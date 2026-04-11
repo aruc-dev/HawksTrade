@@ -1,0 +1,135 @@
+# ============================================================
+# HawksTrade Configuration
+# ============================================================
+# Edit this file to control all bot behaviour.
+# Mode switch: "paper" or "live"
+# ============================================================
+
+# --- TRADING MODE ---
+mode: paper          # "paper" = simulation | "live" = real money
+
+# --- ALPACA ENDPOINTS ---
+alpaca:
+  paper_base_url: "https://paper-api.alpaca.markets"
+  live_base_url:  "https://api.alpaca.markets"
+  data_base_url:  "https://data.alpaca.markets"
+  crypto_data_url: "https://data.alpaca.markets"
+
+# --- INTRADAY TRADING ---
+intraday:
+  enabled: false           # DISABLED by default. Set true to allow same-day entries & exits.
+  # When false, the bot will only enter positions that it intends to hold
+  # for at least 1 trading day (swing trades).
+
+# --- GENERAL TRADING PARAMETERS ---
+trading:
+  max_positions: 10              # Maximum number of open positions at any time
+  max_position_pct: 0.05         # Max % of portfolio per position (5%)
+  stop_loss_pct: 0.02            # Stop-loss at 2% below entry
+  take_profit_pct: 0.08          # Take-profit at 8% above entry
+  daily_loss_limit_pct: 0.05     # Hard stop: halt trading if daily P&L drops 5%
+  min_trade_value_usd: 100       # Minimum $ value per trade
+  order_type: "limit"            # "market" or "limit"
+  limit_slippage_pct: 0.001      # Limit price set 0.1% from current for fast fills
+
+# --- STOCK UNIVERSE ---
+stocks:
+  scan_universe:                 # Stocks screened for opportunities each cycle
+    - AAPL
+    - MSFT
+    - GOOGL
+    - AMZN
+    - NVDA
+    - META
+    - TSLA
+    - AMD
+    - NFLX
+    - JPM
+    - BAC
+    - GS
+    - XOM
+    - CVX
+    - SPY
+    - QQQ
+    - ARKK
+    - SOFI
+    - PLTR
+    - COIN
+
+# --- CRYPTO UNIVERSE ---
+crypto:
+  scan_universe:
+    - BTC/USD
+    - ETH/USD
+    - SOL/USD
+    - AVAX/USD
+    - LINK/USD
+    - POL/USD
+
+# --- STRATEGIES ---
+# Each strategy can be independently enabled/disabled and weighted.
+strategies:
+
+  momentum:
+    enabled: true
+    asset_class: stocks          # stocks | crypto | both
+    description: "Buy top N stocks by 5-day price momentum, hold 3-5 days"
+    top_n: 5                     # Pick top 5 stocks by momentum
+    hold_days: 4                 # Target hold period in trading days
+    min_momentum_pct: 0.03       # Minimum 3% 5-day gain to qualify
+    weight: 1.0                  # Signal weight (relative to other strategies)
+
+  rsi_reversion:
+    enabled: true
+    asset_class: stocks
+    description: "Buy when RSI < 30 (oversold), sell when RSI > 60"
+    rsi_period: 14
+    oversold_threshold: 30
+    overbought_threshold: 60
+    weight: 1.0
+
+  gap_up:
+    enabled: true
+    asset_class: stocks
+    description: "Buy stocks gapping up >3% on above-average volume at open"
+    min_gap_pct: 0.03            # Minimum gap-up percentage
+    volume_multiplier: 1.5       # Volume must be 1.5x the 20-day average
+    entry_window_minutes: 45     # Only enter within first 45 min of market open
+    intraday_exit: false         # Respect intraday.enabled setting above
+    hold_days: 2
+    weight: 0.8
+
+  ma_crossover:
+    enabled: true
+    asset_class: crypto
+    description: "Enter when 9-EMA crosses above 21-EMA, exit on cross below"
+    fast_ema: 9
+    slow_ema: 21
+    timeframe: "1Day"            # "1Hour" | "4Hour" | "1Day"
+    weight: 1.0
+
+  range_breakout:
+    enabled: true
+    asset_class: crypto
+    description: "Enter on breakout of prior day high/low with volume confirmation"
+    breakout_pct: 0.005          # Price must break 0.5% beyond prior day high/low
+    volume_multiplier: 1.3       # Volume must be 1.3x average to confirm breakout
+    timeframe: "1Day"
+    hold_days: 3
+    weight: 0.9
+
+# --- SCHEDULING (for reference — actual cron set in Claude scheduled tasks) ---
+schedule:
+  stock_scan_interval_min: 30        # Every 30 min during market hours
+  crypto_scan_interval_min: 60       # Every 60 min, 24/7
+  risk_check_interval_min: 15        # Every 15 min during market hours
+  daily_report_time: "16:30"         # 4:30 PM ET
+  weekly_report_day: "Monday"
+  weekly_report_time: "08:00"
+
+# --- REPORTING ---
+reporting:
+  trade_log_file: "data/trades.csv"
+  performance_file: "data/performance.csv"
+  reports_dir: "reports/"
+  logs_dir: "logs/"
