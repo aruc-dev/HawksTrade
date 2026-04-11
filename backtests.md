@@ -28,12 +28,3 @@ Detailed attribution and performance metrics for the HawksTrade automated system
 
 ### 12-Month Horizon
 ![12-Month Equity Curve](assets/backtests/equity_12m.png)
-
-### 6-Month Horizon
-![6-Month Equity Curve](assets/backtests/equity_6m.png)
-
-### 4-Month Horizon
-![4-Month Equity Curve](assets/backtests/equity_4m.png)
-
-### 2-Month Horizon
-![2-Month Equity Curve](assets/backtests/equity_2m.png)
