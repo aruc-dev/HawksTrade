@@ -94,7 +94,7 @@ strategies:
     asset_class: stocks
     description: "Buy stocks gapping up >3% on above-average volume at open"
     min_gap_pct: 0.03            # Minimum gap-up percentage
-    volume_multiplier: 1.5       # Volume must be 1.5x the 20-day average
+    volume_multiplier: 2.0       # Volume must be 2.0x the 20-day average
     entry_window_minutes: 45     # Only enter within first 45 min of market open
     intraday_exit: false         # Respect intraday.enabled setting above
     hold_days: 2
@@ -103,9 +103,9 @@ strategies:
   ma_crossover:
     enabled: true
     asset_class: crypto
-    description: "Enter when 9-EMA crosses above 21-EMA, exit on cross below"
-    fast_ema: 9
-    slow_ema: 21
+    description: "Enter when 20-EMA crosses above 50-EMA, exit on cross below"
+    fast_ema: 20
+    slow_ema: 50
     timeframe: "1Day"            # "1Hour" | "4Hour" | "1Day"
     weight: 1.0
 
@@ -113,8 +113,8 @@ strategies:
     enabled: true
     asset_class: crypto
     description: "Enter on breakout of prior day high/low with volume confirmation"
-    breakout_pct: 0.005          # Price must break 0.5% beyond prior day high/low
-    volume_multiplier: 1.3       # Volume must be 1.3x average to confirm breakout
+    breakout_pct: 0.01           # Price must break 1.0% beyond prior day high/low
+    volume_multiplier: 2.0       # Volume must be 2.0x average to confirm breakout
     timeframe: "1Day"
     hold_days: 3
     weight: 0.9

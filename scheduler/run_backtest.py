@@ -318,13 +318,57 @@ def run_backtest(days=28, initial_fund=10000.0):
     final_val = sim.get_portfolio_value()
     pnl = final_val - initial_fund
     pnl_pct = (final_val / initial_fund) - 1
-    log.info(f"Initial Fund: ${initial_fund:,.2f} | Final Value: ${final_val:,.2f} | Total P&L: ${pnl:+,.2f} ({pnl_pct:+.2%})")
-    log.info(f"Total Trades: {len(sim.trades_log)}")
+    
+    log.info(f"Initial Fund: ${initial_fund:,.2f}")
+    log.info(f"Final Value:  ${final_val:,.2f}")
+    log.info(f"Total P&L:    ${pnl:+,.2f} ({pnl_pct:+.2%})")
+    
     if sim.trades_log:
         df = pd.DataFrame(sim.trades_log)
-        wins = len(df[df["pnl"] > 0])
-        log.info(f"Win Rate: {wins / len(df):.1%}")
-        log.info("\nTrades Detail:\n" + df[["symbol", "entry_date", "exit_date", "pnl_pct", "strategy"]].to_string())
+        
+        wins = df[df["pnl"] > 0]
+        losses = df[df["pnl"] <= 0]
+        win_rate = len(wins) / len(df)
+        
+        gross_profit = wins["pnl"].sum()
+        gross_loss = abs(losses["pnl"].sum())
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
+        
+        avg_win = wins["pnl_pct"].mean() if not wins.empty else 0
+        avg_loss = losses["pnl_pct"].mean() if not losses.empty else 0
+        
+        # Strategy Breakdown
+        strat_perf = df.groupby("strategy").agg({
+            "pnl": ["sum", "count"],
+            "pnl_pct": ["mean", "max", "min"]
+        })
+        strat_wins = df[df["pnl"] > 0].groupby("strategy").size()
+        strat_total = df.groupby("strategy").size()
+        strat_win_rate = (strat_wins / strat_total).fillna(0)
+
+        log.info(f"Total Trades:  {len(df)}")
+        log.info(f"Win Rate:      {win_rate:.1%}")
+        log.info(f"Profit Factor: {profit_factor:.2f}")
+        log.info(f"Avg Win:       {avg_win:+.2%}")
+        log.info(f"Avg Loss:      {avg_loss:+.2%}")
+        
+        log.info("\nStrategy Attribution Report:")
+        summary = pd.DataFrame({
+            "Trades": strat_total,
+            "Win Rate": strat_win_rate.map(lambda x: f"{x:.1%}"),
+            "Avg P&L %": strat_perf[("pnl_pct", "mean")].map(lambda x: f"{x:+.2%}"),
+            "Total P&L $": strat_perf[("pnl", "sum")].map(lambda x: f"${x:,.2f}"),
+            "Best Trade": strat_perf[("pnl_pct", "max")].map(lambda x: f"{x:+.2%}"),
+            "Worst Trade": strat_perf[("pnl_pct", "min")].map(lambda x: f"{x:+.2%}")
+        })
+        log.info(summary.to_string())
+        
+        log.info("\nTop 5 Winning Trades:")
+        log.info(df.sort_values("pnl_pct", ascending=False).head(5)[["symbol", "pnl_pct", "strategy"]].to_string(index=False))
+        
+        log.info("\nTop 5 Losing Trades:")
+        log.info(df.sort_values("pnl_pct", ascending=True).head(5)[["symbol", "pnl_pct", "strategy"]].to_string(index=False))
+
     return pnl_pct
 
 if __name__ == "__main__":
