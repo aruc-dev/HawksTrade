@@ -58,6 +58,24 @@ Alpaca paper position.
 
 ---
 
+## Backtesting & Simulation
+
+HawksTrade includes a high-fidelity historical simulator that mocks the Alpaca API to test strategies against past market data with full compounding logic.
+
+### Running a Backtest
+```bash
+# Run for the last 365 days with $10,000 starting fund
+python3 scheduler/run_backtest.py --days 365 --fund 10000
+```
+
+### Features
+- **Historical Data**: Fetches split-adjusted daily bars from Alpaca SIP feed.
+- **Compounding**: Automatically scales position sizes based on growing (or shrinking) portfolio value.
+- **Strategy Attribution**: Provides detailed P&L breakdown, win rates, and best/worst trade analysis per strategy.
+- **Risk Fidelity**: Simulates stop-losses, take-profits, and maximum position limits exactly as they would run in live mode.
+
+---
+
 ## Strategies
 
 | Strategy | Market | Approach |

@@ -8,6 +8,7 @@ Works 24/7 on crypto pairs.
 """
 
 import logging
+from datetime import datetime
 from typing import List, Dict
 from pathlib import Path
 
@@ -43,7 +44,8 @@ class RangeBreakoutStrategy(BaseStrategy):
         signals = []
 
         try:
-            bars_data = ac.get_crypto_bars(universe, timeframe=timeframe, limit=25)
+            # Need 50 bars for trend filter + 20 bars for range
+            bars_data = ac.get_crypto_bars(universe, timeframe=timeframe, limit=60)
         except Exception as e:
             log.error(f"[Breakout] Failed to fetch bars: {e}")
             return []
@@ -51,24 +53,32 @@ class RangeBreakoutStrategy(BaseStrategy):
         for symbol in universe:
             try:
                 bars = bars_data[symbol]
-                if bars is None or len(bars) < 22:
+                if bars is None or len(bars) < 52:
                     continue
 
                 df = pd.DataFrame([{
-                    "high":   b.high,
-                    "low":    b.low,
-                    "close":  b.close,
-                    "volume": b.volume,
+                    "high":   float(b.high),
+                    "low":    float(b.low),
+                    "close":  float(b.close),
+                    "volume": float(b.volume),
                 } for b in bars])
 
                 prev_high  = df["high"].iloc[-2]
                 today_cls  = df["close"].iloc[-1]
                 today_vol  = df["volume"].iloc[-1]
                 avg_vol    = df["volume"].iloc[-21:-1].mean()
+                ema50      = df["close"].ewm(span=50, adjust=False).mean().iloc[-1]
+
+                # Volatility Filter
+                ranges = df["high"] - df["low"]
+                avg_range = ranges.iloc[-11:-1].mean()
+                curr_range = df["high"].iloc[-1] - df["low"].iloc[-1]
+                is_volatile = curr_range >= (avg_range * 0.5)
 
                 breakout_level = prev_high * (1 + breakout_pct)
 
-                if today_cls >= breakout_level and today_vol >= avg_vol * vol_mult:
+                # Condition: Price breakout, High Volume, long-term Uptrend, and Volatility
+                if today_cls >= breakout_level and today_vol >= avg_vol * vol_mult and today_cls > ema50 and is_volatile:
                     excess_pct = (today_cls - prev_high) / prev_high
                     signals.append({
                         "symbol":      symbol,
@@ -78,13 +88,13 @@ class RangeBreakoutStrategy(BaseStrategy):
                         "confidence":  round(min(excess_pct / 0.02, 1.0), 3),
                         "reason":      (
                             f"Breakout above prior high {prev_high:.4f} | "
-                            f"close={today_cls:.4f} | vol={today_vol/avg_vol:.1f}x avg"
+                            f"vol={today_vol/avg_vol:.1f}x avg | Trend UP | Vol Confirm"
                         ),
                     })
                     log.info(
                         f"[Breakout] Signal: BUY {symbol} | "
                         f"close={today_cls:.4f} > prev_high={prev_high:.4f} "
-                        f"vol={today_vol/avg_vol:.1f}x"
+                        f"vol={today_vol/avg_vol:.1f}x | Trend UP | Vol Confirm"
                     )
 
             except Exception as e:

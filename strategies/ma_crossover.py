@@ -67,7 +67,7 @@ class MACrossoverStrategy(BaseStrategy):
         signals = []
 
         try:
-            bars_data = ac.get_crypto_bars(universe, timeframe=timeframe, limit=slow_span + 10)
+            bars_data = ac.get_crypto_bars(universe, timeframe=timeframe, limit=slow_span + 20)
         except Exception as e:
             log.error(f"[MACross] Failed to fetch bars: {e}")
             return []
@@ -75,7 +75,7 @@ class MACrossoverStrategy(BaseStrategy):
         for symbol in universe:
             try:
                 bars = bars_data[symbol]
-                if bars is None or len(bars) < slow_span + 2:
+                if bars is None or len(bars) < slow_span + 5:
                     continue
 
                 closes  = pd.Series([b.close for b in bars])
@@ -83,21 +83,32 @@ class MACrossoverStrategy(BaseStrategy):
                 slow    = _ema(closes, slow_span)
                 cross   = _detect_crossover(fast, slow)
 
+                # Slope Filter: Ensure slow EMA is actually trending up over last 4 periods
+                is_trending_up = slow.iloc[-1] > slow.iloc[-5]
+
+                # Volatility Filter: Ensure we aren't in a completely dead market
+                # Current range must be at least 0.5x the 10-day average range
+                highs  = pd.Series([b.high for b in bars])
+                lows   = pd.Series([b.low for b in bars])
+                ranges = highs - lows
+                avg_range = ranges.iloc[-11:-1].mean()
+                curr_range = highs.iloc[-1] - lows.iloc[-1]
+                is_volatile = curr_range >= (avg_range * 0.5)
+
                 price   = float(closes.iloc[-1])
                 fast_v  = float(fast.iloc[-1])
                 slow_v  = float(slow.iloc[-1])
 
-                if cross == "bullish":
+                if cross == "bullish" and is_trending_up and is_volatile:
                     signals.append({
                         "symbol":      symbol,
                         "action":      "buy",
                         "strategy":    self.name,
                         "asset_class": self.asset_class,
                         "confidence":  round(min(abs(fast_v - slow_v) / slow_v * 10, 1.0), 3),
-                        "reason":      f"EMA {fast_span} crossed above EMA {slow_span}",
+                        "reason":      f"BULLISH {fast_span}/{slow_span} EMA Crossover | Slope UP | Vol Confirm",
                     })
-                    log.info(f"[MACross] BULLISH crossover on {symbol} | "
-                             f"fast={fast_v:.4f} slow={slow_v:.4f}")
+                    log.info(f"[MACross] BULLISH crossover on {symbol} | Trend UP | Vol Confirm")
 
             except Exception as e:
                 log.warning(f"[MACross] Error for {symbol}: {e}")

@@ -52,54 +52,73 @@ class GapUpStrategy(BaseStrategy):
             log.debug("[GapUp] Outside entry window, skipping.")
             return []
 
-        log.info(f"[GapUp] Scanning {len(universe)} symbols...")
+        min_gap     = SCFG["min_gap_pct"]
+        vol_mult    = SCFG["volume_multiplier"]
+        max_gap     = 0.15 # 15% cap to avoid buying "exhaustion" gaps
+        sma_long    = 200
+
+        log.info(f"[GapUp] Scanning {len(universe)} symbols (min_gap={min_gap:.1%}, trend=SMA{sma_long})...")
 
         try:
-            bars_data = ac.get_stock_bars(universe, timeframe="1Day", limit=25)
+            # Need 200 days for trend + 20 days for avg vol
+            bars_data = ac.get_stock_bars(universe, timeframe="1Day", limit=sma_long + 10)
         except Exception as e:
             log.error(f"[GapUp] Failed to fetch bars: {e}")
             return []
 
         signals = []
-        min_gap     = SCFG["min_gap_pct"]
-        vol_mult    = SCFG["volume_multiplier"]
 
         for symbol in universe:
             try:
                 bars = bars_data[symbol]
-                if bars is None or len(bars) < 22:
+                if bars is None or len(bars) < sma_long + 1:
                     continue
 
                 df = pd.DataFrame([{
-                    "open":   b.open,
-                    "close":  b.close,
-                    "volume": b.volume,
+                    "open":   float(b.open),
+                    "high":   float(b.high),
+                    "low":    float(b.low),
+                    "close":  float(b.close),
+                    "volume": float(b.volume),
                 } for b in bars])
 
+                prev_open    = df["open"].iloc[-2]
                 prev_close   = df["close"].iloc[-2]
+                prev_high    = df["high"].iloc[-2]
                 today_open   = df["open"].iloc[-1]
                 today_vol    = df["volume"].iloc[-1]
                 avg_vol_20   = df["volume"].iloc[-21:-1].mean()
+                sma200       = df["close"].rolling(window=sma_long).mean().iloc[-1]
 
                 gap_pct = (today_open - prev_close) / prev_close
 
-                if gap_pct >= min_gap and today_vol >= avg_vol_20 * vol_mult:
-                    signals.append({
-                        "symbol":      symbol,
-                        "action":      "buy",
-                        "strategy":    self.name,
-                        "asset_class": self.asset_class,
-                        "confidence":  round(min(gap_pct / 0.08, 1.0), 3),
-                        "reason":      (
-                            f"Gap-up {gap_pct:.2%} | "
-                            f"vol={today_vol:,.0f} vs avg={avg_vol_20:,.0f} "
-                            f"({today_vol/avg_vol_20:.1f}x)"
-                        ),
-                    })
-                    log.info(
-                        f"[GapUp] Signal: BUY {symbol} | "
-                        f"gap={gap_pct:.2%} vol={today_vol/avg_vol_20:.1f}x"
-                    )
+                # Refined Logic: 
+                # 1. Gap within range (3% to 15%)
+                # 2. High Volume (2x avg)
+                # 3. Long-term Uptrend (Price > SMA200)
+                # 4. Momentum Confirmation (Prev Day was Green: Close > Open)
+                # 5. True Gap (Open is above Prev High)
+                if min_gap <= gap_pct <= max_gap:
+                    if (today_vol >= avg_vol_20 * vol_mult and 
+                        today_open > sma200 and 
+                        prev_close > prev_open and
+                        today_open > prev_high):
+                        
+                        signals.append({
+                            "symbol":      symbol,
+                            "action":      "buy",
+                            "strategy":    self.name,
+                            "asset_class": self.asset_class,
+                            "confidence":  round(min(gap_pct / 0.08, 1.0), 3),
+                            "reason":      (
+                                f"Gap-up {gap_pct:.2%} | vol={today_vol/avg_vol_20:.1f}x | "
+                                f"Trend UP | Prev Day Green | True Gap"
+                            ),
+                        })
+                        log.info(
+                            f"[GapUp] Signal: BUY {symbol} | gap={gap_pct:.2%} | "
+                            f"vol={today_vol/avg_vol_20:.1f}x | SMA200={sma200:.2f}"
+                        )
 
             except Exception as e:
                 log.warning(f"[GapUp] Error for {symbol}: {e}")

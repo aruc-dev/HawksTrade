@@ -143,7 +143,8 @@ def place_market_order(symbol: str, qty: float, side: str, time_in_force: str = 
         time_in_force=TimeInForce.DAY if time_in_force == "day" else TimeInForce.GTC,
     )
     order = client.submit_order(req)
-    log.info(f"Market order submitted: {side} {qty} {symbol} | id={order.id}")
+    order_id = order.id if hasattr(order, "id") else order.get("order_id")
+    log.info(f"Market order submitted: {side} {qty} {symbol} | id={order_id}")
     return order
 
 
@@ -162,7 +163,8 @@ def place_limit_order(symbol: str, qty: float, side: str, limit_price: float,
         time_in_force=TimeInForce.GTC if time_in_force == "gtc" else TimeInForce.DAY,
     )
     order = client.submit_order(req)
-    log.info(f"Limit order submitted: {side} {qty} {symbol} @ {limit_price} | id={order.id}")
+    order_id = order.id if hasattr(order, "id") else order.get("order_id")
+    log.info(f"Limit order submitted: {side} {qty} {symbol} @ {limit_price} | id={order_id}")
     return order
 
 

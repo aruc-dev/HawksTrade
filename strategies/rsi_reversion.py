@@ -49,7 +49,7 @@ class RSIReversionStrategy(BaseStrategy):
 
         period  = SCFG["rsi_period"]
         oversold = SCFG["oversold_threshold"]
-        sma_period = 20
+        sma_period = 50
         log.info(f"[RSI] Scanning {len(universe)} symbols (period={period}, oversold<{oversold}, trend=SMA{sma_period})...")
 
         try:
@@ -68,20 +68,20 @@ class RSIReversionStrategy(BaseStrategy):
 
                 closes = pd.Series([b.close for b in bars])
                 rsi    = _calc_rsi(closes, period)
-                sma20  = closes.rolling(window=sma_period).mean().iloc[-1]
+                sma50  = closes.rolling(window=sma_period).mean().iloc[-1]
                 price  = float(bars[-1].close)
 
-                # Trend Filter: Only buy if price is above 20-day SMA
-                if rsi < oversold and price > sma20:
+                # Trend Filter: Only buy if price is above 50-day SMA
+                if rsi < oversold and price > sma50:
                     signals.append({
                         "symbol":      symbol,
                         "action":      "buy",
                         "strategy":    self.name,
                         "asset_class": self.asset_class,
                         "confidence":  round((oversold - rsi) / oversold, 3),
-                        "reason":      f"RSI oversold ({rsi:.1f}) and Price > SMA20 ({price:.2f} > {sma20:.2f})",
+                        "reason":      f"RSI oversold ({rsi:.1f}) and Price > SMA50 ({price:.2f} > {sma50:.2f})",
                     })
-                    log.info(f"[RSI] Signal: BUY {symbol} | RSI={rsi:.1f} | SMA20={sma20:.2f}")
+                    log.info(f"[RSI] Signal: BUY {symbol} | RSI={rsi:.1f} | SMA50={sma50:.2f}")
 
             except Exception as e:
                 log.warning(f"[RSI] Error for {symbol}: {e}")
