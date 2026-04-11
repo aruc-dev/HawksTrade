@@ -53,7 +53,7 @@ class MACrossoverStrategy(BaseStrategy):
     name        = "ma_crossover"
     asset_class = "crypto"
 
-    def scan(self, universe: List[str]) -> List[Dict]:
+    def scan(self, universe: List[str], **kwargs) -> List[Dict]:
         if not SCFG["enabled"]:
             return []
 

@@ -162,7 +162,14 @@ def fetch_all_data(symbols, start_date, end_date):
         try:
             from alpaca.data.requests import StockBarsRequest
             from alpaca.data.timeframe import TimeFrame
-            req = StockBarsRequest(symbol_or_symbols=[s], timeframe=TimeFrame.Day, start=start_date, end=end_date)
+            from alpaca.data.enums import Adjustment
+            req = StockBarsRequest(
+                symbol_or_symbols=[s], 
+                timeframe=TimeFrame.Day, 
+                start=start_date, 
+                end=end_date,
+                adjustment=Adjustment.ALL
+            )
             bars = ac.get_stock_data_client().get_stock_bars(req)
             if s in bars.data:
                 data[s] = bars.df.loc[s]
@@ -267,7 +274,13 @@ def run_backtest(days=28, initial_fund=10000.0):
                             hist_df = df[mask].tail(limit)
                             bars_list = []
                             for idx, row in hist_df.iterrows():
-                                bar = MagicMock(); bar.close = row["close"]; bar.volume = row["volume"]; bar.timestamp = idx
+                                bar = MagicMock()
+                                bar.close = float(row["close"])
+                                bar.open = float(row["open"])
+                                bar.high = float(row["high"])
+                                bar.low = float(row["low"])
+                                bar.volume = float(row["volume"])
+                                bar.timestamp = idx
                                 bars_list.append(bar)
                             res.data[s] = bars_list
                             temp_df = hist_df.copy()
@@ -278,7 +291,7 @@ def run_backtest(days=28, initial_fund=10000.0):
                 
                 with patch("core.alpaca_client.get_stock_bars", side_effect=mock_get_bars), \
                      patch("core.alpaca_client.get_crypto_bars", side_effect=mock_get_bars):
-                    signals = strat.scan(universe)
+                    signals = strat.scan(universe, current_time=dt)
                     for sig in signals:
                         symbol = sig["symbol"]
                         if symbol not in sim.positions:

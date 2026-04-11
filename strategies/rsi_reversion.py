@@ -43,16 +43,17 @@ class RSIReversionStrategy(BaseStrategy):
     name        = "rsi_reversion"
     asset_class = "stocks"
 
-    def scan(self, universe: List[str]) -> List[Dict]:
+    def scan(self, universe: List[str], **kwargs) -> List[Dict]:
         if not SCFG["enabled"]:
             return []
 
         period  = SCFG["rsi_period"]
         oversold = SCFG["oversold_threshold"]
-        log.info(f"[RSI] Scanning {len(universe)} symbols (period={period}, oversold<{oversold})...")
+        sma_period = 50
+        log.info(f"[RSI] Scanning {len(universe)} symbols (period={period}, oversold<{oversold}, trend=SMA{sma_period})...")
 
         try:
-            bars_data = ac.get_stock_bars(universe, timeframe="1Day", limit=period + 10)
+            bars_data = ac.get_stock_bars(universe, timeframe="1Day", limit=max(period, sma_period) + 10)
         except Exception as e:
             log.error(f"[RSI] Failed to fetch bars: {e}")
             return []
@@ -62,23 +63,25 @@ class RSIReversionStrategy(BaseStrategy):
         for symbol in universe:
             try:
                 bars = bars_data[symbol]
-                if bars is None or len(bars) < period + 1:
+                if bars is None or len(bars) < max(period, sma_period) + 1:
                     continue
 
                 closes = pd.Series([b.close for b in bars])
                 rsi    = _calc_rsi(closes, period)
+                sma50  = closes.rolling(window=sma_period).mean().iloc[-1]
                 price  = float(bars[-1].close)
 
-                if rsi < oversold:
+                # Trend Filter: Only buy if price is above 50-day SMA
+                if rsi < oversold and price > sma50:
                     signals.append({
                         "symbol":      symbol,
                         "action":      "buy",
                         "strategy":    self.name,
                         "asset_class": self.asset_class,
                         "confidence":  round((oversold - rsi) / oversold, 3),
-                        "reason":      f"RSI oversold: {rsi:.1f} < {oversold}",
+                        "reason":      f"RSI oversold ({rsi:.1f}) and Price > SMA50 ({price:.2f} > {sma50:.2f})",
                     })
-                    log.info(f"[RSI] Signal: BUY {symbol} | RSI={rsi:.1f}")
+                    log.info(f"[RSI] Signal: BUY {symbol} | RSI={rsi:.1f} | SMA50={sma50:.2f}")
 
             except Exception as e:
                 log.warning(f"[RSI] Error for {symbol}: {e}")

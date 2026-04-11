@@ -23,7 +23,7 @@ from alpaca.data.requests import (
     StockBarsRequest, CryptoBarsRequest,
     StockLatestQuoteRequest, CryptoLatestOrderbookRequest
 )
-from alpaca.data.enums import DataFeed
+from alpaca.data.enums import DataFeed, Adjustment
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 # ── Setup ───────────────────────────────────────────────────────────────────
@@ -207,7 +207,7 @@ def _lookback_delta(timeframe: str, limit: int, market: str) -> timedelta:
 # ── Market Data: Stocks ──────────────────────────────────────────────────────
 
 def get_stock_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
-    """Fetch OHLCV bars for a list of stock symbols."""
+    """Fetch OHLCV bars for a list of stock symbols. Always split-adjusted."""
     tf_map = {
         "1Min": TimeFrame(1, TimeFrameUnit.Minute),
         "5Min": TimeFrame(5, TimeFrameUnit.Minute),
@@ -218,12 +218,17 @@ def get_stock_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
     tf = tf_map.get(timeframe, TimeFrame.Day)
     end = datetime.now(timezone.utc)
     start = end - _lookback_delta(timeframe, limit, market="stock")
+    
+    # Use SIP feed for live, IEX for paper (default)
+    feed = DataFeed.SIP if MODE == "live" else DataFeed.IEX
+    
     req = StockBarsRequest(
         symbol_or_symbols=symbols,
         timeframe=tf,
         start=start,
         end=end,
-        feed=DataFeed.IEX,
+        feed=feed,
+        adjustment=Adjustment.ALL
     )
     return get_stock_data_client().get_stock_bars(req)
 

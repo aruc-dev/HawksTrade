@@ -15,7 +15,7 @@ class BaseStrategy(ABC):
     asset_class: str = "stocks"   # "stocks" | "crypto" | "both"
 
     @abstractmethod
-    def scan(self, universe: List[str]) -> List[Dict]:
+    def scan(self, universe: List[str], **kwargs) -> List[Dict]:
         """
         Scan the universe for trading signals.
 

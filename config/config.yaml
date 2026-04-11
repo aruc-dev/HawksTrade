@@ -86,6 +86,7 @@ strategies:
     rsi_period: 14
     oversold_threshold: 30
     overbought_threshold: 60
+    hold_days: 15
     weight: 1.0
 
   gap_up:

@@ -43,11 +43,12 @@ class GapUpStrategy(BaseStrategy):
     name        = "gap_up"
     asset_class = "stocks"
 
-    def scan(self, universe: List[str]) -> List[Dict]:
+    def scan(self, universe: List[str], current_time: datetime = None) -> List[Dict]:
         if not SCFG["enabled"]:
             return []
 
-        if not _within_entry_window():
+        # If current_time is provided (backtesting), we assume it's at market open or within window
+        if current_time is None and not _within_entry_window():
             log.debug("[GapUp] Outside entry window, skipping.")
             return []
 

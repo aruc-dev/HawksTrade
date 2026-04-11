@@ -32,7 +32,7 @@ class MomentumStrategy(BaseStrategy):
     name        = "momentum"
     asset_class = "stocks"
 
-    def scan(self, universe: List[str]) -> List[Dict]:
+    def scan(self, universe: List[str], **kwargs) -> List[Dict]:
         if not SCFG["enabled"]:
             return []
 

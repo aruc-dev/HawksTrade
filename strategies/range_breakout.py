@@ -30,7 +30,7 @@ class RangeBreakoutStrategy(BaseStrategy):
     name        = "range_breakout"
     asset_class = "crypto"
 
-    def scan(self, universe: List[str]) -> List[Dict]:
+    def scan(self, universe: List[str], **kwargs) -> List[Dict]:
         if not SCFG["enabled"]:
             return []
 
