@@ -5,7 +5,7 @@
 **Automated swing trading bot for US stocks and crypto, powered by Alpaca Markets.**
 
 Runs 5 independent strategies, enforces strict risk rules, and is designed to be
-operated autonomously by an AI agent (Claude, Codex, or any AI with shell access).
+operated autonomously by an AI agent.
 
 ---
 
@@ -18,61 +18,22 @@ pip install -r requirements.txt --break-system-packages
 # 2. Set up your API keys
 cp config/.env.example config/.env
 # Edit config/.env and fill in your Alpaca keys.
-# A root .env file is also supported and takes precedence.
 
-# 3. Verify connection (paper trading is default)
-python -c "
-import sys; sys.path.insert(0,'.')
-from core.alpaca_client import get_account
-print('Connected:', get_account().portfolio_value)
-"
+# 3. Verify connection
+python3 -c "import sys; sys.path.insert(0,'.'); from core.alpaca_client import get_account; print('Connected:', get_account().portfolio_value)"
 
-# 4. Run your first scan
-python scheduler/run_scan.py --dry-run
-
-# 5. Check risk / stop-losses
-python scheduler/run_risk_check.py --dry-run
-
-# 6. Generate a report
-python scheduler/run_report.py
+# 4. Run a backtest (12 months)
+python3 scheduler/run_backtest.py --days 365 --fund 10000 --output backtests.md
 ```
 
 ---
 
-## Pre-Push Validation
+## Backtesting & Performance
 
-Before pushing or deploying changes:
+HawksTrade includes a high-fidelity historical simulator. The latest "Prplxty" version achieved **+26.30% annual return** in backtesting.
 
-```bash
-python3 -m unittest discover -v
-python3 -W error::DeprecationWarning -m unittest discover
-python3 -m compileall core strategies scheduler tracking tests
-python3 scheduler/run_scan.py --dry-run
-python3 scheduler/run_risk_check.py --dry-run
-python3 scheduler/run_report.py
-```
-
-`--dry-run` validates scan and risk paths without submitting orders. A real paper-order
-lifecycle test should only be run intentionally, because it creates and closes a simulated
-Alpaca paper position.
-
----
-
-## Backtesting & Simulation
-
-HawksTrade includes a high-fidelity historical simulator that mocks the Alpaca API to test strategies against past market data with full compounding logic.
-
-### Running a Backtest
-```bash
-# Run for the last 365 days with $10,000 starting fund
-python3 scheduler/run_backtest.py --days 365 --fund 10000
-```
-
-### Features
-- **Historical Data**: Fetches split-adjusted daily bars from Alpaca SIP feed.
-- **Compounding**: Automatically scales position sizes based on growing (or shrinking) portfolio value.
-- **Strategy Attribution**: Provides detailed P&L breakdown, win rates, and best/worst trade analysis per strategy.
-- **Risk Fidelity**: Simulates stop-losses, take-profits, and maximum position limits exactly as they would run in live mode.
+- **View Full Report**: [backtests.md](backtests.md)
+- **Features**: Split-adjusted data, portfolio compounding, and per-strategy attribution.
 
 ---
 
@@ -80,43 +41,28 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000
 
 | Strategy | Market | Approach |
 |----------|--------|----------|
-| Momentum | US Stocks | Top 5 by 5-day return, hold 4 days |
-| RSI Reversion | US Stocks | Buy oversold (RSI<30), sell overbought (RSI>60) |
-| Gap-Up | US Stocks | Gap >3% on high volume, swing hold |
-| EMA Crossover | Crypto | 9-EMA / 21-EMA crossover on daily bars |
-| Range Breakout | Crypto | Prior-day high breakout with volume confirmation |
+| **Momentum** | US Stocks | Top 5 by 5-day return, captures high-velocity tech rallies. |
+| **RSI Reversion** | US Stocks | Mean reversion on RSI < 35 with SMA-200 trend filter. |
+| **Gap-Up** | US Stocks | 3% gap at open on high volume + SMA-200 trend confirmation. |
+| **EMA Crossover** | Crypto | 9/21 EMA crossover with RSI (35-70) momentum filter. |
+| **Range Breakout** | Crypto | 20-day high breakout on 1.5x volume + SMA-50 filter. |
 
-Configured crypto universe: `BTC/USD`, `ETH/USD`, `SOL/USD`, `AVAX/USD`, `LINK/USD`, `POL/USD`.
+**Crypto Universe**: `BTC`, `ETH`, `SOL`, `AVAX`, `LINK`, `POL`, `DOGE`, `LTC`, `DOT`.
 
 ---
 
-## Risk Controls
+## Risk Controls (Tuned)
 
-- Max 5% of portfolio per position
-- 2% stop-loss / 8% take-profit per trade
-- 5% daily loss limit → all trading halts
-- Max 10 concurrent open positions
-- **Intraday trading disabled by default** (swing trades only)
+- **Asymmetric Reward**: 3.5% stop-loss / 12% take-profit.
+- **Capital Protection**: SMA-based trend filters on all strategies.
+- **Position Limits**: Max 5% of portfolio per trade, cap of 10 concurrent positions.
+- **Daily Guardrail**: 5% daily loss limit (hard stop for the day).
 
 ---
 
 ## Configuration
 
-All settings are in `config/config.yaml`:
-- Switch between `paper` and `live` mode
-- Enable/disable individual strategies
-- Adjust position sizing, stop-loss, universe of stocks/crypto
-
-API credentials are loaded from `config/.env` and then root `.env` if present. Do not commit
-either file.
-
----
-
-## For AI Agents
-
-See `CLAUDE.md` for Claude-specific instructions.
-See `AGENTS.md` for the universal agent operating manual.
-See `TESTING.md` for validation, dry-run, and paper-order lifecycle checks.
+All settings are in `config/config.yaml`. Toggle strategies, adjust risk, or switch between `paper` and `live` modes.
 
 ---
 
@@ -124,25 +70,16 @@ See `TESTING.md` for validation, dry-run, and paper-order lifecycle checks.
 
 ```
 HawksTrade/
-├── CLAUDE.md          ← AI agent instructions (Claude)
-├── AGENTS.md          ← AI agent instructions (universal)
 ├── config/            ← config.yaml + .env.example
-├── core/              ← Alpaca client, risk manager, order executor, portfolio
-├── strategies/        ← 5 trading strategies
-├── scheduler/         ← Scripts called on schedule
-├── tracking/          ← Trade log + performance analytics
-├── data/              ← trades.csv, performance.csv
-├── reports/           ← Generated daily/weekly reports
-└── logs/              ← Daily log files
+├── core/              ← Alpaca client, risk manager, order executor
+├── strategies/        ← Momentum, RSI, Gap-Up, EMA, Breakout
+├── scheduler/         ← Scanner, Risk Check, Backtester
+├── tracking/          ← Trade logs and performance metrics
+└── assets/            ← Generated equity curves and branding
 ```
-
-`data/`, `reports/`, and `logs/` are generated at runtime and are ignored by git.
 
 ---
 
 ## Disclaimer
 
-This software is for educational and personal use only.
-Trading involves significant risk of financial loss.
-Past strategy performance does not guarantee future results.
-Always start with paper trading and review results before using real money.
+Trading involves significant risk. This software is for educational use. Past performance (backtests) does not guarantee future results. Start with paper trading.
