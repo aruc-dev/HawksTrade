@@ -63,8 +63,10 @@ Or recreate them manually using the instructions below. Claude's scheduled tasks
 ```
 Task ID:      hawkstrade-stock-scan
 Description:  HawksTrade: First stock-only scan, then stock + crypto scan every 30 min
-Cron (PDT):   35 6 * * 1-5 and 0,30 7-12 * * 1-5
-Cron (ET):    35 9 * * 1-5 and 0,30 10-15 * * 1-5
+Cron 1 (PDT): 35 6 * * 1-5
+Cron 2 (PDT): 0,30 7-12 * * 1-5
+Cron 1 (ET):  35 9 * * 1-5
+Cron 2 (ET):  0,30 10-15 * * 1-5
 
 Prompt:
 You are the HawksTrade trading bot agent. Your job is to run the scheduled stock and crypto scan.
@@ -89,8 +91,10 @@ Instructions:
 ```
 Task ID:      hawkstrade-risk-check
 Description:  HawksTrade: Stop-loss / take-profit check every 15 min
-Cron (PDT):   45 6 * * 1-5 and 0,15,30,45 7-12 * * 1-5
-Cron (ET):    45 9 * * 1-5 and 0,15,30,45 10-15 * * 1-5
+Cron 1 (PDT): 45 6 * * 1-5
+Cron 2 (PDT): 0,15,30,45 7-12 * * 1-5
+Cron 1 (ET):  45 9 * * 1-5
+Cron 2 (ET):  0,15,30,45 10-15 * * 1-5
 
 Prompt:
 You are the HawksTrade risk enforcement agent.

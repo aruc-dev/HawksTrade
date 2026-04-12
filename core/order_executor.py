@@ -137,8 +137,10 @@ def exit_position(symbol: str, reason: str, asset_class: str = "stock", dry_run:
             from tracking.trade_log import get_open_trades
             open_trades = get_open_trades()
 
+        normalized_symbol = ac.normalize_symbol(symbol)
         for t in open_trades:
-            if t["symbol"] == symbol:
+            trade_symbol = t.get("symbol", "")
+            if trade_symbol == symbol or ac.normalize_symbol(trade_symbol) == normalized_symbol:
                 strategy = t.get("strategy", "unknown")
                 break
 
