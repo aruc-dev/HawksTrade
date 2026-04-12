@@ -1,102 +1,58 @@
-# HawksTrade v3 — Multi-Period Backtest Summary
+# HawksTrade v4 — Multi-Period Backtest Summary
 
-![HawksTrade v3 Dashboard](assets/hawkstrade_v3_dashboard.png)
+![HawksTrade v4 Dashboard](assets/hawkstrade_v4_dashboard.png)
 
 > **Generated:** April 11, 2026  
-> **Strategy Version:** v3 (7 improvements over v2)  
+> **Strategy Version:** v4 (3 improvements over v3)  
 > **Starting Capital:** $10,000 (all periods)  
-> **Test Environment:** Alpaca Paper Trading (backtest simulation)
+> **Test Environment:** Alpaca Paper Trading (backtest simulation)  
+> **Note on partial runs:** The 365-day backtests (12mo, 2025, 2024) hit the 600-second process timeout and captured 77–81% of the target period. Returns and metrics reflect the actual days simulated; annualised estimates are extrapolated.
 
 ---
 
-## Executive Summary
+## What Was Implemented (v4 Changes)
 
-The v3 improvements deliver a strong **+24.6% return over the trailing 12 months** — a +7.1pp gain over v2's +17.5% — while maintaining a healthy 2.81x profit factor and 50% win rate. However, the strategy shows significant sensitivity to market regime: it underperforms in bear/volatile markets (2025: -8.4%, last 6 months: -6.9%) and excels in bull markets (2024: +11.6%, 12mo: +24.6%). The new Market Regime Filter is working exactly as intended — blocking hundreds of trades during SPY-below-SMA50 periods — but the 2025 backtest reveals that the strategy still takes on losses before the regime gate fully activates, particularly from MA Crossover and early momentum signals at period start.
+| # | Change | Files Modified | Summary |
+|---|--------|---------------|---------|
+| 1 | **Crypto Regime Filter** | `risk_manager.py`, `ma_crossover.py`, `range_breakout.py` | New `crypto_regime_ok()` — blocks MA Crossover & Range Breakout when BTC/USD < 20-day EMA |
+| 2 | **Dynamic Kelly Criterion** | `risk_manager.py`, `order_executor.py`, `tracking/trade_log.py` | `kelly_position_size()` now reads the last 30 closed momentum trades live from `data/trades.csv`; added `get_closed_trades()` to trade_log. Falls back to v3 defaults if fewer than 10 trades available. |
+| 3 | **RSI 2-Bar Recovery** | `strategies/rsi_reversion.py` | Added consecutive-higher-close guard (bars[-2] > bars[-3] AND bars[-1] > bars[-2]) inside existing oversold+volume-spike block — prevents entering falling-knife situations |
 
 ---
 
 ## Results Overview
 
-| Period | Final Value | Total Return | Win Rate | Profit Factor | Trades | Max Drawdown |
-|--------|------------|-------------|----------|--------------|--------|-------------|
-| **Last 6 Months** | $9,311 | **-6.89%** | 19.7% | 0.62x | 66 | -9.26% |
-| **Last 12 Months** | $12,460 | **+24.59%** ✅ | 50.0% | 2.81x | 64 | -3.05% |
-| **Full Year 2025** | $9,162 | **-8.38%** ❌ | 11.1% | 0.38x | 36 | -8.13% |
-| **Full Year 2024** | $11,155 | **+11.55%** ✅ | 38.6% | 1.63x | 70 | -8.75% |
+| Period | Days Simulated | Final Value | Return | Win Rate | Profit Factor | Trades | Max DD |
+|--------|---------------|-------------|--------|----------|--------------|--------|--------|
+| **Last 6 Months** | 182/182 ✓ | $9,758 | **-2.41%** | 21.3% | 0.69x | 75 | -4.79% |
+| **Last 12 Months** | 280/365 ⚑ | $13,502 | **+35.02%** ✅ | 43.2% | 2.09x | 118 | -5.39% |
+| **Full Year 2025** | 297/365 ⚑ | $9,217 | **-7.83%** | 10.8% | 0.37x | 37 | -7.58% |
+| **Full Year 2024** | 281/365 ⚑ | $10,847 | **+8.47%** ✅ | 34.6% | 1.38x | 127 | -11.1% |
 
-### v2 vs v3 Head-to-Head (12-Month)
-
-| Metric | v2 (12mo) | v3 (12mo) | Change |
-|--------|-----------|-----------|--------|
-| Total Return | +17.52% | +24.59% | **+7.07pp ▲** |
-| Win Rate | 51.4% | 50.0% | -1.4pp ≈ |
-| Profit Factor | 2.68x | 2.81x | **+0.13x ▲** |
-| Avg Win | +14.17% | +14.75% | +0.58pp ▲ |
-| Avg Loss | -5.43% | -5.25% | **+0.18pp ▲** (tighter) |
-| Max Drawdown | -2.24% | -3.05% | -0.81pp ▼ |
-| Total Trades | 72 | 64 | -8 (quality ▲) |
+> ⚑ = Partial run (backtest timed out at 600s). Returns reflect actual days simulated only.
 
 ---
 
-## Strategy-by-Strategy Analysis
+## Strategy-by-Strategy Analysis (12-Month)
 
-### Momentum (Primary Driver)
-
-| Period | Trades | Win Rate | Net P&L | Profit Factor |
-|--------|--------|----------|---------|--------------|
-| 6 Months | 55 | **23.6%** ❌ | -$423 | 0.77x |
-| 12 Months | 46 | **56.5%** ✅ | +$2,242 | 3.44x |
-| 2025 | 25 | **12.0%** ❌ | -$648 | 0.38x |
-| 2024 | 55 | **38.2%** ⚠️ | +$981 | 1.63x |
-
-**Assessment:** Momentum is the engine of this strategy — when market conditions align, it dominates with 56.5% WR and $2,242 net P&L in the 12-month run. However, it bleeds heavily in bear/volatile regimes. The `min_momentum_pct: 0.04` raise helped reduce noise but wasn't sufficient to filter out the high-volatility bear-regime losses in 2025 and the last 6 months.
-
----
-
-### MA Crossover
-
-| Period | Trades | Win Rate | Net P&L | Profit Factor |
-|--------|--------|----------|---------|--------------|
-| 6 Months | 4 | **0.0%** ❌ | -$84 | 0.00x |
-| 12 Months | 7 | **42.9%** ⚠️ | +$180 | 2.95x |
-| 2025 | 7 | **0.0%** ❌ | -$250 | 0.00x |
-| 2024 | 4 | **50.0%** ✅ | +$81 | 2.47x |
-
----
-
-### Range Breakout
-
-| Period | Trades | Win Rate | Net P&L | Profit Factor |
-|--------|--------|----------|---------|--------------|
-| 6 Months | 0 | — | $0 | — |
-| 12 Months | 9 | **22.2%** ❌ | -$12 | 1.01x |
-| 2025 | 4 | **25.0%** ❌ | +$60 | 2.10x |
-| 2024 | 10 | **30.0%** ⚠️ | +$26 | 1.13x |
-
----
-
-### RSI Reversion
-
-| Period | Trades | Win Rate | Net P&L | Profit Factor |
-|--------|--------|----------|---------|--------------|
-| 6 Months | 7 | **0.0%** ❌ | -$182 | 0.00x |
-| 12 Months | 2 | **50.0%** ⚠️ | +$49 | 2.51x |
-| 2025 | 0 | — | $0 | — |
-| 2024 | 1 | **100%** ✅ | +$68 | ∞ |
+| Strategy | Trades | Win Rate | Net P&L | PF |
+|----------|--------|----------|---------|----|
+| **Momentum** | 98 | 44.9% | +$3,218 | 2.14x |
+| **MA Crossover** | 10 | 50.0% | +$329 | 3.97x |
+| **Range Breakout** | 9 | 22.2% | -$11 | 1.01x |
+| **RSI Reversion** | 0 | — | $0 | — |
 
 ---
 
 ## Market Regime Filter — Impact Analysis
 
-The new `market_regime_ok()` function (SPY > 50-day SMA) was one of the most consequential additions:
-
-| Period | Regime Blocks | Market Context |
-|--------|--------------|---------------|
-| 6 Months | **60 blocks** | Tariff-driven April 2026 selloff |
-| 12 Months | **66 blocks** | Multiple correction periods |
-| 2025 | **240 blocks** | Prolonged bear phase (ATH → correction) |
-| 2024 | **54 blocks** | Brief corrections in bull year |
+| Period | SPY<SMA50 Blocks (stocks) | BTC<EMA20 Blocks (crypto) | Total Capital Protected |
+|--------|--------------------------|--------------------------|------------------------|
+| Last 6 Months | 180 | 262 | 442 scan-days blocked |
+| Last 12 Months | 93 | 266 | 359 scan-days blocked |
+| Year 2025 | 240 | 278 | 518 scan-days blocked |
+| Year 2024 | 111 | 256 | 367 scan-days blocked |
 
 ---
 
-*HawksTrade v3 — Alpaca Paper Trading · Simulation data only · Not financial advice*
+*HawksTrade v4 — Alpaca Paper Trading · Simulation data only · Not financial advice*

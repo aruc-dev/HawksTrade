@@ -61,9 +61,9 @@ def enter_position(symbol: str, strategy: str, asset_class: str = "stock", dry_r
             return None
 
         qty = check["qty"]
-        # Kelly override for momentum
+        # Kelly override for momentum — uses dynamic rolling 30-trade params
         if strategy == "momentum":
-            kelly_qty = rm.kelly_position_size(0.567, 0.1398, 0.0543, price)
+            kelly_qty = rm.kelly_position_size(price=price)
             if kelly_qty > 0:
                 qty = kelly_qty
 

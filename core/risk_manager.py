@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 import yaml
+import numpy as np
 import pandas as pd
 
 from core import alpaca_client as ac
@@ -200,19 +201,72 @@ def market_regime_ok(bars_data=None) -> bool:
         return True  # fail open
 
 
+def crypto_regime_ok(bars_data=None) -> bool:
+    """
+    Returns True if BTC/USD is above its 20-day EMA — indicates crypto bull regime.
+    When bars_data is provided (backtest), uses pre-fetched BTC bars.
+    In live trading, fetches from Alpaca directly.
+    Fails open (returns True) if data unavailable.
+    """
+    try:
+        if bars_data is not None:
+            btc_bars = bars_data.get("BTC/USD")
+            if btc_bars is None or len(btc_bars) < 21:
+                return True
+            closes = pd.Series([float(b.close) if hasattr(b, 'close') else float(b['close']) for b in btc_bars])
+        else:
+            # live mode
+            raw = ac.get_crypto_bars(["BTC/USD"], timeframe="1Day", limit=25)
+            btc_bars = raw["BTC/USD"]
+            if btc_bars is None or len(btc_bars) < 21:
+                return True
+            closes = pd.Series([b.close for b in btc_bars])
+        ema20 = closes.ewm(span=20, adjust=False).mean().iloc[-1]
+        current = float(closes.iloc[-1])
+        is_bull = current > ema20
+        log.debug(f"[CryptoRegime] BTC={current:.2f} EMA20={ema20:.2f} bull={is_bull}")
+        return is_bull
+    except Exception as e:
+        log.warning(f"[CryptoRegime] Could not determine crypto regime: {e}")
+        return True  # fail open
+
+
 # ── Kelly Criterion Position Sizing ──────────────────────────────────────────
 
-def kelly_position_size(win_rate: float, avg_win_pct: float, avg_loss_pct: float,
-                        price: float) -> float:
+def kelly_position_size(win_rate: float = None, avg_win_pct: float = None,
+                        avg_loss_pct: float = None, price: float = 0.0) -> float:
     """
-    Half-Kelly position sizing based on historical win rate and payoff ratio.
-    Falls back to standard calculate_position_size if parameters are invalid.
+    Half-Kelly position sizing. If win_rate/avg_win_pct/avg_loss_pct are None,
+    reads the last 30 closed momentum trades from the trade log to compute them dynamically.
+    Falls back to standard calculate_position_size if parameters are invalid or insufficient data.
     Caps position at 8% of portfolio and floors at 1%.
     """
     try:
+        # Attempt to load dynamic params from recent trade history
+        if win_rate is None or avg_win_pct is None or avg_loss_pct is None:
+            try:
+                from tracking.trade_log import get_closed_trades
+                recent = [t for t in get_closed_trades() if t.get("strategy") == "momentum"][-30:]
+                if len(recent) >= 10:  # need at least 10 trades for meaningful stats
+                    wins = [t for t in recent if float(t.get("pnl_pct", 0)) > 0]
+                    losses = [t for t in recent if float(t.get("pnl_pct", 0)) <= 0]
+                    win_rate = len(wins) / len(recent)
+                    avg_win_pct = float(np.mean([float(t["pnl_pct"]) for t in wins])) if wins else 0.14
+                    avg_loss_pct = abs(float(np.mean([float(t["pnl_pct"]) for t in losses]))) if losses else 0.054
+                    log.debug(f"[Kelly] Dynamic params: WR={win_rate:.3f} win={avg_win_pct:.3f} loss={avg_loss_pct:.3f} (n={len(recent)})")
+                else:
+                    # Fall back to v3 defaults
+                    win_rate = 0.567
+                    avg_win_pct = 0.1398
+                    avg_loss_pct = 0.0543
+            except Exception:
+                win_rate = 0.567
+                avg_win_pct = 0.1398
+                avg_loss_pct = 0.0543
+
         if avg_loss_pct == 0 or win_rate <= 0 or win_rate >= 1:
             return calculate_position_size(price)
-        b = abs(avg_win_pct / avg_loss_pct)  # win/loss ratio
+        b = abs(avg_win_pct / avg_loss_pct)
         kelly_f = (win_rate * b - (1 - win_rate)) / b
         half_kelly = kelly_f / 2
         portfolio_value = ac.get_portfolio_value()

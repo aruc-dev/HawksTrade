@@ -37,17 +37,28 @@ HawksTrade includes a high-fidelity historical simulator. The latest "Prplxty" v
 
 ---
 
-## Strategies
+## Strategy Logic
 
-| Strategy | Market | Approach |
-|----------|--------|----------|
-| **Momentum** | US Stocks | Top 5 by 5-day return, captures high-velocity tech rallies. |
-| **RSI Reversion** | US Stocks | Mean reversion on RSI < 35 with SMA-200 trend filter. |
-| **Gap-Up** | US Stocks | 3% gap at open on high volume + SMA-200 trend confirmation. |
-| **EMA Crossover** | Crypto | 9/21 EMA crossover with RSI (35-70) momentum filter. |
-| **Range Breakout** | Crypto | 20-day high breakout on 1.5x volume + SMA-50 filter. |
+| Strategy | Market | Key Parameters | Approach |
+|----------|--------|----------------|----------|
+| **Momentum** | US Stocks | Top 5 by 5-day return, Kelly sizing | Captures high-velocity tech rallies with dynamic Half-Kelly position sizing. |
+| **RSI Reversion** | US Stocks | RSI < 30, SMA-200 within 15%, vol spike 1.5x, 2-bar recovery | Mean reversion with volume confirmation and consecutive higher-close gate. |
+| **Gap-Up** | US Stocks | 3% gap, high volume, SMA-200 trend | Intraday gap plays on strong trend confirmation. |
+| **EMA Crossover** | Crypto | 9/21 EMA, RSI 35-70, slope + volatility filters | Bullish EMA crossover with BTC regime gate. |
+| **Range Breakout** | Crypto | Prior-day high breakout, 1.5x volume, EMA-50 trend | Breakout entries with BTC regime gate and volume confirmation. |
 
 **Crypto Universe**: `BTC`, `ETH`, `SOL`, `AVAX`, `LINK`, `POL`, `DOGE`, `LTC`, `DOT`.
+
+### Market Regime Filters
+
+- **SPY SMA-50 (Stocks)**: All stock strategies (Momentum, RSI Reversion, Gap-Up) are gated by SPY trading above its 50-day SMA. When SPY is below SMA-50 (bear regime), stock scans are skipped.
+- **BTC EMA-20 (Crypto)**: EMA Crossover and Range Breakout strategies are gated by BTC/USD trading above its 20-day EMA. When BTC is below EMA-20 (crypto bear regime), crypto scans are skipped.
+
+Both filters fail open (return True) if data is unavailable, ensuring the system doesn't halt on data issues.
+
+### Kelly Criterion Dynamic Position Sizing
+
+Momentum strategy uses Half-Kelly position sizing with parameters derived dynamically from the last 30 closed momentum trades. When fewer than 10 trades are available, it falls back to hardcoded defaults (WR=0.567, avg_win=14.0%, avg_loss=5.4%). Position size is capped at 8% of portfolio and floored at 1%.
 
 ---
 

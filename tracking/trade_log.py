@@ -63,6 +63,18 @@ def get_open_trades() -> list:
     return open_trades
 
 
+def get_closed_trades() -> list:
+    """Return all closed trades from the trade log CSV."""
+    _ensure_file()
+    trades = []
+    with open(TRADE_LOG, "r") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if row.get("status") == "closed":
+                trades.append(row)
+    return trades
+
+
 def mark_trade_closed(symbol: str, exit_price: float, pnl_pct: float, reason: str):
     """
     Update the most recent open trade for a symbol to closed.
