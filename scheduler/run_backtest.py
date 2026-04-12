@@ -10,6 +10,7 @@ import sys
 import logging
 import argparse
 import yaml
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta, timezone
@@ -23,6 +24,17 @@ sys.path.insert(0, str(BASE_DIR))
 from core import alpaca_client as ac
 from core import risk_manager as rm
 from core import order_executor as oe
+from core.exit_policy import (
+    VALID_MOMENTUM_EXIT_POLICIES,
+    normalize_momentum_exit_policy,
+    should_exit_for_hold,
+    update_high_water_price,
+)
+import strategies.momentum as momentum_module
+import strategies.rsi_reversion as rsi_module
+import strategies.gap_up as gap_up_module
+import strategies.ma_crossover as ma_crossover_module
+import strategies.range_breakout as range_breakout_module
 from strategies.momentum import MomentumStrategy
 from strategies.rsi_reversion import RSIReversionStrategy
 from strategies.gap_up import GapUpStrategy
@@ -30,24 +42,36 @@ from strategies.ma_crossover import MACrossoverStrategy
 from strategies.range_breakout import RangeBreakoutStrategy
 from screener.universe_builder import UniverseBuilder
 
-# Extended pool of ~80 high-liquidity symbols covering major sectors
+# Extended pool of ~110 high-liquidity symbols covering major sectors
 EXTENDED_POOL = [
     # Tech
     "CRM", "ORCL", "ADBE", "INTC", "QCOM", "TXN", "AVGO", "MU", "AMAT", "LRCX",
-    "NOW", "SNOW", "PANW", "CRWD", "ZS", "NET", "DDOG", "MDB", "UBER", "LYFT",
-    # Financials
-    "MS", "WFC", "C", "BLK", "SCHW", "AXP", "V", "MA", "PYPL", "SQ",
-    # Healthcare
-    "JNJ", "UNH", "PFE", "ABBV", "MRK", "BMY", "GILD", "AMGN", "BIIB", "REGN",
-    # Consumer
-    "AMZN", "HD", "WMT", "TGT", "COST", "NKE", "SBUX", "MCD", "DIS", "CMCSA",
-    # Energy/Industrials
-    "LLY", "CAT", "DE", "BA", "RTX", "HON", "MMM", "GE", "UPS", "FDX",
-    # Real estate / utilities / other
+    "NOW", "SNOW", "PANW", "CRWD", "ZS", "NET", "DDOG", "MDB", "UBER",
+    # AI Infrastructure (2025/2026 leaders)
+    "SMCI", "ARM", "ANET", "MRVL",
+    # Defence / Aerospace (tariff-immune)
+    "LMT", "RTX", "NOC", "GD", "BA",
+    # Energy (commodity surge)
+    "XOM", "CVX", "COP", "SLB", "HAL", "OXY",
+    # Healthcare / Biotech
+    "JNJ", "UNH", "PFE", "ABBV", "MRK", "BMY", "GILD", "AMGN", "REGN",
+    "MDT", "ISRG", "ELV",
+    # Financials (resilience)
+    "JPM", "GS", "MS", "WFC", "C", "BLK", "SCHW", "AXP", "V", "MA",
+    "PYPL", "SQ",
+    # Consumer staples (defensive)
+    "PG", "KO", "PEP", "WMT", "COST",
+    # Consumer discretionary
+    "AMZN", "HD", "TGT", "NKE", "SBUX", "MCD", "DIS", "CMCSA",
+    # Industrials
+    "LLY", "CAT", "DE", "HON", "GE", "UPS", "FDX",
+    # Real estate / utilities / telecom
     "AMT", "PLD", "CCI", "NEE", "DUK", "SO", "T", "VZ", "TMUS",
+    # International ADRs
+    "TSM", "ASML", "SAP", "TM",
     # High-momentum / popular
-    "MSTR", "HOOD", "RIVN", "LCID", "NIO", "BABA", "JD", "PDD", "SHOP", "SPOT",
-    "RBLX", "SNAP", "PINS", "TWLO", "ZM", "DOCN", "GTLB", "U", "ABNB", "DASH",
+    "MSTR", "HOOD", "BABA", "JD", "PDD", "SHOP", "SPOT",
+    "RBLX", "SNAP", "PINS", "ABNB", "DASH",
 ]
 
 # ── Setup Logging ─────────────────────────────────────────────────────────────
@@ -106,6 +130,34 @@ class BacktestSimulator:
             return mock_pos
         return None
 
+    def get_open_trades_for_backtest(self):
+        """Return open positions in the shape expected by get_open_trades() / get_trade_age_days()."""
+        trades = []
+        for symbol, pos in self.positions.items():
+            trades.append({
+                "symbol": symbol,
+                "strategy": pos.get("strategy", "unknown"),
+                "asset_class": pos.get("asset_class", "stock"),
+                "entry_price": pos["entry_price"],
+                "side": "buy",
+                "status": "open",
+                "timestamp": pos["entry_date"].isoformat() if hasattr(pos["entry_date"], "isoformat") else str(pos["entry_date"]),
+            })
+        return trades
+
+    def get_trade_age_days(self, symbol):
+        """Return trade age in days. Stocks use business days; crypto uses calendar days."""
+        if symbol not in self.positions:
+            return 0.0
+        pos = self.positions[symbol]
+        entry_d = pos["entry_date"]
+        curr_d  = self.current_date
+        entry_date = entry_d.date() if hasattr(entry_d, 'date') else entry_d
+        curr_date  = curr_d.date()  if hasattr(curr_d,  'date') else curr_d
+        if pos.get("asset_class") == "crypto":
+            return float(max((curr_date - entry_date).days, 0))
+        return float(np.busday_count(entry_date, curr_date))
+
     def get_current_price(self, symbol):
         df = self.historical_data.get(symbol)
         if df is None or df.empty: return 0.0
@@ -119,6 +171,10 @@ class BacktestSimulator:
         side = req.side.value.lower()
         qty = float(req.qty)
         price = self.get_current_price(symbol)
+        
+        # Pull strategy from the request object (Alpaca SDK Request mock)
+        strategy = getattr(req, "strategy", "unknown")
+
         if side == "buy":
             cost = qty * price
             if cost > self.cash: return MagicMock(id="failed")
@@ -129,8 +185,19 @@ class BacktestSimulator:
                 avg_price = (old_pos["qty"] * old_pos["entry_price"] + cost) / total_qty
                 self.positions[symbol]["qty"] = total_qty
                 self.positions[symbol]["entry_price"] = avg_price
+                self.positions[symbol]["high_water_price"] = max(
+                    old_pos.get("high_water_price", old_pos["entry_price"]),
+                    price,
+                )
             else:
-                self.positions[symbol] = {"qty": qty, "entry_price": price, "entry_date": self.current_date, "asset_class": "stock" if "/" not in symbol else "crypto", "strategy": "backtest"}
+                self.positions[symbol] = {
+                    "qty": qty, 
+                    "entry_price": price, 
+                    "high_water_price": price,
+                    "entry_date": self.current_date, 
+                    "asset_class": "stock" if "/" not in symbol else "crypto", 
+                    "strategy": strategy
+                }
         else:
             if symbol not in self.positions: return MagicMock(id="failed")
             pos = self.positions[symbol]
@@ -146,7 +213,14 @@ class BacktestSimulator:
             })
             if sell_qty >= pos["qty"]: del self.positions[symbol]
             else: self.positions[symbol]["qty"] -= sell_qty
-        return {"order_id": "order_id", "status": "filled"}
+        
+        # Return a mock order object
+        order = MagicMock()
+        order.id = "order_id"
+        order.order_id = "order_id"
+        order.status = "filled"
+        order.strategy = strategy
+        return order
 
 # ── Data Fetching ─────────────────────────────────────────────────────────────
 
@@ -195,14 +269,128 @@ def fetch_all_data(symbols, start_date, end_date):
 
 # ── Main Backtest Loop ────────────────────────────────────────────────────────
 
-def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=None, end_date=None):
+STRATEGY_MODULES = {
+    "momentum": momentum_module,
+    "rsi_reversion": rsi_module,
+    "gap_up": gap_up_module,
+    "ma_crossover": ma_crossover_module,
+    "range_breakout": range_breakout_module,
+}
+
+
+def _coerce_override_value(raw: str):
+    """Convert CLI override strings to bool/int/float where possible."""
+    lowered = raw.lower()
+    if lowered in {"true", "false"}:
+        return lowered == "true"
+    if lowered in {"none", "null"}:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        pass
+    try:
+        return float(raw)
+    except ValueError:
+        return raw
+
+
+def _apply_override(cfg: dict, assignment: str) -> None:
+    """Apply a dotted-path config assignment, e.g. strategies.momentum.top_n=3."""
+    if "=" not in assignment:
+        raise ValueError(f"Invalid override '{assignment}'. Use key.path=value.")
+    key, raw_value = assignment.split("=", 1)
+    parts = [p for p in key.split(".") if p]
+    if not parts:
+        raise ValueError(f"Invalid override '{assignment}'. Use key.path=value.")
+
+    target = cfg
+    for part in parts[:-1]:
+        if part not in target or not isinstance(target[part], dict):
+            target[part] = {}
+        target = target[part]
+    target[parts[-1]] = _coerce_override_value(raw_value)
+
+
+def _apply_runtime_strategy_config(cfg: dict) -> None:
+    """Keep strategy module globals in sync with backtest-time config overrides."""
+    for name, module in STRATEGY_MODULES.items():
+        if name in cfg.get("strategies", {}):
+            module.SCFG = cfg["strategies"][name]
+    gap_up_module.INTRADAY_ON = cfg.get("intraday", {}).get("enabled", False)
+
+
+def _enabled_strategy_names(cfg: dict) -> list:
+    return [
+        name
+        for name, strat_cfg in cfg.get("strategies", {}).items()
+        if strat_cfg.get("enabled", False)
+    ]
+
+
+def _compute_max_drawdown(df_curve: pd.DataFrame) -> float:
+    if df_curve.empty or "value" not in df_curve:
+        return 0.0
+    values = df_curve["value"].astype(float)
+    running_max = values.cummax()
+    drawdowns = (values / running_max) - 1.0
+    return float(drawdowns.min()) if not drawdowns.empty else 0.0
+
+def run_backtest(
+    days=365,
+    initial_fund=10000.0,
+    output_file=None,
+    graph_file=None,
+    end_date=None,
+    exit_policy=None,
+    use_screener=None,
+    enabled_strategies=None,
+    config_overrides=None,
+):
     with open(BASE_DIR / "config" / "config.yaml") as f: cfg = yaml.safe_load(f)
 
+    if config_overrides:
+        for assignment in config_overrides:
+            _apply_override(cfg, assignment)
+
+    if exit_policy:
+        cfg["strategies"]["momentum"]["exit_policy"] = normalize_momentum_exit_policy(exit_policy)
+    else:
+        cfg["strategies"]["momentum"]["exit_policy"] = normalize_momentum_exit_policy(
+            cfg["strategies"]["momentum"].get("exit_policy")
+        )
+
+    if enabled_strategies:
+        selected = set(enabled_strategies)
+        unknown = selected - set(cfg.get("strategies", {}))
+        if unknown:
+            raise ValueError(f"Unknown strategy name(s): {', '.join(sorted(unknown))}")
+        for name, strategy_cfg in cfg["strategies"].items():
+            strategy_cfg["enabled"] = name in selected
+
+    _apply_runtime_strategy_config(cfg)
+
+    stock_strategy_enabled = any(
+        strat_cfg.get("enabled", False) and strat_cfg.get("asset_class") in {"stocks", "both"}
+        for strat_cfg in cfg.get("strategies", {}).values()
+    )
+    crypto_strategy_enabled = any(
+        strat_cfg.get("enabled", False) and strat_cfg.get("asset_class") in {"crypto", "both"}
+        for strat_cfg in cfg.get("strategies", {}).values()
+    )
+
+    screener_enabled = cfg.get("screener", {}).get("enabled", False) if use_screener is None else bool(use_screener)
+    screener_enabled = screener_enabled and stock_strategy_enabled
+
     # Build extended symbol pool (legacy + extended, deduped)
-    all_stock_symbols = list(dict.fromkeys(
-        cfg["stocks"]["scan_universe"] + EXTENDED_POOL
-    ))
-    symbols = all_stock_symbols + cfg["crypto"]["scan_universe"]
+    # When the screener is disabled, backtest the fixed configured universe only.
+    all_stock_symbols = []
+    if stock_strategy_enabled:
+        all_stock_symbols = list(dict.fromkeys(
+            cfg["stocks"]["scan_universe"] + (EXTENDED_POOL if screener_enabled else [])
+        ))
+    crypto_symbols = cfg["crypto"]["scan_universe"] if crypto_strategy_enabled else []
+    symbols = all_stock_symbols + crypto_symbols
     
     if end_date:
         # Expected format: MM/DD/YYYY (e.g. 12/31/2025)
@@ -220,9 +408,11 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
     sim = BacktestSimulator(initial_fund)
     sim.historical_data = historical_data
 
-    # Initialize screener with backtest bars for point-in-time accuracy
-    screener = UniverseBuilder(cfg)
-    screener.preload_historical_bars(historical_data)
+    # Initialize screener with backtest bars for point-in-time accuracy only when enabled.
+    screener = None
+    if screener_enabled:
+        screener = UniverseBuilder(cfg)
+        screener.preload_historical_bars(historical_data)
     
     sim_start_date = end_dt - timedelta(days=days)
     curr = sim_start_date
@@ -231,7 +421,16 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
         all_dates.append(curr)
         curr += timedelta(days=1)
     
-    strategies = [MomentumStrategy(), RSIReversionStrategy(), GapUpStrategy(), MACrossoverStrategy(), RangeBreakoutStrategy()]
+    strategies = [
+        strat for strat in [
+            MomentumStrategy(),
+            RSIReversionStrategy(),
+            GapUpStrategy(),
+            MACrossoverStrategy(),
+            RangeBreakoutStrategy(),
+        ]
+        if cfg["strategies"].get(strat.name, {}).get("enabled", False)
+    ]
     
     with (
         patch("core.alpaca_client.get_portfolio_value", side_effect=sim.get_portfolio_value),
@@ -241,10 +440,13 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
         patch("core.alpaca_client.get_stock_latest_price", side_effect=sim.get_current_price),
         patch("core.alpaca_client.get_crypto_latest_price", side_effect=sim.get_current_price),
         patch("core.alpaca_client.get_trading_client") as mock_trading_client,
-        patch("core.alpaca_client.is_market_open", return_value=True),
-        patch("tracking.trade_log.get_open_trades", side_effect=lambda: []), # Simplified for report
+        patch("core.alpaca_client.is_market_open", side_effect=lambda: sim.current_date.weekday() < 5),
+        patch("tracking.trade_log.get_open_trades", side_effect=lambda: sim.get_open_trades_for_backtest()),
+        patch("tracking.trade_log.get_trade_age_days", side_effect=lambda s: sim.get_trade_age_days(s)),
         patch("tracking.trade_log.log_trade"),
         patch("tracking.trade_log.mark_trade_closed"),
+        patch("core.order_executor.log_trade", lambda *a, **kw: None),
+        patch("core.order_executor.mark_trade_closed", lambda *a, **kw: None),
         patch("core.order_executor.MODE", "backtest"),
         patch("core.order_executor.ORDER_TYPE", "market"),
     ):
@@ -256,11 +458,16 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
             for symbol in list(sim.positions.keys()):
                 pos = sim.positions[symbol]; price = sim.get_current_price(symbol)
                 if price <= 0: continue
+                update_high_water_price(pos, price)
                 should_exit, reason = rm.should_exit_position(symbol, pos["entry_price"], price)
-                if should_exit: oe.exit_position(symbol, reason, pos["asset_class"])
+                if should_exit: 
+                    oe.exit_position(symbol, reason, pos["asset_class"], open_trades_callback=sim.get_open_trades_for_backtest)
             # Scan
             for strat in strategies:
-                universe = screener.get_universe(as_of_date=dt) if strat.asset_class == "stocks" else cfg["crypto"]["scan_universe"]
+                if strat.asset_class == "stocks":
+                    universe = screener.get_universe(as_of_date=dt) if screener_enabled else cfg["stocks"]["scan_universe"]
+                else:
+                    universe = cfg["crypto"]["scan_universe"]
                 def mock_get_bars(symbols, timeframe="1Day", limit=60):
                     class MockBarSet:
                         def __init__(self): self.data = {}; self.df = pd.DataFrame()
@@ -282,17 +489,31 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
                     signals = strat.scan(universe, current_time=dt)
                     for sig in signals:
                         if sig["symbol"] not in sim.positions:
-                            with patch("tracking.trade_log.get_trade_age_days", return_value=0):
-                                order = oe.enter_position(sig["symbol"], strat.name, strat.asset_class)
-                                if order and order.get("status") == "filled":
-                                    if sig["symbol"] in sim.positions: sim.positions[sig["symbol"]]["strategy"] = strat.name
-            # Hold Day Check
+                            order = oe.enter_position(sig["symbol"], strat.name, strat.asset_class)
+                            # enter_position returns status="open" (not "filled") — update strategy name on any non-None return
+                            if order and sig["symbol"] in sim.positions:
+                                sim.positions[sig["symbol"]]["strategy"] = strat.name
+            # Hold Day Check — delegates to sim.get_trade_age_days() (stocks=business days, crypto=calendar days)
             for symbol in list(sim.positions.keys()):
-                pos = sim.positions[symbol]; strat_name = pos.get("strategy")
-                hold_days_limit = cfg["strategies"].get(strat_name, {}).get("hold_days")
-                if hold_days_limit:
-                    age = (sim.current_date - pos["entry_date"]).days
-                    if age >= hold_days_limit: oe.exit_position(symbol, f"Hold {age}d", pos["asset_class"])
+                pos = sim.positions[symbol]
+                strat_name = pos.get("strategy")
+                strategy_cfg = cfg["strategies"].get(strat_name, {})
+                if strategy_cfg.get("hold_days"):
+                    age = sim.get_trade_age_days(symbol)
+                    price = sim.get_current_price(symbol)
+                    if price <= 0:
+                        continue
+                    peak = update_high_water_price(pos, price)
+                    should_exit, reason = should_exit_for_hold(
+                        strategy=strat_name,
+                        age_days=age,
+                        entry_price=pos["entry_price"],
+                        current_price=price,
+                        peak_price=peak,
+                        strategy_cfg=strategy_cfg,
+                    )
+                    if should_exit:
+                        oe.exit_position(symbol, reason, pos["asset_class"], open_trades_callback=sim.get_open_trades_for_backtest)
             sim.equity_curve.append({"date": dt, "value": sim.get_portfolio_value()})
 
     # --- Reporting ---
@@ -313,7 +534,7 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
         strat_wins = df[df["pnl"] > 0].groupby("strategy").size()
         strat_total = df.groupby("strategy").size()
         strat_win_rate = (strat_wins / strat_total).fillna(0)
-        
+
         summary = pd.DataFrame({
             "Trades": strat_total, "Win Rate": strat_win_rate.map(lambda x: f"{x:.1%}"),
             "Avg P&L %": strat_perf[("pnl_pct", "mean")].map(lambda x: f"{x:+.2%}"),
@@ -321,18 +542,97 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
             "Best": strat_perf[("pnl_pct", "max")].map(lambda x: f"{x:+.2%}"),
             "Worst": strat_perf[("pnl_pct", "min")].map(lambda x: f"{x:+.2%}")
         })
-        
+
         final_val = sim.get_portfolio_value()
+        total_win_rate = (df["pnl"] > 0).mean()
+        max_drawdown = _compute_max_drawdown(df_curve)
         report = f"### Backtest Results ({days} Days)\n"
         report += f"- **Final Value**: ${final_val:,.2f} ({ (final_val/initial_fund-1):+.2%})\n"
         report += f"- **Total Trades**: {len(df)}\n\n"
+        report += f"- **Win Rate**: {total_win_rate:.1%}\n"
+        report += f"- **Max Drawdown**: {max_drawdown:.2%}\n"
+        report += f"- **Momentum Exit Policy**: {cfg['strategies']['momentum']['exit_policy']}\n"
+        report += f"- **Screener**: {'enabled' if screener_enabled else 'disabled'}\n\n"
+        report += f"- **Enabled Strategies**: {', '.join(_enabled_strategy_names(cfg))}\n\n"
         report += summary.to_markdown() + "\n\n"
         if graph_file: report += f"![Equity Curve]({graph_file})\n\n"
-        
+
+        # --- Quarterly Performance Breakdown ---
+        quarterly_data = _compute_quarterly_performance(sim, df_curve)
+        if quarterly_data:
+            report += "### Quarterly Performance\n"
+            report += "| Quarter | Start Value | End Value | Return | Trades | Win Rate |\n"
+            report += "|---------|-------------|-----------|--------|--------|----------|\n"
+            for q in quarterly_data:
+                report += f"| {q['quarter']} | ${q['start_value']:,.2f} | ${q['end_value']:,.2f} | {q['return_pct']:+.2%} | {q['trades']} | {q['win_rate']:.1%} |\n"
+            report += "\n"
+            # Save quarterly CSV
+            ts = datetime.now().strftime("%Y%m%d_%H%M")
+            q_csv_path = BASE_DIR / "data" / f"quarterly_{ts}.csv"
+            q_csv_path.parent.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame(quarterly_data).to_csv(q_csv_path, index=False)
+            log.info(f"Quarterly report saved to {q_csv_path}")
+
         if output_file:
             with open(output_file, "a") as f: f.write(report)
         return report
     return "No trades executed."
+
+
+def _compute_quarterly_performance(sim, df_curve):
+    """Compute quarterly breakdowns from equity curve and trades log."""
+    if df_curve.empty or not sim.trades_log:
+        return []
+
+    # Build a date->value lookup from equity curve
+    equity_by_date = {row["date"]: row["value"] for _, row in df_curve.iterrows()}
+    sorted_dates = sorted(equity_by_date.keys())
+    if not sorted_dates:
+        return []
+
+    # Determine quarters spanned
+    first_date = sorted_dates[0]
+    last_date = sorted_dates[-1]
+
+    quarters = []
+    # Start from the quarter containing first_date
+    q_month = ((first_date.month - 1) // 3) * 3 + 1
+    q_start = first_date.replace(month=q_month, day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    while q_start <= last_date:
+        q_year = q_start.year
+        q_num = (q_start.month - 1) // 3 + 1
+        # Quarter end: first day of next quarter
+        if q_num == 4:
+            q_end = q_start.replace(year=q_year + 1, month=1, day=1)
+        else:
+            q_end = q_start.replace(month=q_start.month + 3, day=1)
+
+        # Find dates within this quarter
+        q_dates = [d for d in sorted_dates if q_start <= d < q_end]
+        if q_dates:
+            start_val = equity_by_date[q_dates[0]]
+            end_val = equity_by_date[q_dates[-1]]
+            ret = (end_val - start_val) / start_val if start_val > 0 else 0
+
+            # Count trades closed in this quarter
+            q_trades = [t for t in sim.trades_log if q_start <= t["exit_date"] < q_end]
+            n_trades = len(q_trades)
+            n_wins = sum(1 for t in q_trades if t["pnl"] > 0)
+            win_rate = n_wins / n_trades if n_trades > 0 else 0
+
+            quarters.append({
+                "quarter": f"Q{q_num} {q_year}",
+                "start_value": start_val,
+                "end_value": end_val,
+                "return_pct": ret,
+                "trades": n_trades,
+                "win_rate": win_rate,
+            })
+
+        q_start = q_end
+
+    return quarters
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -341,5 +641,38 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=str)
     parser.add_argument("--graph", type=str)
     parser.add_argument("--end-date", type=str, help="End date for backtest (MM/DD/YYYY)")
+    parser.add_argument(
+        "--exit-policy",
+        choices=sorted(VALID_MOMENTUM_EXIT_POLICIES),
+        help="Momentum hold exit policy to test",
+    )
+    screener_group = parser.add_mutually_exclusive_group()
+    screener_group.add_argument("--screener", dest="use_screener", action="store_true", help="Force dynamic stock screener on")
+    screener_group.add_argument("--no-screener", dest="use_screener", action="store_false", help="Force fixed stock universe only")
+    parser.set_defaults(use_screener=None)
+    parser.add_argument(
+        "--strategies",
+        type=str,
+        help="Comma-separated strategy allowlist for experiments, e.g. momentum,ma_crossover,range_breakout",
+    )
+    parser.add_argument(
+        "--set",
+        dest="config_overrides",
+        action="append",
+        help="Backtest-only config override, e.g. --set strategies.momentum.top_n=3",
+    )
     args = parser.parse_args()
-    print(run_backtest(days=args.days, initial_fund=args.fund, output_file=args.output, graph_file=args.graph, end_date=args.end_date))
+    enabled_strategies = None
+    if args.strategies:
+        enabled_strategies = [name.strip() for name in args.strategies.split(",") if name.strip()]
+    print(run_backtest(
+        days=args.days,
+        initial_fund=args.fund,
+        output_file=args.output,
+        graph_file=args.graph,
+        end_date=args.end_date,
+        exit_policy=args.exit_policy,
+        use_screener=args.use_screener,
+        enabled_strategies=enabled_strategies,
+        config_overrides=args.config_overrides,
+    ))

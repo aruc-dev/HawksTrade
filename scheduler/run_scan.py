@@ -32,6 +32,7 @@ import yaml
 from core import alpaca_client as ac
 from core import order_executor as oe
 from core import risk_manager as rm
+from core.exit_policy import should_exit_for_hold
 from core.portfolio import get_open_symbols, print_snapshot
 from tracking.trade_log import get_open_trades, get_trade_age_days
 from strategies.momentum import MomentumStrategy
@@ -115,6 +116,30 @@ def _asset_class_matches(strategy_asset_class: str, position_asset_class: str) -
     return strategy_class in (position_class, "both")
 
 
+def _latest_price_for_trade(symbol: str, asset_class: str) -> float:
+    if asset_class == "crypto":
+        return ac.get_crypto_latest_price(symbol)
+    return ac.get_stock_latest_price(symbol)
+
+
+def _estimate_peak_price_since_entry(symbol: str, asset_class: str, current_price: float, age_days: float) -> float:
+    """Estimate high-water price for trailing exits from recent daily bars."""
+    limit = max(int(age_days) + 5, 15)
+    try:
+        if asset_class == "crypto":
+            bars_data = ac.get_crypto_bars([symbol], timeframe="1Day", limit=limit)
+        else:
+            bars_data = ac.get_stock_bars([symbol], timeframe="1Day", limit=limit)
+        bars = bars_data[symbol] if bars_data else None
+        if not bars:
+            return current_price
+        highs = [float(getattr(bar, "high", current_price)) for bar in bars[-limit:]]
+        return max([current_price] + highs)
+    except Exception as e:
+        log.warning(f"Could not estimate trailing peak for {symbol}; using current price: {e}")
+        return current_price
+
+
 def _check_hold_day_exits(open_symbols: list, dry_run: bool = False):
     """Exit any swing trade that has been held beyond its target hold_days."""
     open_trades = get_open_trades()
@@ -126,6 +151,35 @@ def _check_hold_day_exits(open_symbols: list, dry_run: bool = False):
         target_days = HOLD_DAYS[strategy]
         age_days    = get_trade_age_days(symbol)
         if age_days >= target_days:
+            if strategy == "momentum":
+                asset_class = trade.get("asset_class", "stock")
+                entry_price = float(trade.get("entry_price") or 0)
+                if entry_price <= 0:
+                    log.warning(f"Skipping momentum hold check for {symbol}: missing entry price.")
+                    continue
+                current_price = _latest_price_for_trade(symbol, asset_class)
+                if current_price <= 0:
+                    log.warning(f"Skipping momentum hold check for {symbol}: invalid current price {current_price}.")
+                    continue
+                peak_price = _estimate_peak_price_since_entry(symbol, asset_class, current_price, age_days)
+                should_exit, reason = should_exit_for_hold(
+                    strategy=strategy,
+                    age_days=age_days,
+                    entry_price=entry_price,
+                    current_price=current_price,
+                    peak_price=peak_price,
+                    strategy_cfg=CFG["strategies"][strategy],
+                )
+                if not should_exit:
+                    log.info(
+                        f"Momentum hold extended for {symbol}: "
+                        f"age={age_days:.1f}d pnl={(current_price / entry_price - 1):+.2%}"
+                    )
+                    continue
+                log.info(f"Momentum hold exit for {symbol}: {reason}")
+                oe.exit_position(symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
+                continue
+
             log.info(
                 f"Hold period expired for {symbol} ({strategy}): "
                 f"{age_days:.1f}d >= {target_days}d — exiting."
@@ -158,8 +212,6 @@ def _check_strategy_exits(strategies, open_symbols, dry_run: bool = False):
 # ── Main Scan ─────────────────────────────────────────────────────────────────
 
 def run(run_stocks: bool = True, run_crypto: bool = True, dry_run: bool = False):
-    stock_universe = get_stock_universe()
-
     log.info("=" * 55)
     log.info(f"HawksTrade scan started | mode={CFG['mode'].upper()} | "
              f"intraday={'ON' if INTRADAY_ON else 'OFF'} | "
@@ -192,6 +244,7 @@ def run(run_stocks: bool = True, run_crypto: bool = True, dry_run: bool = False)
     # --- Stock scan (only when market is open) ---
     if run_stocks and market_open:
         log.info("--- Running stock strategies ---")
+        stock_universe = get_stock_universe()
         for strategy in STOCK_STRATEGIES:
             if not CFG["strategies"].get(strategy.name, {}).get("enabled", False):
                 continue

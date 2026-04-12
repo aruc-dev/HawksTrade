@@ -30,6 +30,13 @@ class UniverseBuilder:
         self.min_atr_pct      = screener_cfg.get("min_atr_pct",      0.01)
         self.max_atr_pct      = screener_cfg.get("max_atr_pct",      0.08)
         self.max_universe     = screener_cfg.get("max_universe",     100)
+        self.trend_sma_days   = screener_cfg.get("trend_sma_days",   50)
+        self.min_trend_sma_ratio = screener_cfg.get("min_trend_sma_ratio", 0.0)
+        self.max_trend_sma_ratio = screener_cfg.get("max_trend_sma_ratio", 999.0)
+        self.min_20d_return_pct  = screener_cfg.get("min_20d_return_pct",  None)
+        self.max_20d_return_pct  = screener_cfg.get("max_20d_return_pct",  None)
+        self.target_atr_pct   = screener_cfg.get("target_atr_pct",    0.03)
+        self.lookback_days    = max(25, int(self.trend_sma_days) + 5)
         self.legacy_universe  = config.get("stocks", {}).get("scan_universe", [])
 
     def preload_historical_bars(self, bars_data: Dict[str, object]):
@@ -81,7 +88,7 @@ class UniverseBuilder:
                 if hasattr(bars, 'index'):  # DataFrame
                     df = bars
                     mask = df.index <= as_of_date if df.index.tz is not None else df.index <= as_of_date.replace(tzinfo=None)
-                    df = df[mask].tail(25)
+                    df = df[mask].tail(self.lookback_days)
                 else:
                     # List of bar objects
                     filtered = [b for b in bars if (b.timestamp if hasattr(b, 'timestamp') else b['timestamp']) <= as_of_date]
@@ -92,7 +99,7 @@ class UniverseBuilder:
                         'volume': float(b.volume if hasattr(b, 'volume') else b['volume']),
                         'high': float(b.high if hasattr(b, 'high') else b['high']),
                         'low': float(b.low if hasattr(b, 'low') else b['low']),
-                    } for b in filtered[-25:]])
+                    } for b in filtered[-self.lookback_days:]])
 
                 if len(df) < 15:
                     continue
@@ -105,8 +112,9 @@ class UniverseBuilder:
                 log.debug(f"[Screener] Skipping {symbol}: {e}")
                 continue
 
-        # Sort by dollar volume descending, cap at max_universe
-        scores.sort(key=lambda x: x['adv_dollars'], reverse=True)
+        # Sort by quality score, cap at max_universe.
+        # Liquidity is still part of the score, but not the only selector.
+        scores.sort(key=lambda x: x['score'], reverse=True)
         return [s['symbol'] for s in scores[:self.max_universe]]
 
     def _screen_live(self) -> List[str]:
@@ -126,24 +134,46 @@ class UniverseBuilder:
         for i in range(0, len(candidates), 200):
             batch = candidates[i:i+200]
             try:
-                bars_batch = self.ac.get_stock_bars(batch, timeframe="1Day", limit=25)
+                bars_batch = self.ac.get_stock_bars(batch, timeframe="1Day", limit=self.lookback_days)
                 for symbol in batch:
-                    bars = bars_batch[symbol] if bars_batch else None
-                    if bars is None or len(bars) < 15:
-                        continue
-                    df = pd.DataFrame([{
-                        'close': float(b.close), 'volume': float(b.volume),
-                        'high': float(b.high), 'low': float(b.low)
-                    } for b in bars[-25:]])
-                    score = self._compute_score(df, symbol)
+                    score = self._score_live_symbol_bars(bars_batch, symbol)
                     if score is not None:
                         scores.append(score)
             except Exception as e:
-                log.warning(f"[Screener] Batch {i}-{i+200} error: {e}")
-                continue
+                log.warning(f"[Screener] Batch {i}-{i+200} error: {e}. Falling back to per-symbol fetch.")
+                for symbol in batch:
+                    score = self._screen_live_symbol(symbol)
+                    if score is not None:
+                        scores.append(score)
 
-        scores.sort(key=lambda x: x['adv_dollars'], reverse=True)
+        scores.sort(key=lambda x: x['score'], reverse=True)
         return [s['symbol'] for s in scores[:self.max_universe]]
+
+    def _screen_live_symbol(self, symbol: str) -> Optional[Dict]:
+        """Fetch and score one symbol after a batch request fails."""
+        try:
+            bars_batch = self.ac.get_stock_bars([symbol], timeframe="1Day", limit=self.lookback_days)
+            return self._score_live_symbol_bars(bars_batch, symbol)
+        except Exception as e:
+            log.debug(f"[Screener] Skipping {symbol} after fallback fetch failed: {e}")
+            return None
+
+    def _score_live_symbol_bars(self, bars_batch, symbol: str) -> Optional[Dict]:
+        """Extract one symbol from an Alpaca bars response and score it."""
+        if not bars_batch:
+            return None
+        try:
+            bars = bars_batch[symbol]
+        except Exception as e:
+            log.debug(f"[Screener] Missing bars for {symbol}: {e}")
+            return None
+        if bars is None or len(bars) < 15:
+            return None
+        df = pd.DataFrame([{
+            'close': float(b.close), 'volume': float(b.volume),
+            'high': float(b.high), 'low': float(b.low)
+        } for b in bars[-self.lookback_days:]])
+        return self._compute_score(df, symbol)
 
     def _compute_score(self, df: pd.DataFrame, symbol: str) -> Optional[Dict]:
         """
@@ -152,6 +182,7 @@ class UniverseBuilder:
         try:
             close   = df['close'].iloc[-1]
             volume  = df['volume']
+            closes  = df['close']
 
             # Price filter
             if not (self.min_price <= close <= self.max_price):
@@ -170,12 +201,12 @@ class UniverseBuilder:
             # ATR % filter — 14-day ATR as % of close
             highs  = df['high'].values
             lows   = df['low'].values
-            closes = df['close'].values
+            close_values = df['close'].values
             tr = np.maximum(
                 highs[1:] - lows[1:],
                 np.maximum(
-                    np.abs(highs[1:] - closes[:-1]),
-                    np.abs(lows[1:]  - closes[:-1])
+                    np.abs(highs[1:] - close_values[:-1]),
+                    np.abs(lows[1:]  - close_values[:-1])
                 )
             )
             atr14 = tr[-14:].mean() if len(tr) >= 14 else tr.mean()
@@ -183,12 +214,39 @@ class UniverseBuilder:
             if not (self.min_atr_pct <= atr_pct <= self.max_atr_pct):
                 return None
 
+            if self.trend_sma_days and len(closes) >= self.trend_sma_days:
+                trend_sma = closes.tail(self.trend_sma_days).mean()
+                if trend_sma <= 0:
+                    return None
+                trend_ratio = close / trend_sma
+                if not (self.min_trend_sma_ratio <= trend_ratio <= self.max_trend_sma_ratio):
+                    return None
+            else:
+                trend_ratio = 1.0
+
+            if len(closes) >= 21:
+                return_20d = (close / closes.iloc[-21]) - 1
+                if self.min_20d_return_pct is not None and return_20d < self.min_20d_return_pct:
+                    return None
+                if self.max_20d_return_pct is not None and return_20d > self.max_20d_return_pct:
+                    return None
+            else:
+                return_20d = 0.0
+
+            atr_quality = max(0.0, 1.0 - abs(atr_pct - self.target_atr_pct) / max(self.target_atr_pct, 1e-9))
+            liquidity_score = np.log10(max(adv_dollars, 1.0))
+            trend_score = max(return_20d, 0.0) * 10.0
+            score = liquidity_score + trend_score + atr_quality
+
             return {
                 'symbol':      symbol,
                 'close':       close,
                 'adv_shares':  adv_shares,
                 'adv_dollars': adv_dollars,
                 'atr_pct':     atr_pct,
+                'trend_ratio': trend_ratio,
+                'return_20d':  return_20d,
+                'score':       score,
             }
         except Exception:
             return None

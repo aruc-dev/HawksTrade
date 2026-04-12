@@ -37,7 +37,9 @@ def load_closed_trades() -> pd.DataFrame:
     df = df[df["status"] == "closed"].copy()
     if df.empty:
         return df
-    df["timestamp"]  = pd.to_datetime(df["timestamp"])
+    timestamps = pd.to_datetime(df["timestamp"], format="mixed", utc=True, errors="coerce")
+    df = df[timestamps.notna()].copy()
+    df["timestamp"] = timestamps[timestamps.notna()].dt.tz_convert(None)
     df["pnl_pct"]    = pd.to_numeric(df["pnl_pct"], errors="coerce").fillna(0)
     df["entry_price"] = pd.to_numeric(df["entry_price"], errors="coerce")
     df["exit_price"]  = pd.to_numeric(df["exit_price"], errors="coerce")

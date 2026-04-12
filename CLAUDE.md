@@ -53,6 +53,24 @@ ALPACA_LIVE_API_KEY=...      # Leave blank until ready for live trading
 ALPACA_LIVE_SECRET_KEY=...   # Leave blank until ready for live trading
 ```
 
+## Validation After Every Change
+
+After EVERY code change, you MUST run both of the following before committing:
+
+1. **Unit tests** — must pass with zero failures:
+   ```bash
+   python3 -m unittest discover -v
+   ```
+
+2. **1-month backtest** — must complete and produce a trades report (not "No trades executed."):
+   ```bash
+   python3 scheduler/run_backtest.py --days 30 --fund 10000
+   ```
+
+If either check fails, fix the issue before proceeding. Do not commit broken code.
+
+## Output Persistence
+
 ### 2c. Verify the connection
 
 ```bash
@@ -140,6 +158,7 @@ The AI agent should run these scripts on this schedule:
 | `scheduler/run_scan.py` | Main scan: signals → entries → exits | `--stocks-only`, `--crypto-only` |
 | `scheduler/run_risk_check.py` | Stop-loss / take-profit enforcement | none |
 | `scheduler/run_report.py` | Performance & portfolio report | `--weekly` |
+| `scheduler/run_backtest.py` | Historical strategy simulation | `--days`, `--fund`, `--exit-policy`, `--screener`, `--no-screener`, `--strategies`, `--set` |
 
 ---
 
@@ -150,11 +169,14 @@ Each can be individually enabled/disabled.
 
 | Strategy | Asset | Logic |
 |----------|-------|-------|
-| `momentum` | Stocks | Buy top 5 by 5-day return (min 3%), hold 4 days |
-| `rsi_reversion` | Stocks | Buy RSI < 30, sell RSI > 60 |
-| `gap_up` | Stocks | Buy on >3% gap-up with 1.5x volume, hold 2 days |
+| `momentum` | Stocks | Buy top 3 by 5-day return (min 6%), exit flat/losing trades after 4 trading days, let profitable trades run with trailing protection |
+| `rsi_reversion` | Stocks | Disabled by default; buy RSI < 38, sell RSI > 62 |
+| `gap_up` | Stocks | Disabled by default; buy on >3% gap-up with 1.5x volume, hold 2 days |
 | `ma_crossover` | Crypto | Buy on 9-EMA crossing above 21-EMA (daily bars) |
-| `range_breakout` | Crypto | Buy on breakout above prior day high, 1.3x volume |
+| `range_breakout` | Crypto | Buy on breakout above prior day high, 1.8x volume |
+
+Momentum backtests can compare `--exit-policy fixed_hold`, `--exit-policy profit_trailing`, and `--exit-policy risk_only_baseline`. Use `risk_only_baseline` only as a benchmark for the old no-hold-exit behavior, not as the default live policy.
+Use `--strategies momentum,ma_crossover,range_breakout` and repeated `--set key.path=value` arguments for backtest-only strategy experiments without editing `config/config.yaml`.
 
 ---
 
@@ -165,8 +187,8 @@ These are set in `config/config.yaml → trading:` and enforced by `core/risk_ma
 | Rule | Value |
 |------|-------|
 | Max position size | 5% of portfolio per trade |
-| Stop-loss | 2% below entry |
-| Take-profit | 8% above entry |
+| Stop-loss | 3.5% below entry |
+| Take-profit | 12% above entry |
 | Daily loss limit | 5% of portfolio → halt all trading |
 | Max open positions | 10 |
 | Min trade value | $100 USD |

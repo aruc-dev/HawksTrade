@@ -23,7 +23,13 @@ log = logging.getLogger("trade_log")
 
 
 def _utc_now():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(timezone.utc)
+
+
+def _as_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 COLUMNS = [
     "timestamp", "mode", "symbol", "strategy", "asset_class",
@@ -116,6 +122,6 @@ def get_trade_age_days(symbol: str) -> float:
     if not entries:
         return 0.0
     latest = sorted(entries, key=lambda x: x["timestamp"])[-1]
-    entry_dt = datetime.fromisoformat(latest["timestamp"])
+    entry_dt = _as_utc(datetime.fromisoformat(latest["timestamp"]))
     delta    = _utc_now() - entry_dt
     return delta.total_seconds() / 86400

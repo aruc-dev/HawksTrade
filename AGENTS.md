@@ -187,7 +187,12 @@ Only run a real paper-order lifecycle test when the human explicitly asks for it
 
 You MUST adhere to these standards for every change:
 1. **Unit Testing**: Implement or update unit tests in the `tests/` directory for ALL logic changes.
-2. **Validation**: Run `python3 -m unittest discover` before committing to ensure zero regressions.
+2. **Validation**: After EVERY change, run unit tests AND a 1-month backtest to confirm nothing is broken:
+   ```bash
+   python3 -m unittest discover -v
+   python3 scheduler/run_backtest.py --days 30 --fund 10000
+   ```
+   Both must pass before committing. If either fails, fix the issue first.
 3. **Documentation**: Update `README.md`, strategy tables, or backtest reports immediately if your changes affect system behavior or performance.
 
 ---

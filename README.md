@@ -4,8 +4,8 @@
 
 **Automated swing trading bot for US stocks and crypto, powered by Alpaca Markets.**
 
-Runs 5 independent strategies, enforces strict risk rules, and is designed to be
-operated autonomously by an AI agent.
+Ships with 5 independent strategies, enables the validated core set by default,
+enforces strict risk rules, and is designed to be operated autonomously by an AI agent.
 
 ---
 
@@ -23,16 +23,17 @@ cp config/.env.example config/.env
 python3 -c "import sys; sys.path.insert(0,'.'); from core.alpaca_client import get_account; print('Connected:', get_account().portfolio_value)"
 
 # 4. Run a backtest (12 months)
-python3 scheduler/run_backtest.py --days 365 --fund 10000 --output backtests.md
+python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener
 ```
 
 ---
 
 ## Backtesting & Performance
 
-HawksTrade includes a high-fidelity historical simulator. The latest "Prplxty" version achieved **+26.30% annual return** in backtesting.
+HawksTrade includes a high-fidelity historical simulator. The current default strategy set achieved **+26.53% annual return** in the 12-month backtest ending 2026-04-10 on $10,000 starting capital.
 
-- **View Full Report**: [backtests.md](backtests.md)
+- **Backtest Summary**: [backtests.md](backtests.md)
+- **Configuration Guide**: [config.md](config.md)
 - **Features**: Split-adjusted data, portfolio compounding, and per-strategy attribution.
 
 ---
@@ -41,13 +42,13 @@ HawksTrade includes a high-fidelity historical simulator. The latest "Prplxty" v
 
 | Strategy | Market | Key Parameters | Approach |
 |----------|--------|----------------|----------|
-| **Momentum** | US Stocks | Top 5 by 5-day return, Kelly sizing | Captures high-velocity tech rallies with dynamic Half-Kelly position sizing. |
-| **RSI Reversion** | US Stocks | RSI < 30, SMA-200 within 15%, vol spike 1.5x, 2-bar recovery | Mean reversion with volume confirmation and consecutive higher-close gate. |
-| **Gap-Up** | US Stocks | 3% gap, high volume, SMA-200 trend | Intraday gap plays on strong trend confirmation. |
+| **Momentum** | US Stocks | Top 3 by 5-day return, min 6% momentum, profit-aware exit | Captures high-velocity rallies, exits flat/losing trades after the minimum hold, and lets profitable trades run under trailing protection. |
+| **RSI Reversion** | US Stocks | Disabled by default; RSI < 38, SMA-200 within 15%, vol spike 1.5x, 2-bar recovery | Mean reversion with volume confirmation and consecutive higher-close gate. |
+| **Gap-Up** | US Stocks | Disabled by default; 3% gap, high volume, SMA-200 trend | Gap plays on strong trend confirmation. |
 | **EMA Crossover** | Crypto | 9/21 EMA, RSI 35-70, slope + volatility filters | Bullish EMA crossover with BTC regime gate. |
-| **Range Breakout** | Crypto | Prior-day high breakout, 1.5x volume, EMA-50 trend | Breakout entries with BTC regime gate and volume confirmation. |
+| **Range Breakout** | Crypto | Prior-day high breakout, 1.8x volume, EMA-50 trend | Breakout entries with BTC regime gate and volume confirmation. |
 
-**Crypto Universe**: `BTC`, `ETH`, `SOL`, `AVAX`, `LINK`, `POL`, `DOGE`, `LTC`, `DOT`.
+**Crypto Universe**: `BTC/USD`, `SOL/USD`, `LINK/USD`, `DOGE/USD`, `LTC/USD`, `DOT/USD`.
 
 ### Market Regime Filters
 
@@ -59,6 +60,25 @@ Both filters fail open (return True) if data is unavailable, ensuring the system
 ### Kelly Criterion Dynamic Position Sizing
 
 Momentum strategy uses Half-Kelly position sizing with parameters derived dynamically from the last 30 closed momentum trades. When fewer than 10 trades are available, it falls back to hardcoded defaults (WR=0.567, avg_win=14.0%, avg_loss=5.4%). Position size is capped at 8% of portfolio and floored at 1%.
+
+### Momentum Exit Policy
+
+Momentum uses `exit_policy: profit_trailing` by default. After the 4-trading-day minimum hold, flat or losing trades are exited, profitable trades can continue, and a trailing stop exits trades that fall 4% from a post-entry peak after reaching a 6% peak gain. Backtests can compare policies with:
+
+```bash
+python3 scheduler/run_backtest.py --days 365 --exit-policy fixed_hold
+python3 scheduler/run_backtest.py --days 365 --exit-policy profit_trailing
+python3 scheduler/run_backtest.py --days 365 --exit-policy risk_only_baseline
+```
+
+Use `--no-screener` to backtest only the fixed configured stock universe, or `--screener` to force the dynamic screener. Use `--strategies` and `--set` for backtest-only experiments without editing the live config:
+
+```bash
+python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
+  --strategies momentum,ma_crossover,range_breakout \
+  --set strategies.momentum.top_n=3 \
+  --set strategies.momentum.min_momentum_pct=0.06
+```
 
 ---
 
@@ -73,7 +93,7 @@ Momentum strategy uses Half-Kelly position sizing with parameters derived dynami
 
 ## Configuration
 
-All settings are in `config/config.yaml`. Toggle strategies, adjust risk, or switch between `paper` and `live` modes.
+All settings are in `config/config.yaml`. See [config.md](config.md) for the available configuration options and the recommended backtest-backed profile. Toggle strategies, adjust risk, or switch between `paper` and `live` modes only when you intend to revalidate those changes.
 
 ---
 
