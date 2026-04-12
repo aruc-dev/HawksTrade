@@ -28,11 +28,40 @@ from strategies.rsi_reversion import RSIReversionStrategy
 from strategies.gap_up import GapUpStrategy
 from strategies.ma_crossover import MACrossoverStrategy
 from strategies.range_breakout import RangeBreakoutStrategy
+from screener.universe_builder import UniverseBuilder
+
+# Extended pool of ~80 high-liquidity symbols covering major sectors
+EXTENDED_POOL = [
+    # Tech
+    "CRM", "ORCL", "ADBE", "INTC", "QCOM", "TXN", "AVGO", "MU", "AMAT", "LRCX",
+    "NOW", "SNOW", "PANW", "CRWD", "ZS", "NET", "DDOG", "MDB", "UBER", "LYFT",
+    # Financials
+    "MS", "WFC", "C", "BLK", "SCHW", "AXP", "V", "MA", "PYPL", "SQ",
+    # Healthcare
+    "JNJ", "UNH", "PFE", "ABBV", "MRK", "BMY", "GILD", "AMGN", "BIIB", "REGN",
+    # Consumer
+    "AMZN", "HD", "WMT", "TGT", "COST", "NKE", "SBUX", "MCD", "DIS", "CMCSA",
+    # Energy/Industrials
+    "LLY", "CAT", "DE", "BA", "RTX", "HON", "MMM", "GE", "UPS", "FDX",
+    # Real estate / utilities / other
+    "AMT", "PLD", "CCI", "NEE", "DUK", "SO", "T", "VZ", "TMUS",
+    # High-momentum / popular
+    "MSTR", "HOOD", "RIVN", "LCID", "NIO", "BABA", "JD", "PDD", "SHOP", "SPOT",
+    "RBLX", "SNAP", "PINS", "TWLO", "ZM", "DOCN", "GTLB", "U", "ABNB", "DASH",
+]
 
 # ── Setup Logging ─────────────────────────────────────────────────────────────
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("backtest")
+
+# ── Lightweight bar object (replaces MagicMock for speed) ────────────────────
+
+class SimpleBar:
+    __slots__ = ('open', 'high', 'low', 'close', 'volume', 'timestamp')
+    def __init__(self, open_price, high_price, low_price, close_price, volume, timestamp):
+        self.open = open_price; self.high = high_price; self.low = low_price
+        self.close = close_price; self.volume = volume; self.timestamp = timestamp
 
 # ── Simulation State ─────────────────────────────────────────────────────────
 
@@ -127,23 +156,53 @@ def fetch_all_data(symbols, start_date, end_date):
     from alpaca.data.enums import Adjustment
     from alpaca.data.requests import StockBarsRequest, CryptoBarsRequest
     from alpaca.data.timeframe import TimeFrame
-    for s in symbols:
+
+    # Separate stock vs crypto symbols
+    stock_symbols = [s for s in symbols if "/" not in s]
+    crypto_symbols = [s for s in symbols if "/" in s]
+
+    # Batch-fetch stocks in groups of 50 (much faster than 1-at-a-time)
+    BATCH = 50
+    for i in range(0, len(stock_symbols), BATCH):
+        batch = stock_symbols[i:i+BATCH]
         try:
-            if "/" not in s:
-                req = StockBarsRequest(symbol_or_symbols=[s], timeframe=TimeFrame.Day, start=start_date, end=end_date, adjustment=Adjustment.ALL)
-                bars = ac.get_stock_data_client().get_stock_bars(req)
-            else:
-                req = CryptoBarsRequest(symbol_or_symbols=[s], timeframe=TimeFrame.Day, start=start_date, end=end_date)
-                bars = ac.get_crypto_data_client().get_crypto_bars(req)
+            req = StockBarsRequest(symbol_or_symbols=batch, timeframe=TimeFrame.Day, start=start_date, end=end_date, adjustment=Adjustment.ALL)
+            bars = ac.get_stock_data_client().get_stock_bars(req)
+            for s in batch:
+                if s in bars.data:
+                    data[s] = bars.df.loc[s]
+        except Exception as e:
+            log.error(f"Batch stock fetch failed ({i}-{i+BATCH}): {e}")
+            # Fallback: fetch individually
+            for s in batch:
+                try:
+                    req = StockBarsRequest(symbol_or_symbols=[s], timeframe=TimeFrame.Day, start=start_date, end=end_date, adjustment=Adjustment.ALL)
+                    bars = ac.get_stock_data_client().get_stock_bars(req)
+                    if s in bars.data: data[s] = bars.df.loc[s]
+                except Exception as e2: log.error(f"Failed to fetch {s}: {e2}")
+        log.info(f"  Fetched stocks batch {i+1}-{min(i+BATCH, len(stock_symbols))} of {len(stock_symbols)}")
+
+    # Fetch crypto individually (usually only 6 symbols)
+    for s in crypto_symbols:
+        try:
+            req = CryptoBarsRequest(symbol_or_symbols=[s], timeframe=TimeFrame.Day, start=start_date, end=end_date)
+            bars = ac.get_crypto_data_client().get_crypto_bars(req)
             if s in bars.data: data[s] = bars.df.loc[s]
         except Exception as e: log.error(f"Failed to fetch {s}: {e}")
+
+    log.info(f"Fetched data for {len(data)} of {len(symbols)} symbols")
     return data
 
 # ── Main Backtest Loop ────────────────────────────────────────────────────────
 
 def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=None, end_date=None):
     with open(BASE_DIR / "config" / "config.yaml") as f: cfg = yaml.safe_load(f)
-    symbols = cfg["stocks"]["scan_universe"] + cfg["crypto"]["scan_universe"]
+
+    # Build extended symbol pool (legacy + extended, deduped)
+    all_stock_symbols = list(dict.fromkeys(
+        cfg["stocks"]["scan_universe"] + EXTENDED_POOL
+    ))
+    symbols = all_stock_symbols + cfg["crypto"]["scan_universe"]
     
     if end_date:
         # Expected format: MM/DD/YYYY (e.g. 12/31/2025)
@@ -160,6 +219,10 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
     historical_data = fetch_all_data(symbols, start_dt, end_dt)
     sim = BacktestSimulator(initial_fund)
     sim.historical_data = historical_data
+
+    # Initialize screener with backtest bars for point-in-time accuracy
+    screener = UniverseBuilder(cfg)
+    screener.preload_historical_bars(historical_data)
     
     sim_start_date = end_dt - timedelta(days=days)
     curr = sim_start_date
@@ -197,7 +260,7 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
                 if should_exit: oe.exit_position(symbol, reason, pos["asset_class"])
             # Scan
             for strat in strategies:
-                universe = cfg["stocks"]["scan_universe"] if strat.asset_class == "stocks" else cfg["crypto"]["scan_universe"]
+                universe = screener.get_universe(as_of_date=dt) if strat.asset_class == "stocks" else cfg["crypto"]["scan_universe"]
                 def mock_get_bars(symbols, timeframe="1Day", limit=60):
                     class MockBarSet:
                         def __init__(self): self.data = {}; self.df = pd.DataFrame()
@@ -208,7 +271,7 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
                             df = sim.historical_data[s]; mask = df.index <= sim.current_date; hist_df = df[mask].tail(limit)
                             bars_list = []
                             for idx, row in hist_df.iterrows():
-                                bar = MagicMock(); bar.close = float(row["close"]); bar.open = float(row["open"]); bar.high = float(row["high"]); bar.low = float(row["low"]); bar.volume = float(row["volume"]); bar.timestamp = idx
+                                bar = SimpleBar(open_price=float(row["open"]), high_price=float(row["high"]), low_price=float(row["low"]), close_price=float(row["close"]), volume=float(row["volume"]), timestamp=idx)
                                 bars_list.append(bar)
                             res.data[s] = bars_list
                             temp_df = hist_df.copy(); temp_df.index = pd.MultiIndex.from_product([[s], temp_df.index], names=['symbol', 'timestamp']); dfs.append(temp_df)

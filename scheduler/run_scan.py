@@ -26,6 +26,8 @@ from datetime import datetime, timezone
 # Ensure project root is on path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from typing import List
+
 import yaml
 from core import alpaca_client as ac
 from core import order_executor as oe
@@ -37,6 +39,7 @@ from strategies.rsi_reversion import RSIReversionStrategy
 from strategies.gap_up import GapUpStrategy
 from strategies.ma_crossover import MACrossoverStrategy
 from strategies.range_breakout import RangeBreakoutStrategy
+from screener.universe_builder import UniverseBuilder
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 
@@ -63,7 +66,17 @@ log = logging.getLogger("run_scan")
 with open(BASE_DIR / "config" / "config.yaml") as f:
     CFG = yaml.safe_load(f)
 
-STOCK_UNIVERSE  = CFG["stocks"]["scan_universe"]
+_screener = None
+
+def get_stock_universe() -> List[str]:
+    """Returns dynamic universe if screener enabled, else static config list."""
+    global _screener
+    if not CFG.get("screener", {}).get("enabled", False):
+        return CFG["stocks"]["scan_universe"]
+    if _screener is None:
+        _screener = UniverseBuilder(CFG, alpaca_client=ac)
+    return _screener.get_universe()
+
 CRYPTO_UNIVERSE = CFG["crypto"]["scan_universe"]
 INTRADAY_ON     = CFG["intraday"]["enabled"]
 
@@ -145,6 +158,8 @@ def _check_strategy_exits(strategies, open_symbols, dry_run: bool = False):
 # ── Main Scan ─────────────────────────────────────────────────────────────────
 
 def run(run_stocks: bool = True, run_crypto: bool = True, dry_run: bool = False):
+    stock_universe = get_stock_universe()
+
     log.info("=" * 55)
     log.info(f"HawksTrade scan started | mode={CFG['mode'].upper()} | "
              f"intraday={'ON' if INTRADAY_ON else 'OFF'} | "
@@ -181,7 +196,7 @@ def run(run_stocks: bool = True, run_crypto: bool = True, dry_run: bool = False)
             if not CFG["strategies"].get(strategy.name, {}).get("enabled", False):
                 continue
             try:
-                signals = strategy.scan(STOCK_UNIVERSE)
+                signals = strategy.scan(stock_universe)
                 for sig in signals:
                     sym = sig["symbol"]
                     if _already_holding(sym, open_symbols):
