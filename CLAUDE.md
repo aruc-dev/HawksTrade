@@ -34,6 +34,22 @@ Follow all instructions and conventions found in these files. They define the pr
 - NEVER approve PRs — you are not authorized to approve pull requests. Only create and comment on PRs.
 - Complete the task autonomously and create the PR(s) when done.
 
+## Validation After Every Change
+
+After EVERY code change, you MUST run both of the following before committing:
+
+1. **Unit tests** — must pass with zero failures:
+   ```bash
+   python3 -m unittest discover -v
+   ```
+
+2. **1-month backtest** — must complete and produce a trades report (not "No trades executed."):
+   ```bash
+   python3 scheduler/run_backtest.py --days 30 --fund 10000
+   ```
+
+If either check fails, fix the issue before proceeding. Do not commit broken code.
+
 ## Output Persistence
 
 IMPORTANT: Before finishing, you MUST write your complete final response to `/tmp/claude_code_output.md` using the Write tool. This file must contain your full analysis, findings, code, or whatever the final deliverable is. This is a hard requirement — do not skip it.

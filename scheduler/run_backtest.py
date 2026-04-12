@@ -156,6 +156,10 @@ class BacktestSimulator:
         side = req.side.value.lower()
         qty = float(req.qty)
         price = self.get_current_price(symbol)
+        
+        # Pull strategy from the request object (Alpaca SDK Request mock)
+        strategy = getattr(req, "strategy", "unknown")
+
         if side == "buy":
             cost = qty * price
             if cost > self.cash: return MagicMock(id="failed")
@@ -167,7 +171,13 @@ class BacktestSimulator:
                 self.positions[symbol]["qty"] = total_qty
                 self.positions[symbol]["entry_price"] = avg_price
             else:
-                self.positions[symbol] = {"qty": qty, "entry_price": price, "entry_date": self.current_date, "asset_class": "stock" if "/" not in symbol else "crypto", "strategy": "backtest"}
+                self.positions[symbol] = {
+                    "qty": qty, 
+                    "entry_price": price, 
+                    "entry_date": self.current_date, 
+                    "asset_class": "stock" if "/" not in symbol else "crypto", 
+                    "strategy": strategy
+                }
         else:
             if symbol not in self.positions: return MagicMock(id="failed")
             pos = self.positions[symbol]
@@ -183,7 +193,14 @@ class BacktestSimulator:
             })
             if sell_qty >= pos["qty"]: del self.positions[symbol]
             else: self.positions[symbol]["qty"] -= sell_qty
-        return {"order_id": "order_id", "status": "filled"}
+        
+        # Return a mock order object
+        order = MagicMock()
+        order.id = "order_id"
+        order.order_id = "order_id"
+        order.status = "filled"
+        order.strategy = strategy
+        return order
 
 # ── Data Fetching ─────────────────────────────────────────────────────────────
 
@@ -295,7 +312,8 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
                 pos = sim.positions[symbol]; price = sim.get_current_price(symbol)
                 if price <= 0: continue
                 should_exit, reason = rm.should_exit_position(symbol, pos["entry_price"], price)
-                if should_exit: oe.exit_position(symbol, reason, pos["asset_class"])
+                if should_exit: 
+                    oe.exit_position(symbol, reason, pos["asset_class"], open_trades_callback=sim.get_open_trades_for_backtest)
             # Scan
             for strat in strategies:
                 universe = screener.get_universe(as_of_date=dt) if strat.asset_class == "stocks" else cfg["crypto"]["scan_universe"]
@@ -338,7 +356,7 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
                         curr_d.date()  if hasattr(curr_d,  'date') else curr_d
                     ))
                     if trading_age >= hold_days_limit:
-                        oe.exit_position(symbol, f"Hold {trading_age}d", pos["asset_class"])
+                        oe.exit_position(symbol, f"Hold {trading_age}d", pos["asset_class"], open_trades_callback=sim.get_open_trades_for_backtest)
             sim.equity_curve.append({"date": dt, "value": sim.get_portfolio_value()})
 
     # --- Reporting ---

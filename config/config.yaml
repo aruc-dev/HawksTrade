@@ -58,7 +58,7 @@ stocks:
 
 # --- DYNAMIC UNIVERSE SCREENER ---
 screener:
-  enabled: false                   # Set true to enable dynamic screening (increases API usage vs static list)
+  enabled: true                   # Set true to enable dynamic screening (increases API usage vs static list)
   min_adv_shares: 500000           # Min avg daily volume (shares, 20-day)
   min_adv_dollars: 5000000         # Min avg daily dollar volume ($5M/day)
   min_price: 5.0                   # Min share price (filter penny stocks)

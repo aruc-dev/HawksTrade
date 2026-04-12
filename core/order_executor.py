@@ -106,7 +106,7 @@ def enter_position(symbol: str, strategy: str, asset_class: str = "stock", dry_r
         return None
 
 
-def exit_position(symbol: str, reason: str, asset_class: str = "stock", dry_run: bool = False) -> Optional[dict]:
+def exit_position(symbol: str, reason: str, asset_class: str = "stock", dry_run: bool = False, open_trades_callback=None) -> Optional[dict]:
     """
     Close an open position fully.
       1. Check position exists
@@ -129,12 +129,25 @@ def exit_position(symbol: str, reason: str, asset_class: str = "stock", dry_run:
         entry_price = float(position.avg_entry_price)
         pnl_pct     = (current_price - entry_price) / entry_price
 
+        # Retrieve strategy from local open trades if possible
+        strategy = "unknown"
+        if open_trades_callback:
+            open_trades = open_trades_callback()
+        else:
+            from tracking.trade_log import get_open_trades
+            open_trades = get_open_trades()
+
+        for t in open_trades:
+            if t["symbol"] == symbol:
+                strategy = t.get("strategy", "unknown")
+                break
+
         if dry_run:
             trade = {
                 "timestamp":     _utc_now().isoformat(),
                 "mode":          MODE,
                 "symbol":        symbol,
-                "strategy":      "exit",
+                "strategy":      strategy,
                 "asset_class":   asset_class,
                 "side":          "sell",
                 "qty":           qty,
@@ -146,23 +159,23 @@ def exit_position(symbol: str, reason: str, asset_class: str = "stock", dry_run:
                 "status":        "dry_run",
             }
             log.info(
-                f"DRY RUN: would exit {symbol} | reason={reason} | "
+                f"DRY RUN: would exit {symbol} | strategy={strategy} | reason={reason} | "
                 f"entry={entry_price} exit={current_price} pnl={pnl_pct:.2%}"
             )
             return trade
 
         if ORDER_TYPE == "market":
-            order = ac.place_market_order(symbol, qty, "sell")
+            order = ac.place_market_order(symbol, qty, "sell", strategy=strategy)
         else:
             limit_px = round(current_price * (1 - SLIPPAGE), 4)
-            order = ac.place_limit_order(symbol, qty, "sell", limit_px)
+            order = ac.place_limit_order(symbol, qty, "sell", limit_px, strategy=strategy)
 
         order_id = str(order.id) if hasattr(order, "id") else str(order.get("order_id"))
         trade = {
             "timestamp":     _utc_now().isoformat(),
             "mode":          MODE,
             "symbol":        symbol,
-            "strategy":      "exit",
+            "strategy":      strategy,
             "asset_class":   asset_class,
             "side":          "sell",
             "qty":           qty,

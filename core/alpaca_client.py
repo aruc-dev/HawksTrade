@@ -130,7 +130,7 @@ def get_position(symbol: str):
 
 # ── Orders ───────────────────────────────────────────────────────────────────
 
-def place_market_order(symbol: str, qty: float, side: str, time_in_force: str = "day"):
+def place_market_order(symbol: str, qty: float, side: str, time_in_force: str = "day", strategy: str = "unknown"):
     """Place a market order. side = 'buy' or 'sell'."""
     side = side.lower()
     if side not in {"buy", "sell"}:
@@ -143,13 +143,17 @@ def place_market_order(symbol: str, qty: float, side: str, time_in_force: str = 
         time_in_force=TimeInForce.DAY if time_in_force == "day" else TimeInForce.GTC,
     )
     order = client.submit_order(req)
+    # Store strategy in mock-friendly way for backtests
+    if hasattr(order, "__setitem__"): order["strategy"] = strategy
+    elif hasattr(order, "strategy"): order.strategy = strategy
+    
     order_id = order.id if hasattr(order, "id") else order.get("order_id")
-    log.info(f"Market order submitted: {side} {qty} {symbol} | id={order_id}")
+    log.info(f"Market order submitted: {side} {qty} {symbol} | strategy={strategy} | id={order_id}")
     return order
 
 
 def place_limit_order(symbol: str, qty: float, side: str, limit_price: float,
-                      time_in_force: str = "gtc"):
+                      time_in_force: str = "gtc", strategy: str = "unknown"):
     """Place a limit order."""
     side = side.lower()
     if side not in {"buy", "sell"}:
@@ -163,8 +167,12 @@ def place_limit_order(symbol: str, qty: float, side: str, limit_price: float,
         time_in_force=TimeInForce.GTC if time_in_force == "gtc" else TimeInForce.DAY,
     )
     order = client.submit_order(req)
+    # Store strategy in mock-friendly way for backtests
+    if hasattr(order, "__setitem__"): order["strategy"] = strategy
+    elif hasattr(order, "strategy"): order.strategy = strategy
+
     order_id = order.id if hasattr(order, "id") else order.get("order_id")
-    log.info(f"Limit order submitted: {side} {qty} {symbol} @ {limit_price} | id={order_id}")
+    log.info(f"Limit order submitted: {side} {qty} {symbol} @ {limit_price} | strategy={strategy} | id={order_id}")
     return order
 
 
