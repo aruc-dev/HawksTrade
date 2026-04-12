@@ -13,7 +13,14 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scheduler.run_backtest import BacktestSimulator, EXTENDED_POOL, _compute_quarterly_performance
+from scheduler.run_backtest import (
+    BacktestSimulator,
+    EXTENDED_POOL,
+    _apply_override,
+    _compute_max_drawdown,
+    _compute_quarterly_performance,
+)
+from core.exit_policy import should_exit_for_hold
 
 
 class TestHoldDayExitFix(unittest.TestCase):
@@ -97,6 +104,78 @@ class TestHoldDayExitFix(unittest.TestCase):
         }
         age = self.sim.get_trade_age_days("FRESH")  # 0 business days (Sat->Sun)
         self.assertLess(age, 4)  # momentum hold_days = 4
+
+
+class TestMomentumExitPolicy(unittest.TestCase):
+    """Tests for profit-aware momentum hold exits."""
+
+    def _cfg(self, policy="profit_trailing"):
+        return {
+            "hold_days": 4,
+            "exit_policy": policy,
+            "profit_floor_pct": 0.0,
+            "trail_activation_pct": 0.06,
+            "trailing_stop_pct": 0.04,
+            "max_hold_days": 20,
+        }
+
+    def test_profit_trailing_exits_loser_after_min_hold(self):
+        should_exit, reason = should_exit_for_hold(
+            strategy="momentum",
+            age_days=4,
+            entry_price=100,
+            current_price=99,
+            peak_price=104,
+            strategy_cfg=self._cfg(),
+        )
+        self.assertTrue(should_exit)
+        self.assertIn("without profit", reason)
+
+    def test_profit_trailing_keeps_winner_after_min_hold(self):
+        should_exit, _ = should_exit_for_hold(
+            strategy="momentum",
+            age_days=4,
+            entry_price=100,
+            current_price=103,
+            peak_price=104,
+            strategy_cfg=self._cfg(),
+        )
+        self.assertFalse(should_exit)
+
+    def test_profit_trailing_exits_on_trailing_drawdown(self):
+        should_exit, reason = should_exit_for_hold(
+            strategy="momentum",
+            age_days=7,
+            entry_price=100,
+            current_price=105,
+            peak_price=110,
+            strategy_cfg=self._cfg(),
+        )
+        self.assertTrue(should_exit)
+        self.assertIn("trailing stop", reason)
+
+    def test_risk_only_baseline_ignores_hold_days(self):
+        should_exit, _ = should_exit_for_hold(
+            strategy="momentum",
+            age_days=30,
+            entry_price=100,
+            current_price=90,
+            peak_price=112,
+            strategy_cfg=self._cfg(policy="risk_only_baseline"),
+        )
+        self.assertFalse(should_exit)
+
+    def test_fixed_hold_preserves_existing_behavior(self):
+        should_exit, reason = should_exit_for_hold(
+            strategy="momentum",
+            age_days=4,
+            entry_price=100,
+            current_price=103,
+            peak_price=104,
+            strategy_cfg=self._cfg(policy="fixed_hold"),
+        )
+        self.assertTrue(should_exit)
+        self.assertEqual(reason, "Hold 4d")
 
 
 class TestQuarterlyReporting(unittest.TestCase):
@@ -188,6 +267,31 @@ class TestQuarterlyReporting(unittest.TestCase):
         df_curve = pd.DataFrame([{"date": datetime(2025, 1, 1, tzinfo=timezone.utc), "value": 10000}])
         quarters = _compute_quarterly_performance(sim, df_curve)
         self.assertEqual(quarters, [])
+
+
+class TestBacktestExperimentControls(unittest.TestCase):
+    """Tests for backtest-only experiment controls."""
+
+    def test_apply_override_coerces_dotted_values(self):
+        cfg = {"strategies": {"momentum": {"top_n": 5}}}
+
+        _apply_override(cfg, "strategies.momentum.top_n=3")
+        _apply_override(cfg, "screener.enabled=false")
+        _apply_override(cfg, "screener.max_atr_pct=0.06")
+
+        self.assertEqual(cfg["strategies"]["momentum"]["top_n"], 3)
+        self.assertFalse(cfg["screener"]["enabled"])
+        self.assertEqual(cfg["screener"]["max_atr_pct"], 0.06)
+
+    def test_compute_max_drawdown(self):
+        df_curve = pd.DataFrame([
+            {"value": 100.0},
+            {"value": 120.0},
+            {"value": 90.0},
+            {"value": 110.0},
+        ])
+
+        self.assertAlmostEqual(_compute_max_drawdown(df_curve), -0.25)
 
 
 class TestExtendedPool(unittest.TestCase):

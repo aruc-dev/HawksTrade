@@ -4,6 +4,7 @@ Tests for screener/universe_builder.py and core/alpaca_client.get_all_tradable_a
 
 import unittest
 from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
 import pandas as pd
 import numpy as np
 from datetime import datetime, timezone
@@ -39,6 +40,9 @@ def _base_config():
             "max_price": 2000.0,
             "min_atr_pct": 0.01,
             "max_atr_pct": 0.08,
+            "trend_sma_days": 50,
+            "min_trend_sma_ratio": 0.0,
+            "max_trend_sma_ratio": 999.0,
             "max_universe": 100,
         },
         "stocks": {
@@ -100,6 +104,44 @@ class TestComputeScore(unittest.TestCase):
         builder = UniverseBuilder(cfg)
         df = _make_bars_df(n=25, close=100.0, volume=800_000, atr_pct=0.15)
         score = builder._compute_score(df, "MEME")
+        self.assertIsNone(score)
+
+    def test_compute_score_filters_below_trend_sma(self):
+        """A tightened screener can require price above its trend SMA."""
+        cfg = _base_config()
+        cfg["screener"]["min_trend_sma_ratio"] = 1.0
+        builder = UniverseBuilder(cfg)
+        dates = pd.date_range(end="2025-06-01", periods=55, freq="D", tz="UTC")
+        closes = np.array([120.0] * 54 + [90.0])
+        df = pd.DataFrame({
+            "close": closes,
+            "open": closes,
+            "high": closes * 1.03,
+            "low": closes * 0.97,
+            "volume": np.full(55, 1_000_000.0),
+        }, index=dates)
+
+        score = builder._compute_score(df, "BROKEN")
+
+        self.assertIsNone(score)
+
+    def test_compute_score_filters_overextended_20d_return(self):
+        """A tightened screener can reject blow-off moves."""
+        cfg = _base_config()
+        cfg["screener"]["max_20d_return_pct"] = 0.35
+        builder = UniverseBuilder(cfg)
+        dates = pd.date_range(end="2025-06-01", periods=55, freq="D", tz="UTC")
+        closes = np.array([100.0] * 34 + [100.0] * 20 + [160.0])
+        df = pd.DataFrame({
+            "close": closes,
+            "open": closes,
+            "high": closes * 1.03,
+            "low": closes * 0.97,
+            "volume": np.full(55, 1_000_000.0),
+        }, index=dates)
+
+        score = builder._compute_score(df, "BLOWOFF")
+
         self.assertIsNone(score)
 
 
@@ -167,6 +209,48 @@ class TestUniverseCache(unittest.TestCase):
         self.assertEqual(result1, result2)
         # Cache should have exactly one entry
         self.assertEqual(builder.get_stats()["cached_dates"], 1)
+
+
+class TestLiveScreenerReliability(unittest.TestCase):
+    """Tests for live batch handling."""
+
+    def _bars(self):
+        df = _make_bars_df(n=25, close=100.0, volume=1_000_000, atr_pct=0.025)
+        return [
+            SimpleNamespace(
+                close=row.close,
+                volume=row.volume,
+                high=row.high,
+                low=row.low,
+            )
+            for row in df.itertuples()
+        ]
+
+    def test_missing_symbol_in_batch_does_not_drop_valid_symbol(self):
+        cfg = _base_config()
+        ac = MagicMock()
+        ac.get_all_tradable_assets.return_value = ["BAD", "AAPL"]
+        ac.get_stock_bars.return_value = {"AAPL": self._bars()}
+        builder = UniverseBuilder(cfg, alpaca_client=ac)
+
+        result = builder._screen_live()
+
+        self.assertIn("AAPL", result)
+
+    def test_batch_error_falls_back_to_per_symbol_fetch(self):
+        cfg = _base_config()
+        ac = MagicMock()
+        ac.get_all_tradable_assets.return_value = ["AAPL"]
+        ac.get_stock_bars.side_effect = [
+            RuntimeError("batch failed"),
+            {"AAPL": self._bars()},
+        ]
+        builder = UniverseBuilder(cfg, alpaca_client=ac)
+
+        result = builder._screen_live()
+
+        self.assertIn("AAPL", result)
+        self.assertEqual(ac.get_stock_bars.call_count, 2)
 
 
 class TestBacktestPointInTime(unittest.TestCase):

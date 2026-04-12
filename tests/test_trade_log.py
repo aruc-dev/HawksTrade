@@ -58,6 +58,27 @@ class TradeLogTests(unittest.TestCase):
         self.assertEqual(rows[1]["pnl_pct"], "0.1")
         self.assertEqual(rows[1]["exit_reason"], "test exit")
 
+    def test_get_trade_age_days_accepts_timezone_aware_timestamp(self):
+        timestamp = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+
+        trade_log.log_trade({
+            "timestamp": timestamp,
+            "mode": "paper",
+            "symbol": "AAPL",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "side": "buy",
+            "qty": 1,
+            "entry_price": 100,
+            "order_id": "aware",
+            "status": "open",
+        })
+
+        age = trade_log.get_trade_age_days("AAPL")
+
+        self.assertGreater(age, 1.9)
+        self.assertLess(age, 2.1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -19,6 +19,7 @@ logs/
 reports/
 data/*.csv
 data/*.json
+data/archive/
 
 # Local system files
 .DS_Store

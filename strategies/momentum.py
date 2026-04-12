@@ -3,7 +3,8 @@ HawksTrade - Momentum Strategy (Stocks)
 ========================================
 Ranks all stocks in the universe by 5-day price momentum.
 Buys the top N if momentum > min_momentum_pct.
-Exits after hold_days trading days.
+Exits are handled by the scheduler: flat/losing trades exit after
+the minimum hold, while profitable trades can run with trailing protection.
 
 Strategy: Swing trade (NOT intraday).
 """
@@ -98,6 +99,6 @@ class MomentumStrategy(BaseStrategy):
     def should_exit(self, symbol: str, entry_price: float) -> tuple:
         """
         Momentum exits on take-profit / stop-loss (handled by risk_manager).
-        Strategy-level exit: after hold_days (checked by scheduler via trade log).
+        Strategy-level hold/trailing exits are checked by the scheduler.
         """
         return False, ""

@@ -59,13 +59,19 @@ stocks:
 # --- DYNAMIC UNIVERSE SCREENER ---
 screener:
   enabled: true                   # Set true to enable dynamic screening (increases API usage vs static list)
-  min_adv_shares: 500000           # Min avg daily volume (shares, 20-day)
-  min_adv_dollars: 5000000         # Min avg daily dollar volume ($5M/day)
-  min_price: 5.0                   # Min share price (filter penny stocks)
+  min_adv_shares: 1000000          # Min avg daily volume (shares, 20-day)
+  min_adv_dollars: 50000000        # Min avg daily dollar volume ($50M/day)
+  min_price: 10.0                  # Min share price (filter penny stocks and low-quality churn)
   max_price: 2000.0                # Max share price
-  min_atr_pct: 0.01                # Min 14-day ATR as % of price (1% — needs movement)
-  max_atr_pct: 0.08                # Max 14-day ATR as % of price (8% — not too wild)
-  max_universe: 100                # Hard cap on dynamic candidates returned
+  min_atr_pct: 0.012               # Min 14-day ATR as % of price (needs movement)
+  max_atr_pct: 0.06                # Max 14-day ATR as % of price (avoid unstable tail risk)
+  target_atr_pct: 0.03             # Score candidates closest to moderate volatility
+  trend_sma_days: 50               # Prefer symbols above their intermediate trend
+  min_trend_sma_ratio: 1.0         # Current close must be at/above SMA trend
+  max_trend_sma_ratio: 1.30        # Avoid chasing names stretched >30% above trend
+  min_20d_return_pct: -0.05        # Avoid recent breakdowns
+  max_20d_return_pct: 0.35         # Avoid blow-off moves
+  max_universe: 40                 # Hard cap on dynamic candidates returned
   # The legacy scan_universe (above) is always merged in, so existing symbols
   # are never dropped even if they fail the screener filters.
 
@@ -86,14 +92,19 @@ strategies:
   momentum:
     enabled: true
     asset_class: stocks          # stocks | crypto | both
-    description: "Buy top N stocks by 5-day price momentum, hold 3-5 days"
-    top_n: 5                     # Pick top 5 stocks by momentum
-    hold_days: 4                 # Target hold period in trading days
-    min_momentum_pct: 0.04       # Minimum 4% 5-day gain to qualify
+    description: "Buy top N stocks by 5-day price momentum; let profitable trades run with trailing protection"
+    top_n: 3                     # Pick top 3 stocks by momentum
+    hold_days: 4                 # Minimum hold before profit-aware exit checks
+    exit_policy: "profit_trailing" # fixed_hold | profit_trailing | risk_only_baseline
+    profit_floor_pct: 0.0        # After hold_days, exit if P&L is flat/negative
+    trail_activation_pct: 0.06   # Enable trailing stop once peak gain reaches 6%
+    trailing_stop_pct: 0.04      # Exit if price falls 4% from post-entry peak
+    max_hold_days: 20            # Cap stale momentum positions even if still green
+    min_momentum_pct: 0.06       # Minimum 6% 5-day gain to qualify
     weight: 1.0                  # Signal weight (relative to other strategies)
 
   rsi_reversion:
-    enabled: true
+    enabled: false
     asset_class: stocks
     description: "Buy when RSI < 30 (oversold), sell when RSI > 60"
     rsi_period: 14
@@ -103,7 +114,7 @@ strategies:
     weight: 1.0
 
   gap_up:
-    enabled: true
+    enabled: false
     asset_class: stocks
     description: "Buy stocks gapping up >3% on above-average volume at open"
     min_gap_pct: 0.03            # Minimum gap-up percentage

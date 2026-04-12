@@ -76,10 +76,10 @@ def enter_position(symbol: str, strategy: str, asset_class: str = "stock", dry_r
 
         # Place Order
         if ORDER_TYPE == "market":
-            order = ac.place_market_order(symbol, qty, "buy")
+            order = ac.place_market_order(symbol, qty, "buy", strategy=strategy)
         else:
             limit_px = round(price * (1 + SLIPPAGE), 4)
-            order = ac.place_limit_order(symbol, qty, "buy", limit_px)
+            order = ac.place_limit_order(symbol, qty, "buy", limit_px, strategy=strategy)
 
         # Capture details for logging
         order_id = str(order.id) if hasattr(order, "id") else str(order.get("order_id"))

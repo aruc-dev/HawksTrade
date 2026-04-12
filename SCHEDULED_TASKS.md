@@ -18,11 +18,28 @@ The cron expressions in Section 3 are written for **ET (UTC−4)** (for cloud VM
 
 ---
 
+## Current Project Status
+
+As of April 12, 2026, the validated default profile is:
+
+- `mode: paper`
+- `intraday.enabled: false`
+- `screener.enabled: true`
+- Enabled strategies: `momentum`, `ma_crossover`, `range_breakout`
+- Disabled strategies: `rsi_reversion`, `gap_up`
+- Momentum defaults: `top_n: 3`, `min_momentum_pct: 0.06`, `exit_policy: profit_trailing`
+- Current crypto universe: `BTC/USD`, `SOL/USD`, `LINK/USD`, `DOGE/USD`, `LTC/USD`, `DOT/USD`
+- Latest 12-month backtest: +26.53%, 274 trades, 34.7% win rate, -9.34% max drawdown
+
+See `backtests.md` and `config.md` before changing strategy schedules or defaults.
+
+---
+
 ## 1. Task Summary
 
 | Task ID | Purpose | ET Schedule | PDT Schedule |
 |---------|---------|-------------|--------------|
-| `hawkstrade-stock-scan` | Full scan (stocks + crypto) | Every 30 min, 9:30 AM–3:30 PM Mon–Fri | Every 30 min, 6:30 AM–12:30 PM Mon–Fri |
+| `hawkstrade-stock-scan` | First stock-only scan, then full stock + crypto scans | 9:35 AM stocks-only, then every 30 min from 10:00 AM–3:30 PM Mon–Fri | 6:35 AM stocks-only, then every 30 min from 7:00 AM–12:30 PM Mon–Fri |
 | `hawkstrade-risk-check` | Stop-loss / take-profit enforcement | Every 15 min, 9:45 AM–3:45 PM Mon–Fri | Every 15 min, 6:45 AM–12:45 PM Mon–Fri |
 | `hawkstrade-crypto-scan` | Crypto-only scan (24/7) | Every hour, every day | Every hour, every day (same) |
 | `hawkstrade-daily-report` | Daily performance report | 4:30 PM Mon–Fri | 1:30 PM Mon–Fri |
@@ -45,9 +62,9 @@ Or recreate them manually using the instructions below. Claude's scheduled tasks
 
 ```
 Task ID:      hawkstrade-stock-scan
-Description:  HawksTrade: Stock + Crypto scan every 30 min | Market hours 6:30 AM–12:30 PM PDT
-Cron (PDT):   0,30 6-12 * * 1-5
-Cron (ET):    0,30 9-15 * * 1-5
+Description:  HawksTrade: First stock-only scan, then stock + crypto scan every 30 min
+Cron (PDT):   35 6 * * 1-5 and 0,30 7-12 * * 1-5
+Cron (ET):    35 9 * * 1-5 and 0,30 10-15 * * 1-5
 
 Prompt:
 You are the HawksTrade trading bot agent. Your job is to run the scheduled stock and crypto scan.
@@ -56,14 +73,15 @@ Working directory: /path/to/HawksTrade   ← UPDATE THIS PATH
 
 Instructions:
 1. Read CLAUDE.md in the working directory for the full operating manual.
-2. Run the scan script:
-   cd /path/to/HawksTrade && python scheduler/run_scan.py
-3. If it is the first scan of the day (before 7:00 AM PDT / 10:00 AM ET), run stocks-only:
+2. If it is the first scan of the day (6:35 AM PDT / 9:35 AM ET), run stocks-only:
    cd /path/to/HawksTrade && python scheduler/run_scan.py --stocks-only
-4. Report back: signals found, trades entered/exited, errors, open position count.
-5. If the script errors due to missing keys, remind the user to fill in their
+3. Otherwise run the full scan:
+   cd /path/to/HawksTrade && python scheduler/run_scan.py
+4. Current default stock strategy set: momentum only; RSI reversion and gap-up are disabled.
+5. Report back: signals found, trades entered/exited, errors, open position count.
+6. If the script errors due to missing keys, remind the user to fill in their
    Alpaca API keys in config/.env or .env (copy from config/.env.example).
-6. Do NOT change config/config.yaml risk parameters or mode without explicit user instruction.
+7. Do NOT change config/config.yaml risk parameters or mode without explicit user instruction.
 ```
 
 ### Task 2 — Risk Check (PDT cron)
@@ -71,8 +89,8 @@ Instructions:
 ```
 Task ID:      hawkstrade-risk-check
 Description:  HawksTrade: Stop-loss / take-profit check every 15 min
-Cron (PDT):   15,45 6-12 * * 1-5
-Cron (ET):    15,45 9-15 * * 1-5
+Cron (PDT):   45 6 * * 1-5 and 0,15,30,45 7-12 * * 1-5
+Cron (ET):    45 9 * * 1-5 and 0,15,30,45 10-15 * * 1-5
 
 Prompt:
 You are the HawksTrade risk enforcement agent.
@@ -102,7 +120,7 @@ Working directory: /path/to/HawksTrade   ← UPDATE THIS PATH
 
 Instructions:
 1. Run: cd /path/to/HawksTrade && python scheduler/run_scan.py --crypto-only
-2. Strategies: EMA Crossover and Range Breakout on BTC, ETH, SOL, AVAX, LINK, POL.
+2. Strategies: EMA Crossover and Range Breakout on BTC/USD, SOL/USD, LINK/USD, DOGE/USD, LTC/USD, DOT/USD.
 3. Report: pairs scanned, buy signals, trades entered/exited, open crypto positions with P&L.
 4. On connection error: retry once after 90 seconds.
 ```
@@ -171,14 +189,15 @@ Paste (update `/path/to/HawksTrade`):
 ```cron
 # HawksTrade — all times in ET (Eastern Time)
 
-# Full scan every 30 min during market hours (Mon–Fri, 9:30 AM–3:30 PM ET)
-0,30 9-15 * * 1-5  cd /path/to/HawksTrade && python scheduler/run_scan.py >> logs/cron.log 2>&1
-
 # First scan of day: stocks only (9:35 AM ET)
 35 9 * * 1-5       cd /path/to/HawksTrade && python scheduler/run_scan.py --stocks-only >> logs/cron.log 2>&1
 
-# Risk check every 15 min during market hours
-15,45 9-15 * * 1-5 cd /path/to/HawksTrade && python scheduler/run_risk_check.py >> logs/cron.log 2>&1
+# Full scan every 30 min from 10:00 AM-3:30 PM ET
+0,30 10-15 * * 1-5 cd /path/to/HawksTrade && python scheduler/run_scan.py >> logs/cron.log 2>&1
+
+# Risk check every 15 min from 9:45 AM-3:45 PM ET
+45 9 * * 1-5        cd /path/to/HawksTrade && python scheduler/run_risk_check.py >> logs/cron.log 2>&1
+0,15,30,45 10-15 * * 1-5 cd /path/to/HawksTrade && python scheduler/run_risk_check.py >> logs/cron.log 2>&1
 
 # Crypto scan every hour, 24/7
 0 * * * *          cd /path/to/HawksTrade && python scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
@@ -195,8 +214,10 @@ If your VM is in **UTC**, subtract 4 hours from ET times (or 7 from PDT):
 ```cron
 # HawksTrade — all times in UTC (ET+4, PDT+7)
 
-0,30 13-19 * * 1-5  cd /path/to/HawksTrade && python scheduler/run_scan.py >> logs/cron.log 2>&1
-15,45 13-19 * * 1-5 cd /path/to/HawksTrade && python scheduler/run_risk_check.py >> logs/cron.log 2>&1
+35 13 * * 1-5        cd /path/to/HawksTrade && python scheduler/run_scan.py --stocks-only >> logs/cron.log 2>&1
+0,30 14-19 * * 1-5  cd /path/to/HawksTrade && python scheduler/run_scan.py >> logs/cron.log 2>&1
+45 13 * * 1-5        cd /path/to/HawksTrade && python scheduler/run_risk_check.py >> logs/cron.log 2>&1
+0,15,30,45 14-19 * * 1-5 cd /path/to/HawksTrade && python scheduler/run_risk_check.py >> logs/cron.log 2>&1
 0 * * * *            cd /path/to/HawksTrade && python scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
 30 20 * * 1-5        cd /path/to/HawksTrade && python scheduler/run_report.py >> logs/cron.log 2>&1
 0 12 * * 1           cd /path/to/HawksTrade && python scheduler/run_report.py --weekly >> logs/cron.log 2>&1

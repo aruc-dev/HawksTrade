@@ -24,6 +24,17 @@ sys.path.insert(0, str(BASE_DIR))
 from core import alpaca_client as ac
 from core import risk_manager as rm
 from core import order_executor as oe
+from core.exit_policy import (
+    VALID_MOMENTUM_EXIT_POLICIES,
+    normalize_momentum_exit_policy,
+    should_exit_for_hold,
+    update_high_water_price,
+)
+import strategies.momentum as momentum_module
+import strategies.rsi_reversion as rsi_module
+import strategies.gap_up as gap_up_module
+import strategies.ma_crossover as ma_crossover_module
+import strategies.range_breakout as range_breakout_module
 from strategies.momentum import MomentumStrategy
 from strategies.rsi_reversion import RSIReversionStrategy
 from strategies.gap_up import GapUpStrategy
@@ -174,10 +185,15 @@ class BacktestSimulator:
                 avg_price = (old_pos["qty"] * old_pos["entry_price"] + cost) / total_qty
                 self.positions[symbol]["qty"] = total_qty
                 self.positions[symbol]["entry_price"] = avg_price
+                self.positions[symbol]["high_water_price"] = max(
+                    old_pos.get("high_water_price", old_pos["entry_price"]),
+                    price,
+                )
             else:
                 self.positions[symbol] = {
                     "qty": qty, 
                     "entry_price": price, 
+                    "high_water_price": price,
                     "entry_date": self.current_date, 
                     "asset_class": "stock" if "/" not in symbol else "crypto", 
                     "strategy": strategy
@@ -253,14 +269,128 @@ def fetch_all_data(symbols, start_date, end_date):
 
 # ── Main Backtest Loop ────────────────────────────────────────────────────────
 
-def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=None, end_date=None):
+STRATEGY_MODULES = {
+    "momentum": momentum_module,
+    "rsi_reversion": rsi_module,
+    "gap_up": gap_up_module,
+    "ma_crossover": ma_crossover_module,
+    "range_breakout": range_breakout_module,
+}
+
+
+def _coerce_override_value(raw: str):
+    """Convert CLI override strings to bool/int/float where possible."""
+    lowered = raw.lower()
+    if lowered in {"true", "false"}:
+        return lowered == "true"
+    if lowered in {"none", "null"}:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        pass
+    try:
+        return float(raw)
+    except ValueError:
+        return raw
+
+
+def _apply_override(cfg: dict, assignment: str) -> None:
+    """Apply a dotted-path config assignment, e.g. strategies.momentum.top_n=3."""
+    if "=" not in assignment:
+        raise ValueError(f"Invalid override '{assignment}'. Use key.path=value.")
+    key, raw_value = assignment.split("=", 1)
+    parts = [p for p in key.split(".") if p]
+    if not parts:
+        raise ValueError(f"Invalid override '{assignment}'. Use key.path=value.")
+
+    target = cfg
+    for part in parts[:-1]:
+        if part not in target or not isinstance(target[part], dict):
+            target[part] = {}
+        target = target[part]
+    target[parts[-1]] = _coerce_override_value(raw_value)
+
+
+def _apply_runtime_strategy_config(cfg: dict) -> None:
+    """Keep strategy module globals in sync with backtest-time config overrides."""
+    for name, module in STRATEGY_MODULES.items():
+        if name in cfg.get("strategies", {}):
+            module.SCFG = cfg["strategies"][name]
+    gap_up_module.INTRADAY_ON = cfg.get("intraday", {}).get("enabled", False)
+
+
+def _enabled_strategy_names(cfg: dict) -> list:
+    return [
+        name
+        for name, strat_cfg in cfg.get("strategies", {}).items()
+        if strat_cfg.get("enabled", False)
+    ]
+
+
+def _compute_max_drawdown(df_curve: pd.DataFrame) -> float:
+    if df_curve.empty or "value" not in df_curve:
+        return 0.0
+    values = df_curve["value"].astype(float)
+    running_max = values.cummax()
+    drawdowns = (values / running_max) - 1.0
+    return float(drawdowns.min()) if not drawdowns.empty else 0.0
+
+def run_backtest(
+    days=365,
+    initial_fund=10000.0,
+    output_file=None,
+    graph_file=None,
+    end_date=None,
+    exit_policy=None,
+    use_screener=None,
+    enabled_strategies=None,
+    config_overrides=None,
+):
     with open(BASE_DIR / "config" / "config.yaml") as f: cfg = yaml.safe_load(f)
 
+    if config_overrides:
+        for assignment in config_overrides:
+            _apply_override(cfg, assignment)
+
+    if exit_policy:
+        cfg["strategies"]["momentum"]["exit_policy"] = normalize_momentum_exit_policy(exit_policy)
+    else:
+        cfg["strategies"]["momentum"]["exit_policy"] = normalize_momentum_exit_policy(
+            cfg["strategies"]["momentum"].get("exit_policy")
+        )
+
+    if enabled_strategies:
+        selected = set(enabled_strategies)
+        unknown = selected - set(cfg.get("strategies", {}))
+        if unknown:
+            raise ValueError(f"Unknown strategy name(s): {', '.join(sorted(unknown))}")
+        for name, strategy_cfg in cfg["strategies"].items():
+            strategy_cfg["enabled"] = name in selected
+
+    _apply_runtime_strategy_config(cfg)
+
+    stock_strategy_enabled = any(
+        strat_cfg.get("enabled", False) and strat_cfg.get("asset_class") in {"stocks", "both"}
+        for strat_cfg in cfg.get("strategies", {}).values()
+    )
+    crypto_strategy_enabled = any(
+        strat_cfg.get("enabled", False) and strat_cfg.get("asset_class") in {"crypto", "both"}
+        for strat_cfg in cfg.get("strategies", {}).values()
+    )
+
+    screener_enabled = cfg.get("screener", {}).get("enabled", False) if use_screener is None else bool(use_screener)
+    screener_enabled = screener_enabled and stock_strategy_enabled
+
     # Build extended symbol pool (legacy + extended, deduped)
-    all_stock_symbols = list(dict.fromkeys(
-        cfg["stocks"]["scan_universe"] + EXTENDED_POOL
-    ))
-    symbols = all_stock_symbols + cfg["crypto"]["scan_universe"]
+    # When the screener is disabled, backtest the fixed configured universe only.
+    all_stock_symbols = []
+    if stock_strategy_enabled:
+        all_stock_symbols = list(dict.fromkeys(
+            cfg["stocks"]["scan_universe"] + (EXTENDED_POOL if screener_enabled else [])
+        ))
+    crypto_symbols = cfg["crypto"]["scan_universe"] if crypto_strategy_enabled else []
+    symbols = all_stock_symbols + crypto_symbols
     
     if end_date:
         # Expected format: MM/DD/YYYY (e.g. 12/31/2025)
@@ -278,9 +408,11 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
     sim = BacktestSimulator(initial_fund)
     sim.historical_data = historical_data
 
-    # Initialize screener with backtest bars for point-in-time accuracy
-    screener = UniverseBuilder(cfg)
-    screener.preload_historical_bars(historical_data)
+    # Initialize screener with backtest bars for point-in-time accuracy only when enabled.
+    screener = None
+    if screener_enabled:
+        screener = UniverseBuilder(cfg)
+        screener.preload_historical_bars(historical_data)
     
     sim_start_date = end_dt - timedelta(days=days)
     curr = sim_start_date
@@ -289,7 +421,16 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
         all_dates.append(curr)
         curr += timedelta(days=1)
     
-    strategies = [MomentumStrategy(), RSIReversionStrategy(), GapUpStrategy(), MACrossoverStrategy(), RangeBreakoutStrategy()]
+    strategies = [
+        strat for strat in [
+            MomentumStrategy(),
+            RSIReversionStrategy(),
+            GapUpStrategy(),
+            MACrossoverStrategy(),
+            RangeBreakoutStrategy(),
+        ]
+        if cfg["strategies"].get(strat.name, {}).get("enabled", False)
+    ]
     
     with (
         patch("core.alpaca_client.get_portfolio_value", side_effect=sim.get_portfolio_value),
@@ -317,12 +458,16 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
             for symbol in list(sim.positions.keys()):
                 pos = sim.positions[symbol]; price = sim.get_current_price(symbol)
                 if price <= 0: continue
+                update_high_water_price(pos, price)
                 should_exit, reason = rm.should_exit_position(symbol, pos["entry_price"], price)
                 if should_exit: 
                     oe.exit_position(symbol, reason, pos["asset_class"], open_trades_callback=sim.get_open_trades_for_backtest)
             # Scan
             for strat in strategies:
-                universe = screener.get_universe(as_of_date=dt) if strat.asset_class == "stocks" else cfg["crypto"]["scan_universe"]
+                if strat.asset_class == "stocks":
+                    universe = screener.get_universe(as_of_date=dt) if screener_enabled else cfg["stocks"]["scan_universe"]
+                else:
+                    universe = cfg["crypto"]["scan_universe"]
                 def mock_get_bars(symbols, timeframe="1Day", limit=60):
                     class MockBarSet:
                         def __init__(self): self.data = {}; self.df = pd.DataFrame()
@@ -352,11 +497,23 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
             for symbol in list(sim.positions.keys()):
                 pos = sim.positions[symbol]
                 strat_name = pos.get("strategy")
-                hold_days_limit = cfg["strategies"].get(strat_name, {}).get("hold_days")
-                if hold_days_limit:
-                    age = int(sim.get_trade_age_days(symbol))
-                    if age >= hold_days_limit:
-                        oe.exit_position(symbol, f"Hold {age}d", pos["asset_class"], open_trades_callback=sim.get_open_trades_for_backtest)
+                strategy_cfg = cfg["strategies"].get(strat_name, {})
+                if strategy_cfg.get("hold_days"):
+                    age = sim.get_trade_age_days(symbol)
+                    price = sim.get_current_price(symbol)
+                    if price <= 0:
+                        continue
+                    peak = update_high_water_price(pos, price)
+                    should_exit, reason = should_exit_for_hold(
+                        strategy=strat_name,
+                        age_days=age,
+                        entry_price=pos["entry_price"],
+                        current_price=price,
+                        peak_price=peak,
+                        strategy_cfg=strategy_cfg,
+                    )
+                    if should_exit:
+                        oe.exit_position(symbol, reason, pos["asset_class"], open_trades_callback=sim.get_open_trades_for_backtest)
             sim.equity_curve.append({"date": dt, "value": sim.get_portfolio_value()})
 
     # --- Reporting ---
@@ -387,9 +544,16 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
         })
 
         final_val = sim.get_portfolio_value()
+        total_win_rate = (df["pnl"] > 0).mean()
+        max_drawdown = _compute_max_drawdown(df_curve)
         report = f"### Backtest Results ({days} Days)\n"
         report += f"- **Final Value**: ${final_val:,.2f} ({ (final_val/initial_fund-1):+.2%})\n"
         report += f"- **Total Trades**: {len(df)}\n\n"
+        report += f"- **Win Rate**: {total_win_rate:.1%}\n"
+        report += f"- **Max Drawdown**: {max_drawdown:.2%}\n"
+        report += f"- **Momentum Exit Policy**: {cfg['strategies']['momentum']['exit_policy']}\n"
+        report += f"- **Screener**: {'enabled' if screener_enabled else 'disabled'}\n\n"
+        report += f"- **Enabled Strategies**: {', '.join(_enabled_strategy_names(cfg))}\n\n"
         report += summary.to_markdown() + "\n\n"
         if graph_file: report += f"![Equity Curve]({graph_file})\n\n"
 
@@ -477,5 +641,38 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=str)
     parser.add_argument("--graph", type=str)
     parser.add_argument("--end-date", type=str, help="End date for backtest (MM/DD/YYYY)")
+    parser.add_argument(
+        "--exit-policy",
+        choices=sorted(VALID_MOMENTUM_EXIT_POLICIES),
+        help="Momentum hold exit policy to test",
+    )
+    screener_group = parser.add_mutually_exclusive_group()
+    screener_group.add_argument("--screener", dest="use_screener", action="store_true", help="Force dynamic stock screener on")
+    screener_group.add_argument("--no-screener", dest="use_screener", action="store_false", help="Force fixed stock universe only")
+    parser.set_defaults(use_screener=None)
+    parser.add_argument(
+        "--strategies",
+        type=str,
+        help="Comma-separated strategy allowlist for experiments, e.g. momentum,ma_crossover,range_breakout",
+    )
+    parser.add_argument(
+        "--set",
+        dest="config_overrides",
+        action="append",
+        help="Backtest-only config override, e.g. --set strategies.momentum.top_n=3",
+    )
     args = parser.parse_args()
-    print(run_backtest(days=args.days, initial_fund=args.fund, output_file=args.output, graph_file=args.graph, end_date=args.end_date))
+    enabled_strategies = None
+    if args.strategies:
+        enabled_strategies = [name.strip() for name in args.strategies.split(",") if name.strip()]
+    print(run_backtest(
+        days=args.days,
+        initial_fund=args.fund,
+        output_file=args.output,
+        graph_file=args.graph,
+        end_date=args.end_date,
+        exit_policy=args.exit_policy,
+        use_screener=args.use_screener,
+        enabled_strategies=enabled_strategies,
+        config_overrides=args.config_overrides,
+    ))

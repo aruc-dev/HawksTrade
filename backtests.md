@@ -1,54 +1,106 @@
-# HawksTrade v4 — Backtest Summary
+# HawksTrade Backtest Summary
 
-![HawksTrade v4 Dashboard](assets/hawkstrade_v4_dashboard.png)
-
-> **Generated:** April 11, 2026  
-> **Strategy Version:** v4 (3 improvements over v3)  
-> **Starting Capital:** $10,000  
-> **Test Environment:** Alpaca Paper Trading (backtest simulation)  
-> **Note on partial runs:** The 365-day backtest (12mo) hit the 600-second process timeout and captured ~77% of the target period. Returns and metrics reflect the actual days simulated.
-
----
-
-## What Was Implemented (v4 Changes)
-
-| # | Change | Files Modified | Summary |
-|---|--------|---------------|---------|
-| 1 | **Crypto Regime Filter** | `risk_manager.py`, `ma_crossover.py`, `range_breakout.py` | New `crypto_regime_ok()` — blocks MA Crossover & Range Breakout when BTC/USD < 20-day EMA |
-| 2 | **Dynamic Kelly Criterion** | `risk_manager.py`, `order_executor.py`, `tracking/trade_log.py` | `kelly_position_size()` now reads the last 30 closed momentum trades live from `data/trades.csv`. |
-| 3 | **RSI 2-Bar Recovery** | `strategies/rsi_reversion.py` | Added consecutive-higher-close guard — prevents entering falling-knife situations. |
+> **Updated:** April 12, 2026
+> **Starting Capital:** $10,000
+> **Backtest End Date:** April 10, 2026
+> **Momentum Exit Policy:** `profit_trailing`
+> **Screener:** enabled for the recommended default
+> **Simulation Only:** Historical backtest results are not a guarantee of future returns.
 
 ---
 
-## Results Overview
+## Recommended Default Result
 
-| Period | Days Simulated | Final Value | Return | Win Rate | Profit Factor | Trades | Max DD |
-|--------|---------------|-------------|--------|----------|--------------|--------|--------|
-| **Last 6 Months** | 182/182 ✓ | $9,758 | **-2.41%** | 21.3% | 0.69x | 75 | -4.79% |
-| **Last 12 Months** | 280/365 ⚑ | $13,502 | **+35.02%** ✅ | 43.2% | 2.09x | 118 | -5.39% |
+The current recommended configuration uses:
 
-> ⚑ = Partial run (backtest timed out at 600s). Returns reflect actual days simulated only.
+- Dynamic screener enabled with tightened liquidity, trend, volatility, and overextension filters
+- `momentum` enabled with `top_n: 3` and `min_momentum_pct: 0.06`
+- `ma_crossover` enabled
+- `range_breakout` enabled
+- `rsi_reversion` disabled
+- `gap_up` disabled
 
----
-
-## Strategy-by-Strategy Analysis (12-Month)
-
-| Strategy | Trades | Win Rate | Net P&L | PF |
-|----------|--------|----------|---------|----|
-| **Momentum** | 98 | 44.9% | +$3,218 | 2.14x |
-| **MA Crossover** | 10 | 50.0% | +$329 | 3.97x |
-| **Range Breakout** | 9 | 22.2% | -$11 | 1.01x |
-| **RSI Reversion** | 0 | — | $0 | — |
+| Period | Final Value | Return | Trades | Win Rate | Max Drawdown |
+|---|---:|---:|---:|---:|---:|
+| 12 months | $12,652.86 | +26.53% | 274 | 34.7% | -9.34% |
+| 6 months | $10,911.44 | +9.11% | 104 | 32.7% | -5.80% |
 
 ---
 
-## Market Regime Filter — Impact Analysis
+## 12-Month Per-Strategy Stats
 
-| Period | SPY<SMA50 Blocks (stocks) | BTC<EMA20 Blocks (crypto) | Total Capital Protected |
-|--------|--------------------------|--------------------------|------------------------|
-| Last 6 Months | 180 | 262 | 442 scan-days blocked |
-| Last 12 Months | 93 | 266 | 359 scan-days blocked |
+| Strategy | Trades | Win Rate | Avg P&L % | Total P&L | Best | Worst |
+|---|---:|---:|---:|---:|---:|---:|
+| `momentum` | 226 | 31.0% | +0.94% | $1,846.24 | +19.10% | -12.85% |
+| `ma_crossover` | 23 | 52.2% | +3.80% | $463.43 | +18.74% | -7.40% |
+| `range_breakout` | 25 | 52.0% | +1.79% | $216.05 | +26.50% | -7.56% |
+
+## 12-Month Quarterly Breakdown
+
+| Quarter | Start Value | End Value | Return | Trades | Win Rate |
+|---|---:|---:|---:|---:|---:|
+| Q2 2025 | $10,000.00 | $10,923.15 | +9.23% | 55 | 40.0% |
+| Q3 2025 | $10,955.62 | $11,701.20 | +6.81% | 97 | 34.0% |
+| Q4 2025 | $11,775.83 | $11,162.32 | -5.21% | 71 | 21.1% |
+| Q1 2026 | $11,114.30 | $12,530.92 | +12.75% | 50 | 50.0% |
+| Q2 2026 | $12,530.92 | $12,652.86 | +0.97% | 1 | 0.0% |
 
 ---
 
-*HawksTrade v4 — Alpaca Paper Trading · Simulation data only · Not financial advice*
+## Strategy and Screener Comparison
+
+| Scenario | Screener | Strategies | Return | Trades | Win Rate | Max Drawdown |
+|---|---|---|---:|---:|---:|---:|
+| Old screener baseline | On | all | +8.35% | 337 | not recorded | not recorded |
+| Tight screener, all strategies | On | all | +19.78% | 316 | 30.4% | -11.50% |
+| Tight screener, default strategy set | On | `momentum`, `ma_crossover`, `range_breakout` | +26.53% | 274 | 34.7% | -9.34% |
+| Fixed universe, all strategies | Off | all | +22.55% | 229 | 35.4% | -6.96% |
+| Fixed universe, default strategy set | Off | `momentum`, `ma_crossover`, `range_breakout` | +20.16% | 172 | 39.0% | -4.64% |
+
+Interpretation:
+
+- The tightened screener fixed the main underperformance seen in the old broad screener run.
+- The highest 12-month return came from the tightened screener plus the default strategy set.
+- The fixed-universe default strategy set had lower drawdown and higher win rate, but lower total return.
+- `rsi_reversion` and `gap_up` are disabled by default because they did not improve the validated 12-month configuration.
+
+---
+
+## Reproduction Commands
+
+Recommended default:
+
+```bash
+python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/10/2026 --exit-policy profit_trailing --screener
+```
+
+Fixed-universe comparison:
+
+```bash
+python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/10/2026 --exit-policy profit_trailing --no-screener
+```
+
+Experiment-only overrides without editing `config/config.yaml`:
+
+```bash
+python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/10/2026 --screener \
+  --strategies momentum,ma_crossover,range_breakout \
+  --set strategies.momentum.top_n=3 \
+  --set strategies.momentum.min_momentum_pct=0.06
+```
+
+---
+
+## Validation
+
+The latest implementation was also checked with:
+
+```bash
+python3 -m unittest discover -v
+python3 -W error::DeprecationWarning -m unittest discover
+python3 -m compileall core strategies scheduler tracking tests
+python3 scheduler/run_scan.py --dry-run
+python3 scheduler/run_risk_check.py --dry-run
+```
+
+All checks passed at the time this document was updated.

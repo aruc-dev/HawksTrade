@@ -142,6 +142,12 @@ def place_market_order(symbol: str, qty: float, side: str, time_in_force: str = 
         side=OrderSide.BUY if side == "buy" else OrderSide.SELL,
         time_in_force=TimeInForce.DAY if time_in_force == "day" else TimeInForce.GTC,
     )
+    # Attach strategy for backtest mock visibility (bypass Pydantic strictness)
+    try:
+        object.__setattr__(req, "strategy", strategy)
+    except Exception:
+        pass
+
     order = client.submit_order(req)
     # Store strategy in mock-friendly way for backtests
     if hasattr(order, "__setitem__"): order["strategy"] = strategy
@@ -166,6 +172,12 @@ def place_limit_order(symbol: str, qty: float, side: str, limit_price: float,
         limit_price=round(limit_price, 4),
         time_in_force=TimeInForce.GTC if time_in_force == "gtc" else TimeInForce.DAY,
     )
+    # Attach strategy for backtest mock visibility (bypass Pydantic strictness)
+    try:
+        object.__setattr__(req, "strategy", strategy)
+    except Exception:
+        pass
+
     order = client.submit_order(req)
     # Store strategy in mock-friendly way for backtests
     if hasattr(order, "__setitem__"): order["strategy"] = strategy

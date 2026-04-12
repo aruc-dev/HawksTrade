@@ -48,6 +48,31 @@ python3 scheduler/run_report.py --weekly
 `--dry-run` validates signal generation, risk checks, and order-intent logging without
 submitting orders.
 
+## Backtest Comparisons
+
+Use these when validating momentum exit behavior:
+
+```bash
+python3 scheduler/run_backtest.py --days 365 --fund 10000 --exit-policy fixed_hold --no-screener
+python3 scheduler/run_backtest.py --days 365 --fund 10000 --exit-policy profit_trailing --no-screener
+python3 scheduler/run_backtest.py --days 365 --fund 10000 --exit-policy risk_only_baseline --no-screener
+```
+
+`risk_only_baseline` is for comparing against the old no-hold-exit behavior. It should
+not be treated as the default live policy.
+
+Use these for strategy and screener experiments without editing the runtime config:
+
+```bash
+python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
+  --strategies momentum,ma_crossover,range_breakout
+
+python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
+  --strategies momentum,ma_crossover,range_breakout \
+  --set strategies.momentum.top_n=3 \
+  --set strategies.momentum.min_momentum_pct=0.06
+```
+
 ## Paper Order Lifecycle
 
 Only run this when explicitly requested. It creates and closes a simulated Alpaca paper

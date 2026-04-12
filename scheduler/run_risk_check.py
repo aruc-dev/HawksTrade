@@ -45,6 +45,22 @@ with open(BASE_DIR / "config" / "config.yaml") as f:
     CFG = yaml.safe_load(f)
 
 
+def _position_asset_class(pos) -> str:
+    return (
+        "crypto"
+        if str(getattr(pos, "asset_class", "")).lower().endswith("crypto")
+        else "stock"
+    )
+
+
+def _find_matching_trade(symbol: str, open_trades: list) -> dict | None:
+    normalized = ac.normalize_symbol(symbol)
+    for trade in reversed(open_trades):
+        if ac.normalize_symbol(trade.get("symbol", "")) == normalized and trade.get("side") == "buy":
+            return trade
+    return None
+
+
 def run(dry_run: bool = False):
     log.info(f"--- Risk Check | dry_run={'ON' if dry_run else 'OFF'} ---")
 
@@ -76,25 +92,39 @@ def run(dry_run: bool = False):
 
     # --- Per-position stop-loss / take-profit check ---
     open_trades = get_open_trades()
-    if not open_trades:
-        log.info("No open trades to check.")
+    try:
+        positions = ac.get_all_positions()
+    except Exception as e:
+        log.error(f"Could not fetch positions for risk check: {e}", exc_info=True)
         return
 
-    for trade in open_trades:
-        symbol      = trade["symbol"]
-        asset_class = trade.get("asset_class", "stock")
+    if not positions:
+        if open_trades:
+            log.warning(
+                f"Trade log has {len(open_trades)} open row(s), but Alpaca has no open positions; "
+                "skipping stale log rows."
+            )
+        else:
+            log.info("No open positions to check.")
+        return
+
+    for pos in positions:
+        symbol      = pos.symbol
+        asset_class = _position_asset_class(pos)
+        trade       = _find_matching_trade(symbol, open_trades)
+        price_symbol = trade.get("symbol", symbol) if trade and asset_class == "crypto" else symbol
 
         try:
-            entry_price = float(trade["entry_price"])
+            entry_price = float(getattr(pos, "avg_entry_price", None) or (trade or {}).get("entry_price"))
         except (ValueError, TypeError):
             log.warning(f"Invalid entry price for {symbol}, skipping.")
             continue
 
         try:
             if asset_class == "crypto":
-                current_price = ac.get_crypto_latest_price(symbol)
+                current_price = ac.get_crypto_latest_price(price_symbol)
             else:
-                current_price = ac.get_stock_latest_price(symbol)
+                current_price = ac.get_stock_latest_price(price_symbol)
         except Exception as e:
             log.warning(f"Could not get price for {symbol}: {e}")
             continue

@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from scheduler import run_risk_check
@@ -13,6 +14,33 @@ class RunRiskCheckTests(unittest.TestCase):
             run_risk_check.run(dry_run=True)
 
         exit_position.assert_not_called()
+
+    def test_stale_open_trade_log_rows_are_skipped_when_no_broker_positions(self):
+        with (
+            patch.object(run_risk_check.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_risk_check, "get_open_trades", return_value=[{"symbol": "AAPL", "side": "buy"}]),
+            patch.object(run_risk_check.ac, "get_all_positions", return_value=[]),
+            patch.object(run_risk_check.ac, "get_stock_latest_price") as latest_price,
+            patch.object(run_risk_check.oe, "exit_position") as exit_position,
+        ):
+            run_risk_check.run(dry_run=True)
+
+        latest_price.assert_not_called()
+        exit_position.assert_not_called()
+
+    def test_risk_check_uses_broker_positions_as_source_of_truth(self):
+        position = SimpleNamespace(symbol="AAPL", avg_entry_price="100", asset_class="us_equity")
+
+        with (
+            patch.object(run_risk_check.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_risk_check, "get_open_trades", return_value=[]),
+            patch.object(run_risk_check.ac, "get_all_positions", return_value=[position]),
+            patch.object(run_risk_check.ac, "get_stock_latest_price", return_value=80),
+            patch.object(run_risk_check.oe, "exit_position") as exit_position,
+        ):
+            run_risk_check.run(dry_run=True)
+
+        exit_position.assert_called_once()
 
 
 if __name__ == "__main__":
