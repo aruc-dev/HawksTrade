@@ -60,11 +60,8 @@ stocks:
 crypto:
   scan_universe:
     - BTC/USD
-    - ETH/USD
     - SOL/USD
-    - AVAX/USD
     - LINK/USD
-    - POL/USD
     - DOGE/USD
     - LTC/USD
     - DOT/USD
@@ -79,7 +76,7 @@ strategies:
     description: "Buy top N stocks by 5-day price momentum, hold 3-5 days"
     top_n: 5                     # Pick top 5 stocks by momentum
     hold_days: 4                 # Target hold period in trading days
-    min_momentum_pct: 0.03       # Minimum 3% 5-day gain to qualify
+    min_momentum_pct: 0.04       # Minimum 4% 5-day gain to qualify
     weight: 1.0                  # Signal weight (relative to other strategies)
 
   rsi_reversion:
@@ -87,9 +84,9 @@ strategies:
     asset_class: stocks
     description: "Buy when RSI < 30 (oversold), sell when RSI > 60"
     rsi_period: 14
-    oversold_threshold: 35
-    overbought_threshold: 65
-    hold_days: 15
+    oversold_threshold: 38
+    overbought_threshold: 62
+    hold_days: 10
     weight: 1.0
 
   gap_up:
@@ -110,14 +107,15 @@ strategies:
     fast_ema: 9
     slow_ema: 21
     timeframe: "1Day"            # "1Hour" | "4Hour" | "1Day"
+    hold_days: 12
     weight: 1.0
 
   range_breakout:
     enabled: true
     asset_class: crypto
     description: "Enter on breakout of prior day high/low with volume confirmation"
-    breakout_pct: 0.005          # Price must break 0.5% beyond prior day high/low
-    volume_multiplier: 1.5       # Volume must be 1.5x average to confirm breakout
+    breakout_pct: 0.008          # Price must break 0.8% beyond prior day high/low
+    volume_multiplier: 1.8       # Volume must be 1.8x average to confirm breakout
     timeframe: "1Day"
     hold_days: 3
     weight: 0.9

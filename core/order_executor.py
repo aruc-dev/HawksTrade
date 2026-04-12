@@ -61,6 +61,12 @@ def enter_position(symbol: str, strategy: str, asset_class: str = "stock", dry_r
             return None
 
         qty = check["qty"]
+        # Kelly override for momentum
+        if strategy == "momentum":
+            kelly_qty = rm.kelly_position_size(0.567, 0.1398, 0.0543, price)
+            if kelly_qty > 0:
+                qty = kelly_qty
+
         sl = rm.stop_loss_price(price)
         tp = rm.take_profit_price(price)
 

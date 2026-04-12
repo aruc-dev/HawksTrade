@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 import yaml
+import pandas as pd
 
 from core import alpaca_client as ac
 
@@ -164,3 +165,64 @@ def should_exit_position(symbol: str, entry_price: float, current_price: float) 
     if current_price >= tp:
         return True, f"Take-profit hit: {current_price:.4f} >= {tp:.4f}"
     return False, ""
+
+
+# ── Market Regime Filter ─────────────────────────────────────────────────────
+
+def market_regime_ok(bars_data=None) -> bool:
+    """
+    Returns True if SPY is above its 50-day SMA — indicates bull market regime.
+    When bars_data is provided (backtest), uses pre-fetched SPY bars dict.
+    In live trading, fetches from Alpaca directly.
+    Fails open (returns True) if data unavailable.
+    """
+    try:
+        if bars_data is not None:
+            # backtest mode: bars_data is a dict symbol->list of bar mocks
+            spy_bars = bars_data.get("SPY")
+            if spy_bars is None or len(spy_bars) < 51:
+                return True
+            closes = pd.Series([float(b.close) if hasattr(b, 'close') else float(b['close']) for b in spy_bars])
+        else:
+            # live mode
+            raw = ac.get_stock_bars(["SPY"], timeframe="1Day", limit=55)
+            spy_bars = raw["SPY"]
+            if spy_bars is None or len(spy_bars) < 51:
+                return True
+            closes = pd.Series([b.close for b in spy_bars])
+        sma50 = closes.rolling(50).mean().iloc[-1]
+        current = float(closes.iloc[-1])
+        is_bull = current > sma50
+        log.debug(f"[RegimeFilter] SPY={current:.2f} SMA50={sma50:.2f} bull={is_bull}")
+        return is_bull
+    except Exception as e:
+        log.warning(f"[RegimeFilter] Could not determine market regime: {e}")
+        return True  # fail open
+
+
+# ── Kelly Criterion Position Sizing ──────────────────────────────────────────
+
+def kelly_position_size(win_rate: float, avg_win_pct: float, avg_loss_pct: float,
+                        price: float) -> float:
+    """
+    Half-Kelly position sizing based on historical win rate and payoff ratio.
+    Falls back to standard calculate_position_size if parameters are invalid.
+    Caps position at 8% of portfolio and floors at 1%.
+    """
+    try:
+        if avg_loss_pct == 0 or win_rate <= 0 or win_rate >= 1:
+            return calculate_position_size(price)
+        b = abs(avg_win_pct / avg_loss_pct)  # win/loss ratio
+        kelly_f = (win_rate * b - (1 - win_rate)) / b
+        half_kelly = kelly_f / 2
+        portfolio_value = ac.get_portfolio_value()
+        cash = ac.get_cash()
+        pct = max(0.01, min(half_kelly, 0.08))
+        max_value = portfolio_value * pct
+        affordable = min(max_value, cash)
+        if affordable < T["min_trade_value_usd"]:
+            return 0.0
+        return round(affordable / price, 6)
+    except Exception as e:
+        log.warning(f"[Kelly] Fallback to standard sizing: {e}")
+        return calculate_position_size(price)

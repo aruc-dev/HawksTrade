@@ -18,6 +18,7 @@ from pathlib import Path
 
 from strategies.base_strategy import BaseStrategy
 from core import alpaca_client as ac
+from core import risk_manager as rm
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 with open(BASE_DIR / "config" / "config.yaml") as f:
@@ -43,6 +44,10 @@ class MomentumStrategy(BaseStrategy):
             bars_data = ac.get_stock_bars(universe, timeframe="1Day", limit=10)
         except Exception as e:
             log.error(f"[Momentum] Failed to fetch bars: {e}")
+            return []
+
+        if not rm.market_regime_ok():
+            log.info("[Momentum] Bear regime (SPY < SMA50), skipping scan.")
             return []
 
         for symbol in universe:
