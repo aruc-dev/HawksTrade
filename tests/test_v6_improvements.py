@@ -71,11 +71,11 @@ class TestHoldDayExitFix(unittest.TestCase):
 
     def test_get_trade_age_days_correct(self):
         age = self.sim.get_trade_age_days("AAPL")
-        self.assertEqual(age, 5)  # June 15 - June 10 = 5 days
+        self.assertEqual(age, 4)  # Jun 10 (Tue) -> Jun 15 (Sun) = 4 trading days (Mon-Fri only)
 
     def test_get_trade_age_days_crypto(self):
         age = self.sim.get_trade_age_days("BTC/USD")
-        self.assertEqual(age, 14)  # June 15 - June 1 = 14 days
+        self.assertEqual(age, 10)  # Jun 1 (Sun) -> Jun 15 (Sun) = 10 trading days
 
     def test_get_trade_age_days_unknown_symbol(self):
         age = self.sim.get_trade_age_days("UNKNOWN")
