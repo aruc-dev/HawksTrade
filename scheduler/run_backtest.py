@@ -141,10 +141,20 @@ def fetch_all_data(symbols, start_date, end_date):
 
 # ── Main Backtest Loop ────────────────────────────────────────────────────────
 
-def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=None):
+def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=None, end_date=None):
     with open(BASE_DIR / "config" / "config.yaml") as f: cfg = yaml.safe_load(f)
     symbols = cfg["stocks"]["scan_universe"] + cfg["crypto"]["scan_universe"]
-    end_dt = datetime.now(timezone.utc) - timedelta(days=2)
+    
+    if end_date:
+        # Expected format: MM/DD/YYYY (e.g. 12/31/2025)
+        try:
+            end_dt = datetime.strptime(end_date, "%m/%d/%Y").replace(tzinfo=timezone.utc)
+        except ValueError:
+            log.error(f"Invalid date format: {end_date}. Use MM/DD/YYYY")
+            return "Invalid date format."
+    else:
+        end_dt = datetime.now(timezone.utc) - timedelta(days=2)
+        
     start_dt = end_dt - timedelta(days=days + 210) # 210 for SMA200
     
     historical_data = fetch_all_data(symbols, start_dt, end_dt)
@@ -267,5 +277,6 @@ if __name__ == "__main__":
     parser.add_argument("--fund", type=float, default=10000.0)
     parser.add_argument("--output", type=str)
     parser.add_argument("--graph", type=str)
+    parser.add_argument("--end-date", type=str, help="End date for backtest (MM/DD/YYYY)")
     args = parser.parse_args()
-    print(run_backtest(days=args.days, initial_fund=args.fund, output_file=args.output, graph_file=args.graph))
+    print(run_backtest(days=args.days, initial_fund=args.fund, output_file=args.output, graph_file=args.graph, end_date=args.end_date))
