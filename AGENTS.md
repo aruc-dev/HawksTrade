@@ -183,6 +183,15 @@ Only run a real paper-order lifecycle test when the human explicitly asks for it
 
 ---
 
+## Quality & Documentation
+
+You MUST adhere to these standards for every change:
+1. **Unit Testing**: Implement or update unit tests in the `tests/` directory for ALL logic changes.
+2. **Validation**: Run `python3 -m unittest discover` before committing to ensure zero regressions.
+3. **Documentation**: Update `README.md`, strategy tables, or backtest reports immediately if your changes affect system behavior or performance.
+
+---
+
 ## Reporting Back to the Human
 
 After each run, summarise:

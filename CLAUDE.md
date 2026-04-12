@@ -284,6 +284,15 @@ moving to a new system are:
 
 ---
 
+## 16. Quality & Documentation Mandates
+
+For every modification to the codebase:
+1. **Unit Tests**: You MUST implement or update relevant unit tests in the `tests/` directory.
+2. **Validation**: Always run the full test suite (`python3 -m unittest discover`) before pushing.
+3. **Documentation**: If strategy parameters, risk rules, or core logic change, you MUST update `README.md` and `backtests.md` to reflect the new system state.
+
+---
+
 *HawksTrade — Built for automation. Respect the risk rules.*
 
 
