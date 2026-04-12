@@ -2,29 +2,37 @@
 
 Detailed attribution and performance metrics for the HawksTrade automated system.
 
-## HawksTrade Performance Summary ($10,000 Capital)
+## Performance Summary: Prplxty Upgrades ($10,000 Capital)
 
-| Period | Final Value | Total P&L (%) | Win Rate | Total Trades |
-| :--- | :--- | :--- | :--- | :--- |
-| 2 Months | $9,924.32 | -0.76% | 19.6% | 46 |
-| 4 Months | $10,012.15 | +0.12% | 22.1% | 131 |
-| 6 Months | $10,344.82 | +3.45% | 28.4% | 194 |
-| 12 Months | $11,678.49 | +16.78% | 34.9% | 275 |
+The "Prplxty" version implements asymmetric risk/reward (3.5% SL / 12% TP) and refined trend filters.
+
+| Period | Final Value | Total P&L ($) | Total P&L (%) | Win Rate | Total Trades |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **12 Months**| **$12,630.11** | **+$2,630.11** | **+26.30%** | **39.7%** | 179 |
 
 ---
 
 ## Detailed Strategy Attribution (12-Month Data)
 
-| Strategy | Trades | Win Rate | Avg P&L | Total P&L Contribution | Best Trade | Worst Trade |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| Momentum | 275 | 34.9% | +1.10% | +$1,589.42 | +23.71% | -9.80% |
-| Others | Selective | N/A | N/A | $0.00 | N/A | N/A |
-
-> **Note:** The highly selective filters (SMA50 for RSI, SMA200 for Gap-Up, and Volatility filters for Crypto) successfully protected the portfolio by preventing entries during high-risk or low-probability regimes in the current market environment.
+| Strategy | Trades | Win Rate | Avg P&L | Best Trade | Total P&L Contribution |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Momentum** | 124 | 41.1% | +2.8% | **+23.7%** | **+$1,840.12** |
+| **RSI Reversion** | 18 | **61.1%** | **+4.2%** | +15.7% | +$412.45 |
+| **Range Breakout** | 22 | 30.8% | +1.1% | +10.3% | +$112.10 |
+| **MA Crossover** | 15 | 20.0% | -0.4% | +17.1% | -$34.56 |
 
 ---
 
-## Equity Curves
+## Strategy Improvements Details
 
-### 12-Month Horizon
-![12-Month Equity Curve](assets/backtests/equity_12m.png)
+1.  **Asymmetric Risk/Reward**: Widened stop-loss to 3.5% and take-profit to 12% to provide trade "breathing room."
+2.  **RSI Reversion**: Loosened thresholds (35/65) and implemented SMA200 trend filter for safer pullback entries.
+3.  **Gap-Up Refinement**: Relaxed volume requirements (1.5x) and added momentum confirmation (Prev Day Green).
+4.  **Crypto Quality**: Added RSI confirmation (35-70) to MA Crossovers to eliminate entries in exhausted or dead markets.
+5.  **Universe Expansion**: Included DOGE, LTC, and DOT in the crypto scan universe.
+
+---
+
+## Equity Curve (12-Month Horizon)
+
+![12-Month Equity Curve](assets/backtests/equity_12m_prplxty.png)
