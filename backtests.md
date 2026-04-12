@@ -2,9 +2,9 @@
 
 Detailed attribution and performance metrics for the HawksTrade automated system.
 
-## Performance Summary: Prplxty Upgrades ($10,000 Capital)
+## Performance Summary: Upgrades ($10,000 Capital)
 
-The "Prplxty" version implements asymmetric risk/reward (3.5% SL / 12% TP) and refined trend filters.
+Asymmetric risk/reward (3.5% SL / 12% TP) and refined trend filters.
 
 | Period | Final Value | Total P&L ($) | Total P&L (%) | Win Rate | Total Trades |
 | :--- | :--- | :--- | :--- | :--- | :--- |

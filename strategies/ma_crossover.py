@@ -15,6 +15,7 @@ import yaml
 import pandas as pd
 
 from strategies.base_strategy import BaseStrategy
+from strategies.rsi_reversion import _calc_rsi
 from core import alpaca_client as ac
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -99,16 +100,18 @@ class MACrossoverStrategy(BaseStrategy):
                 fast_v  = float(fast.iloc[-1])
                 slow_v  = float(slow.iloc[-1])
 
-                if cross == "bullish" and is_trending_up and is_volatile:
+                rsi_val = _calc_rsi(closes, 14)
+
+                if cross == "bullish" and is_trending_up and is_volatile and 35 <= rsi_val <= 70:
                     signals.append({
                         "symbol":      symbol,
                         "action":      "buy",
                         "strategy":    self.name,
                         "asset_class": self.asset_class,
                         "confidence":  round(min(abs(fast_v - slow_v) / slow_v * 10, 1.0), 3),
-                        "reason":      f"BULLISH {fast_span}/{slow_span} EMA Crossover | Slope UP | Vol Confirm",
+                        "reason":      f"BULLISH {fast_span}/{slow_span} EMA Crossover | Slope UP | Vol Confirm | RSI={rsi_val:.1f}",
                     })
-                    log.info(f"[MACross] BULLISH crossover on {symbol} | Trend UP | Vol Confirm")
+                    log.info(f"[MACross] BULLISH crossover on {symbol} | Trend UP | Vol Confirm | RSI={rsi_val:.1f}")
 
             except Exception as e:
                 log.warning(f"[MACross] Error for {symbol}: {e}")

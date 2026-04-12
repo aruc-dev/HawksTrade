@@ -99,20 +99,22 @@ class GapUpStrategy(BaseStrategy):
                 # 4. Momentum Confirmation (Prev Day was Green: Close > Open)
                 # 5. True Gap (Open is above Prev High)
                 if min_gap <= gap_pct <= max_gap:
-                    if (today_vol >= avg_vol_20 * vol_mult and 
-                        today_open > sma200 and 
-                        prev_close > prev_open and
-                        today_open > prev_high):
-                        
+                    if (today_vol >= avg_vol_20 * vol_mult and
+                        today_open > sma200 and
+                        prev_close > prev_open):
+                        # true gap boosts confidence
+                        is_true_gap = today_open > prev_high
+                        confidence = round(min(gap_pct / 0.08, 1.0) * (1.1 if is_true_gap else 1.0), 3)
                         signals.append({
                             "symbol":      symbol,
                             "action":      "buy",
                             "strategy":    self.name,
                             "asset_class": self.asset_class,
-                            "confidence":  round(min(gap_pct / 0.08, 1.0), 3),
+                            "confidence":  confidence,
                             "reason":      (
                                 f"Gap-up {gap_pct:.2%} | vol={today_vol/avg_vol_20:.1f}x | "
-                                f"Trend UP | Prev Day Green | True Gap"
+                                f"Trend UP | Prev Day Green"
+                                + (" | True Gap" if is_true_gap else "")
                             ),
                         })
                         log.info(
