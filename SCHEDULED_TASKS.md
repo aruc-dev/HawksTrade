@@ -39,7 +39,7 @@ See `backtests.md` and `config.md` before changing strategy schedules or default
 
 | Task ID | Purpose | ET Schedule | PDT Schedule |
 |---------|---------|-------------|--------------|
-| `hawkstrade-stock-scan` | First stock-only scan, then full stock + crypto scans | 9:35 AM stocks-only, then every 30 min from 10:00 AM–3:30 PM Mon–Fri | 6:35 AM stocks-only, then every 30 min from 7:00 AM–12:30 PM Mon–Fri |
+| `hawkstrade-stock-scan` | First stock-only scan, then hourly full scans | 9:35 AM stocks-only, then every hour from 10:00 AM–3:00 PM Mon–Fri | 6:35 AM stocks-only, then every hour from 7:00 AM–12:00 PM Mon–Fri |
 | `hawkstrade-risk-check` | Stop-loss / take-profit enforcement | Every 15 min, 9:45 AM–3:45 PM Mon–Fri | Every 15 min, 6:45 AM–12:45 PM Mon–Fri |
 | `hawkstrade-crypto-scan` | Crypto-only scan (24/7) | Every hour, every day | Every hour, every day (same) |
 | `hawkstrade-daily-report` | Daily performance report | 4:30 PM Mon–Fri | 1:30 PM Mon–Fri |
@@ -62,11 +62,11 @@ Or recreate them manually using the instructions below. Claude's scheduled tasks
 
 ```
 Task ID:      hawkstrade-stock-scan
-Description:  HawksTrade: First stock-only scan, then stock + crypto scan every 30 min
+Description:  HawksTrade: First stock-only scan, then stock + crypto scan every hour
 Cron 1 (PDT): 35 6 * * 1-5
-Cron 2 (PDT): 0,30 7-12 * * 1-5
+Cron 2 (PDT): 0 7-12 * * 1-5
 Cron 1 (ET):  35 9 * * 1-5
-Cron 2 (ET):  0,30 10-15 * * 1-5
+Cron 2 (ET):  0 10-15 * * 1-5
 
 Prompt:
 You are the HawksTrade trading bot agent. Your job is to run the scheduled stock and crypto scan.
@@ -196,8 +196,8 @@ Paste (update `/path/to/HawksTrade`):
 # First scan of day: stocks only (9:35 AM ET)
 35 9 * * 1-5       cd /path/to/HawksTrade && python scheduler/run_scan.py --stocks-only >> logs/cron.log 2>&1
 
-# Full scan every 30 min from 10:00 AM-3:30 PM ET
-0,30 10-15 * * 1-5 cd /path/to/HawksTrade && python scheduler/run_scan.py >> logs/cron.log 2>&1
+# Full scan every hour from 10:00 AM-3:00 PM ET
+0 10-15 * * 1-5 cd /path/to/HawksTrade && python scheduler/run_scan.py >> logs/cron.log 2>&1
 
 # Risk check every 15 min from 9:45 AM-3:45 PM ET
 45 9 * * 1-5        cd /path/to/HawksTrade && python scheduler/run_risk_check.py >> logs/cron.log 2>&1
@@ -219,7 +219,7 @@ If your VM is in **UTC**, subtract 4 hours from ET times (or 7 from PDT):
 # HawksTrade — all times in UTC (ET+4, PDT+7)
 
 35 13 * * 1-5        cd /path/to/HawksTrade && python scheduler/run_scan.py --stocks-only >> logs/cron.log 2>&1
-0,30 14-19 * * 1-5  cd /path/to/HawksTrade && python scheduler/run_scan.py >> logs/cron.log 2>&1
+0 14-19 * * 1-5  cd /path/to/HawksTrade && python scheduler/run_scan.py >> logs/cron.log 2>&1
 45 13 * * 1-5        cd /path/to/HawksTrade && python scheduler/run_risk_check.py >> logs/cron.log 2>&1
 0,15,30,45 14-19 * * 1-5 cd /path/to/HawksTrade && python scheduler/run_risk_check.py >> logs/cron.log 2>&1
 0 * * * *            cd /path/to/HawksTrade && python scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
