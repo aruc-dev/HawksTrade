@@ -287,3 +287,29 @@ def get_crypto_latest_price(symbol: str) -> float:
 def is_market_open() -> bool:
     clock = get_trading_client().get_clock()
     return clock.is_open
+
+
+# ── Asset Discovery ─────────────────────────────────────────────────────────
+
+def get_all_tradable_assets(asset_class: str = "us_equity") -> list:
+    """
+    Returns a list of all active, fractionable, tradable US equity symbols.
+    Used by the dynamic universe screener.
+    """
+    from alpaca.trading.requests import GetAssetsRequest
+    from alpaca.trading.enums import AssetClass, AssetStatus
+    client = get_trading_client()
+    request = GetAssetsRequest(
+        asset_class=AssetClass.US_EQUITY,
+        status=AssetStatus.ACTIVE,
+    )
+    assets = client.get_all_assets(request)
+    # Filter: tradable, not OTC, fractionable preferred but not required
+    symbols = [
+        a.symbol for a in assets
+        if a.tradable
+        and a.status.value == "active"
+        and "." not in a.symbol   # exclude OTC/foreign (e.g. BRK.B becomes BRK-B)
+        and len(a.symbol) <= 5     # exclude most ETNs/structured products
+    ]
+    return sorted(set(symbols))

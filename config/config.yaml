@@ -56,6 +56,19 @@ stocks:
     - PLTR
     - COIN
 
+# --- DYNAMIC UNIVERSE SCREENER ---
+screener:
+  enabled: true                    # Set false to revert to static scan_universe
+  min_adv_shares: 500000           # Min avg daily volume (shares, 20-day)
+  min_adv_dollars: 5000000         # Min avg daily dollar volume ($5M/day)
+  min_price: 5.0                   # Min share price (filter penny stocks)
+  max_price: 2000.0                # Max share price
+  min_atr_pct: 0.01                # Min 14-day ATR as % of price (1% — needs movement)
+  max_atr_pct: 0.08                # Max 14-day ATR as % of price (8% — not too wild)
+  max_universe: 100                # Hard cap on dynamic candidates returned
+  # The legacy scan_universe (above) is always merged in, so existing symbols
+  # are never dropped even if they fail the screener filters.
+
 # --- CRYPTO UNIVERSE ---
 crypto:
   scan_universe:
