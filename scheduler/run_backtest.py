@@ -30,24 +30,36 @@ from strategies.ma_crossover import MACrossoverStrategy
 from strategies.range_breakout import RangeBreakoutStrategy
 from screener.universe_builder import UniverseBuilder
 
-# Extended pool of ~80 high-liquidity symbols covering major sectors
+# Extended pool of ~110 high-liquidity symbols covering major sectors
 EXTENDED_POOL = [
     # Tech
     "CRM", "ORCL", "ADBE", "INTC", "QCOM", "TXN", "AVGO", "MU", "AMAT", "LRCX",
-    "NOW", "SNOW", "PANW", "CRWD", "ZS", "NET", "DDOG", "MDB", "UBER", "LYFT",
-    # Financials
-    "MS", "WFC", "C", "BLK", "SCHW", "AXP", "V", "MA", "PYPL", "SQ",
-    # Healthcare
-    "JNJ", "UNH", "PFE", "ABBV", "MRK", "BMY", "GILD", "AMGN", "BIIB", "REGN",
-    # Consumer
-    "AMZN", "HD", "WMT", "TGT", "COST", "NKE", "SBUX", "MCD", "DIS", "CMCSA",
-    # Energy/Industrials
-    "LLY", "CAT", "DE", "BA", "RTX", "HON", "MMM", "GE", "UPS", "FDX",
-    # Real estate / utilities / other
+    "NOW", "SNOW", "PANW", "CRWD", "ZS", "NET", "DDOG", "MDB", "UBER",
+    # AI Infrastructure (2025/2026 leaders)
+    "SMCI", "ARM", "ANET", "MRVL",
+    # Defence / Aerospace (tariff-immune)
+    "LMT", "RTX", "NOC", "GD", "BA",
+    # Energy (commodity surge)
+    "XOM", "CVX", "COP", "SLB", "HAL", "OXY",
+    # Healthcare / Biotech
+    "JNJ", "UNH", "PFE", "ABBV", "MRK", "BMY", "GILD", "AMGN", "REGN",
+    "MDT", "ISRG", "ELV",
+    # Financials (resilience)
+    "JPM", "GS", "MS", "WFC", "C", "BLK", "SCHW", "AXP", "V", "MA",
+    "PYPL", "SQ",
+    # Consumer staples (defensive)
+    "PG", "KO", "PEP", "WMT", "COST",
+    # Consumer discretionary
+    "AMZN", "HD", "TGT", "NKE", "SBUX", "MCD", "DIS", "CMCSA",
+    # Industrials
+    "LLY", "CAT", "DE", "HON", "GE", "UPS", "FDX",
+    # Real estate / utilities / telecom
     "AMT", "PLD", "CCI", "NEE", "DUK", "SO", "T", "VZ", "TMUS",
+    # International ADRs
+    "TSM", "ASML", "SAP", "TM",
     # High-momentum / popular
-    "MSTR", "HOOD", "RIVN", "LCID", "NIO", "BABA", "JD", "PDD", "SHOP", "SPOT",
-    "RBLX", "SNAP", "PINS", "TWLO", "ZM", "DOCN", "GTLB", "U", "ABNB", "DASH",
+    "MSTR", "HOOD", "BABA", "JD", "PDD", "SHOP", "SPOT",
+    "RBLX", "SNAP", "PINS", "ABNB", "DASH",
 ]
 
 # ── Setup Logging ─────────────────────────────────────────────────────────────
@@ -105,6 +117,28 @@ class BacktestSimulator:
             mock_pos.avg_entry_price = p["entry_price"]
             return mock_pos
         return None
+
+    def get_open_trades_for_backtest(self):
+        """Return open positions in the shape expected by get_open_trades() / get_trade_age_days()."""
+        trades = []
+        for symbol, pos in self.positions.items():
+            trades.append({
+                "symbol": symbol,
+                "strategy": pos.get("strategy", "unknown"),
+                "asset_class": pos.get("asset_class", "stock"),
+                "entry_price": pos["entry_price"],
+                "side": "buy",
+                "status": "open",
+                "timestamp": pos["entry_date"].isoformat() if hasattr(pos["entry_date"], "isoformat") else str(pos["entry_date"]),
+            })
+        return trades
+
+    def get_trade_age_days(self, symbol):
+        """Compute trade age from sim positions and current_date."""
+        if symbol not in self.positions:
+            return 0.0
+        entry_date = self.positions[symbol]["entry_date"]
+        return (self.current_date - entry_date).days
 
     def get_current_price(self, symbol):
         df = self.historical_data.get(symbol)
@@ -242,7 +276,8 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
         patch("core.alpaca_client.get_crypto_latest_price", side_effect=sim.get_current_price),
         patch("core.alpaca_client.get_trading_client") as mock_trading_client,
         patch("core.alpaca_client.is_market_open", return_value=True),
-        patch("tracking.trade_log.get_open_trades", side_effect=lambda: []), # Simplified for report
+        patch("tracking.trade_log.get_open_trades", side_effect=lambda: sim.get_open_trades_for_backtest()),
+        patch("tracking.trade_log.get_trade_age_days", side_effect=lambda s: sim.get_trade_age_days(s)),
         patch("tracking.trade_log.log_trade"),
         patch("tracking.trade_log.mark_trade_closed"),
         patch("core.order_executor.MODE", "backtest"),
@@ -282,10 +317,10 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
                     signals = strat.scan(universe, current_time=dt)
                     for sig in signals:
                         if sig["symbol"] not in sim.positions:
-                            with patch("tracking.trade_log.get_trade_age_days", return_value=0):
-                                order = oe.enter_position(sig["symbol"], strat.name, strat.asset_class)
-                                if order and order.get("status") == "filled":
-                                    if sig["symbol"] in sim.positions: sim.positions[sig["symbol"]]["strategy"] = strat.name
+                            order = oe.enter_position(sig["symbol"], strat.name, strat.asset_class)
+                            # enter_position returns status="open" (not "filled") — update strategy name on any non-None return
+                            if order and sig["symbol"] in sim.positions:
+                                sim.positions[sig["symbol"]]["strategy"] = strat.name
             # Hold Day Check
             for symbol in list(sim.positions.keys()):
                 pos = sim.positions[symbol]; strat_name = pos.get("strategy")
@@ -313,7 +348,7 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
         strat_wins = df[df["pnl"] > 0].groupby("strategy").size()
         strat_total = df.groupby("strategy").size()
         strat_win_rate = (strat_wins / strat_total).fillna(0)
-        
+
         summary = pd.DataFrame({
             "Trades": strat_total, "Win Rate": strat_win_rate.map(lambda x: f"{x:.1%}"),
             "Avg P&L %": strat_perf[("pnl_pct", "mean")].map(lambda x: f"{x:+.2%}"),
@@ -321,18 +356,90 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
             "Best": strat_perf[("pnl_pct", "max")].map(lambda x: f"{x:+.2%}"),
             "Worst": strat_perf[("pnl_pct", "min")].map(lambda x: f"{x:+.2%}")
         })
-        
+
         final_val = sim.get_portfolio_value()
         report = f"### Backtest Results ({days} Days)\n"
         report += f"- **Final Value**: ${final_val:,.2f} ({ (final_val/initial_fund-1):+.2%})\n"
         report += f"- **Total Trades**: {len(df)}\n\n"
         report += summary.to_markdown() + "\n\n"
         if graph_file: report += f"![Equity Curve]({graph_file})\n\n"
-        
+
+        # --- Quarterly Performance Breakdown ---
+        quarterly_data = _compute_quarterly_performance(sim, df_curve)
+        if quarterly_data:
+            report += "### Quarterly Performance\n"
+            report += "| Quarter | Start Value | End Value | Return | Trades | Win Rate |\n"
+            report += "|---------|-------------|-----------|--------|--------|----------|\n"
+            for q in quarterly_data:
+                report += f"| {q['quarter']} | ${q['start_value']:,.2f} | ${q['end_value']:,.2f} | {q['return_pct']:+.2%} | {q['trades']} | {q['win_rate']:.1%} |\n"
+            report += "\n"
+            # Save quarterly CSV
+            ts = datetime.now().strftime("%Y%m%d_%H%M")
+            q_csv_path = BASE_DIR / "data" / f"quarterly_{ts}.csv"
+            q_csv_path.parent.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame(quarterly_data).to_csv(q_csv_path, index=False)
+            log.info(f"Quarterly report saved to {q_csv_path}")
+
         if output_file:
             with open(output_file, "a") as f: f.write(report)
         return report
     return "No trades executed."
+
+
+def _compute_quarterly_performance(sim, df_curve):
+    """Compute quarterly breakdowns from equity curve and trades log."""
+    if df_curve.empty or not sim.trades_log:
+        return []
+
+    # Build a date->value lookup from equity curve
+    equity_by_date = {row["date"]: row["value"] for _, row in df_curve.iterrows()}
+    sorted_dates = sorted(equity_by_date.keys())
+    if not sorted_dates:
+        return []
+
+    # Determine quarters spanned
+    first_date = sorted_dates[0]
+    last_date = sorted_dates[-1]
+
+    quarters = []
+    # Start from the quarter containing first_date
+    q_month = ((first_date.month - 1) // 3) * 3 + 1
+    q_start = first_date.replace(month=q_month, day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    while q_start <= last_date:
+        q_year = q_start.year
+        q_num = (q_start.month - 1) // 3 + 1
+        # Quarter end: first day of next quarter
+        if q_num == 4:
+            q_end = q_start.replace(year=q_year + 1, month=1, day=1)
+        else:
+            q_end = q_start.replace(month=q_start.month + 3, day=1)
+
+        # Find dates within this quarter
+        q_dates = [d for d in sorted_dates if q_start <= d < q_end]
+        if q_dates:
+            start_val = equity_by_date[q_dates[0]]
+            end_val = equity_by_date[q_dates[-1]]
+            ret = (end_val - start_val) / start_val if start_val > 0 else 0
+
+            # Count trades closed in this quarter
+            q_trades = [t for t in sim.trades_log if q_start <= t["exit_date"] < q_end]
+            n_trades = len(q_trades)
+            n_wins = sum(1 for t in q_trades if t["pnl"] > 0)
+            win_rate = n_wins / n_trades if n_trades > 0 else 0
+
+            quarters.append({
+                "quarter": f"Q{q_num} {q_year}",
+                "start_value": start_val,
+                "end_value": end_val,
+                "return_pct": ret,
+                "trades": n_trades,
+                "win_rate": win_rate,
+            })
+
+        q_start = q_end
+
+    return quarters
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
