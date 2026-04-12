@@ -50,7 +50,7 @@ class V4ImprovementsTests(unittest.TestCase):
             self.assertEqual(qty, 8.0)
 
     def test_rsi_2bar_recovery_allows_rising(self):
-        strat = RSIReversionStrategy()
+        _strat = RSIReversionStrategy()  # noqa: F841
         # RSI oversold, within 15% of SMA200, vol spike
         # And 2 consecutive higher closes
         mock_bars = []

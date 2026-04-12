@@ -101,7 +101,6 @@ class MACrossoverStrategy(BaseStrategy):
                 curr_range = highs.iloc[-1] - lows.iloc[-1]
                 is_volatile = curr_range >= (avg_range * 0.5)
 
-                price   = float(closes.iloc[-1])
                 fast_v  = float(fast.iloc[-1])
                 slow_v  = float(slow.iloc[-1])
 
