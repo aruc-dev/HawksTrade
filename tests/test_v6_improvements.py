@@ -6,7 +6,6 @@ Tests for v6 improvements:
 """
 
 import unittest
-from unittest.mock import MagicMock, patch
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 
@@ -75,7 +74,7 @@ class TestHoldDayExitFix(unittest.TestCase):
 
     def test_get_trade_age_days_crypto(self):
         age = self.sim.get_trade_age_days("BTC/USD")
-        self.assertEqual(age, 10)  # Jun 1 (Sun) -> Jun 15 (Sun) = 10 trading days
+        self.assertEqual(age, 14)  # Jun 1 (Sun) -> Jun 15 (Sun) = 14 calendar days (crypto uses calendar)
 
     def test_get_trade_age_days_unknown_symbol(self):
         age = self.sim.get_trade_age_days("UNKNOWN")
@@ -84,7 +83,7 @@ class TestHoldDayExitFix(unittest.TestCase):
     def test_hold_day_exit_triggers_correctly(self):
         """Verify that the hold-day check in the backtest loop would trigger for aged positions."""
         hold_days_limit = 4  # momentum hold_days from config
-        age = self.sim.get_trade_age_days("AAPL")  # 5 days
+        age = self.sim.get_trade_age_days("AAPL")  # 4 business days
         self.assertGreaterEqual(age, hold_days_limit)
 
     def test_hold_day_exit_does_not_trigger_for_fresh(self):
@@ -96,7 +95,7 @@ class TestHoldDayExitFix(unittest.TestCase):
             "asset_class": "stock",
             "strategy": "momentum",
         }
-        age = self.sim.get_trade_age_days("FRESH")  # 1 day
+        age = self.sim.get_trade_age_days("FRESH")  # 0 business days (Sat->Sun)
         self.assertLess(age, 4)  # momentum hold_days = 4
 
 
