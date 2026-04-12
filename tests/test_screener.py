@@ -8,26 +8,23 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timezone
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 from screener.universe_builder import UniverseBuilder
 
 
-def _make_bars_df(n=25, close=100.0, volume=1_000_000, atr_pct=0.025):
+def _make_bars_df(n=25, close=100.0, volume=1_000_000, atr_pct=0.025, seed=0):
     """
     Create a mock DataFrame of daily bars for testing.
     atr_pct controls the spread between high/low relative to close.
     """
+    rng = np.random.default_rng(seed)
     dates = pd.date_range(end="2025-06-01", periods=n, freq="D", tz="UTC")
     spread = close * atr_pct
     data = {
-        "close":  [close + np.random.uniform(-0.5, 0.5) for _ in range(n)],
-        "open":   [close + np.random.uniform(-0.5, 0.5) for _ in range(n)],
-        "high":   [close + spread + np.random.uniform(0, 0.5) for _ in range(n)],
-        "low":    [close - spread - np.random.uniform(0, 0.5) for _ in range(n)],
-        "volume": [volume + np.random.randint(-10000, 10000) for _ in range(n)],
+        "close":  [close + rng.uniform(-0.5, 0.5) for _ in range(n)],
+        "open":   [close + rng.uniform(-0.5, 0.5) for _ in range(n)],
+        "high":   [close + spread + rng.uniform(0, 0.5) for _ in range(n)],
+        "low":    [close - spread - rng.uniform(0, 0.5) for _ in range(n)],
+        "volume": [volume + rng.integers(-10000, 10000) for _ in range(n)],
     }
     return pd.DataFrame(data, index=dates)
 

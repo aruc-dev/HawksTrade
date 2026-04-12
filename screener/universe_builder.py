@@ -1,7 +1,7 @@
 import logging
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import List, Dict, Optional
 
 log = logging.getLogger("screener")
@@ -56,7 +56,7 @@ class UniverseBuilder:
             qualified = self._screen_from_bars(self._historical_bars, as_of_date)
         else:
             # Live mode: fetch from Alpaca
-            qualified = self._screen_live(as_of_date)
+            qualified = self._screen_live()
 
         # Always merge legacy universe (so existing 20 symbols are never dropped)
         result = list(dict.fromkeys(qualified + self.legacy_universe))  # dedup, preserve order
@@ -109,7 +109,7 @@ class UniverseBuilder:
         scores.sort(key=lambda x: x['adv_dollars'], reverse=True)
         return [s['symbol'] for s in scores[:self.max_universe]]
 
-    def _screen_live(self, as_of_date: datetime) -> List[str]:
+    def _screen_live(self) -> List[str]:
         """Screen using live Alpaca data."""
         if self._asset_cache is None:
             try:

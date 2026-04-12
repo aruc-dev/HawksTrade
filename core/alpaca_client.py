@@ -293,23 +293,27 @@ def is_market_open() -> bool:
 
 def get_all_tradable_assets(asset_class: str = "us_equity") -> list:
     """
-    Returns a list of all active, fractionable, tradable US equity symbols.
+    Returns a list of all active, tradable symbols for the given asset class.
+    Filters out OTC symbols (containing '.') and long tickers (>5 chars).
     Used by the dynamic universe screener.
     """
     from alpaca.trading.requests import GetAssetsRequest
     from alpaca.trading.enums import AssetClass, AssetStatus
+    asset_class_map = {
+        "us_equity": AssetClass.US_EQUITY,
+        "crypto": AssetClass.CRYPTO,
+    }
     client = get_trading_client()
     request = GetAssetsRequest(
-        asset_class=AssetClass.US_EQUITY,
+        asset_class=asset_class_map.get(asset_class, AssetClass.US_EQUITY),
         status=AssetStatus.ACTIVE,
     )
     assets = client.get_all_assets(request)
-    # Filter: tradable, not OTC, fractionable preferred but not required
     symbols = [
         a.symbol for a in assets
         if a.tradable
         and a.status.value == "active"
-        and "." not in a.symbol   # exclude OTC/foreign (e.g. BRK.B becomes BRK-B)
+        and "." not in a.symbol   # exclude OTC/foreign (dotted symbols like BRK.B)
         and len(a.symbol) <= 5     # exclude most ETNs/structured products
     ]
     return sorted(set(symbols))

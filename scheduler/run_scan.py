@@ -77,7 +77,6 @@ def get_stock_universe() -> List[str]:
         _screener = UniverseBuilder(CFG, alpaca_client=ac)
     return _screener.get_universe()
 
-STOCK_UNIVERSE  = get_stock_universe()
 CRYPTO_UNIVERSE = CFG["crypto"]["scan_universe"]
 INTRADAY_ON     = CFG["intraday"]["enabled"]
 
@@ -159,6 +158,8 @@ def _check_strategy_exits(strategies, open_symbols, dry_run: bool = False):
 # ── Main Scan ─────────────────────────────────────────────────────────────────
 
 def run(run_stocks: bool = True, run_crypto: bool = True, dry_run: bool = False):
+    stock_universe = get_stock_universe()
+
     log.info("=" * 55)
     log.info(f"HawksTrade scan started | mode={CFG['mode'].upper()} | "
              f"intraday={'ON' if INTRADAY_ON else 'OFF'} | "
@@ -195,7 +196,7 @@ def run(run_stocks: bool = True, run_crypto: bool = True, dry_run: bool = False)
             if not CFG["strategies"].get(strategy.name, {}).get("enabled", False):
                 continue
             try:
-                signals = strategy.scan(STOCK_UNIVERSE)
+                signals = strategy.scan(stock_universe)
                 for sig in signals:
                     sym = sig["symbol"]
                     if _already_holding(sym, open_symbols):

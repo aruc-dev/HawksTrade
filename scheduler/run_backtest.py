@@ -59,9 +59,9 @@ log = logging.getLogger("backtest")
 
 class SimpleBar:
     __slots__ = ('open', 'high', 'low', 'close', 'volume', 'timestamp')
-    def __init__(self, open, high, low, close, volume, timestamp):
-        self.open = open; self.high = high; self.low = low
-        self.close = close; self.volume = volume; self.timestamp = timestamp
+    def __init__(self, open_price, high_price, low_price, close_price, volume, timestamp):
+        self.open = open_price; self.high = high_price; self.low = low_price
+        self.close = close_price; self.volume = volume; self.timestamp = timestamp
 
 # ── Simulation State ─────────────────────────────────────────────────────────
 
@@ -271,7 +271,7 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
                             df = sim.historical_data[s]; mask = df.index <= sim.current_date; hist_df = df[mask].tail(limit)
                             bars_list = []
                             for idx, row in hist_df.iterrows():
-                                bar = SimpleBar(open=float(row["open"]), high=float(row["high"]), low=float(row["low"]), close=float(row["close"]), volume=float(row["volume"]), timestamp=idx)
+                                bar = SimpleBar(open_price=float(row["open"]), high_price=float(row["high"]), low_price=float(row["low"]), close_price=float(row["close"]), volume=float(row["volume"]), timestamp=idx)
                                 bars_list.append(bar)
                             res.data[s] = bars_list
                             temp_df = hist_df.copy(); temp_df.index = pd.MultiIndex.from_product([[s], temp_df.index], names=['symbol', 'timestamp']); dfs.append(temp_df)
