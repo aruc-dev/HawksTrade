@@ -135,13 +135,17 @@ class BacktestSimulator:
         return trades
 
     def get_trade_age_days(self, symbol):
-        """Compute trade age in trading days (Mon-Fri) from sim positions and current_date."""
+        """Return trade age in days. Stocks use business days; crypto uses calendar days."""
         if symbol not in self.positions:
             return 0.0
-        entry_date = self.positions[symbol]["entry_date"]
-        entry_d = entry_date.date() if hasattr(entry_date, 'date') else entry_date
-        curr_d  = self.current_date.date() if hasattr(self.current_date, 'date') else self.current_date
-        return float(np.busday_count(entry_d, curr_d))
+        pos = self.positions[symbol]
+        entry_d = pos["entry_date"]
+        curr_d  = self.current_date
+        entry_date = entry_d.date() if hasattr(entry_d, 'date') else entry_d
+        curr_date  = curr_d.date()  if hasattr(curr_d,  'date') else curr_d
+        if pos.get("asset_class") == "crypto":
+            return float(max((curr_date - entry_date).days, 0))
+        return float(np.busday_count(entry_date, curr_date))
 
     def get_current_price(self, symbol):
         df = self.historical_data.get(symbol)
@@ -278,11 +282,13 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
         patch("core.alpaca_client.get_stock_latest_price", side_effect=sim.get_current_price),
         patch("core.alpaca_client.get_crypto_latest_price", side_effect=sim.get_current_price),
         patch("core.alpaca_client.get_trading_client") as mock_trading_client,
-        patch("core.alpaca_client.is_market_open", return_value=True),
+        patch("core.alpaca_client.is_market_open", side_effect=lambda: sim.current_date.weekday() < 5),
         patch("tracking.trade_log.get_open_trades", side_effect=lambda: sim.get_open_trades_for_backtest()),
         patch("tracking.trade_log.get_trade_age_days", side_effect=lambda s: sim.get_trade_age_days(s)),
         patch("tracking.trade_log.log_trade"),
         patch("tracking.trade_log.mark_trade_closed"),
+        patch("core.order_executor.log_trade", lambda *a, **kw: None),
+        patch("core.order_executor.mark_trade_closed", lambda *a, **kw: None),
         patch("core.order_executor.MODE", "backtest"),
         patch("core.order_executor.ORDER_TYPE", "market"),
     ):
@@ -324,21 +330,15 @@ def run_backtest(days=365, initial_fund=10000.0, output_file=None, graph_file=No
                             # enter_position returns status="open" (not "filled") — update strategy name on any non-None return
                             if order and sig["symbol"] in sim.positions:
                                 sim.positions[sig["symbol"]]["strategy"] = strat.name
-            # Hold Day Check — count trading days only (skip weekends)
+            # Hold Day Check — delegates to sim.get_trade_age_days() (stocks=business days, crypto=calendar days)
             for symbol in list(sim.positions.keys()):
-                pos = sim.positions[symbol]; strat_name = pos.get("strategy")
+                pos = sim.positions[symbol]
+                strat_name = pos.get("strategy")
                 hold_days_limit = cfg["strategies"].get(strat_name, {}).get("hold_days")
                 if hold_days_limit:
-                    # Count business days between entry and today (excludes Sat/Sun)
-                    entry_d = pos["entry_date"]
-                    curr_d  = sim.current_date
-                    # numpy busday_count counts Mon-Fri days between dates
-                    trading_age = int(np.busday_count(
-                        entry_d.date() if hasattr(entry_d, 'date') else entry_d,
-                        curr_d.date()  if hasattr(curr_d,  'date') else curr_d
-                    ))
-                    if trading_age >= hold_days_limit:
-                        oe.exit_position(symbol, f"Hold {trading_age}d", pos["asset_class"])
+                    age = int(sim.get_trade_age_days(symbol))
+                    if age >= hold_days_limit:
+                        oe.exit_position(symbol, f"Hold {age}d", pos["asset_class"])
             sim.equity_curve.append({"date": dt, "value": sim.get_portfolio_value()})
 
     # --- Reporting ---
