@@ -13,6 +13,7 @@ import yaml
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import contextlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -87,6 +88,47 @@ class SimpleBar:
         self.open = open_price; self.high = high_price; self.low = low_price
         self.close = close_price; self.volume = volume; self.timestamp = timestamp
 
+def _make_bar_fetcher(sim: "BacktestSimulator"):
+    """Return a mock_get_bars function bound to the given simulator.
+
+    Extracting this factory to module level keeps the nesting depth inside
+    run_backtest() within CPython's 20-block compile-time limit.
+    """
+    class MockBarSet:
+        def __init__(self): self.data = {}; self.df = pd.DataFrame()
+        def __getitem__(self, key): return self.data.get(key)
+
+    def mock_get_bars(symbols, timeframe="1Day", limit=60):
+        res = MockBarSet(); dfs = []
+        for s in symbols:
+            if s in sim.historical_data:
+                df = sim.historical_data[s]
+                mask = df.index <= sim.current_date
+                hist_df = df[mask].tail(limit)
+                bars_list = [
+                    SimpleBar(
+                        open_price=float(row["open"]),
+                        high_price=float(row["high"]),
+                        low_price=float(row["low"]),
+                        close_price=float(row["close"]),
+                        volume=float(row["volume"]),
+                        timestamp=idx,
+                    )
+                    for idx, row in hist_df.iterrows()
+                ]
+                res.data[s] = bars_list
+                temp_df = hist_df.copy()
+                temp_df.index = pd.MultiIndex.from_product(
+                    [[s], temp_df.index], names=["symbol", "timestamp"]
+                )
+                dfs.append(temp_df)
+        if dfs:
+            res.df = pd.concat(dfs)
+        return res
+
+    return mock_get_bars
+
+
 # ── Simulation State ─────────────────────────────────────────────────────────
 
 class BacktestSimulator:
@@ -146,14 +188,22 @@ class BacktestSimulator:
         return trades
 
     def get_trade_age_days(self, symbol):
-        """Return trade age in days. Stocks use business days; crypto uses calendar days."""
+        """Return trade age in days. Stocks use business days; crypto uses calendar days.
+
+        Always normalises to ``datetime.date`` before arithmetic so that
+        timezone-aware ``datetime`` objects and plain ``date`` objects are
+        handled consistently (``np.busday_count`` requires date-like inputs,
+        not full datetimes).
+        """
         if symbol not in self.positions:
             return 0.0
         pos = self.positions[symbol]
         entry_d = pos["entry_date"]
         curr_d  = self.current_date
-        entry_date = entry_d.date() if hasattr(entry_d, 'date') else entry_d
-        curr_date  = curr_d.date()  if hasattr(curr_d,  'date') else curr_d
+        # Unconditionally extract .date() — works for datetime, date, and
+        # timezone-aware datetime alike; raises early if something unexpected arrives.
+        entry_date = entry_d.date() if isinstance(entry_d, datetime) else entry_d
+        curr_date  = curr_d.date()  if isinstance(curr_d,  datetime) else curr_d
         if pos.get("asset_class") == "crypto":
             return float(max((curr_date - entry_date).days, 0))
         return float(np.busday_count(entry_date, curr_date))
@@ -432,24 +482,28 @@ def run_backtest(
         if cfg["strategies"].get(strat.name, {}).get("enabled", False)
     ]
     
-    with (
-        patch("core.alpaca_client.get_portfolio_value", side_effect=sim.get_portfolio_value),
-        patch("core.alpaca_client.get_cash", side_effect=sim.get_cash),
-        patch("core.alpaca_client.get_all_positions", side_effect=sim.get_all_positions),
-        patch("core.alpaca_client.get_position", side_effect=lambda s: sim.get_position(s)),
-        patch("core.alpaca_client.get_stock_latest_price", side_effect=sim.get_current_price),
-        patch("core.alpaca_client.get_crypto_latest_price", side_effect=sim.get_current_price),
-        patch("core.alpaca_client.get_trading_client") as mock_trading_client,
-        patch("core.alpaca_client.is_market_open", side_effect=lambda: sim.current_date.weekday() < 5),
-        patch("tracking.trade_log.get_open_trades", side_effect=lambda: sim.get_open_trades_for_backtest()),
-        patch("tracking.trade_log.get_trade_age_days", side_effect=lambda s: sim.get_trade_age_days(s)),
-        patch("tracking.trade_log.log_trade"),
-        patch("tracking.trade_log.mark_trade_closed"),
-        patch("core.order_executor.log_trade", lambda *a, **kw: None),
-        patch("core.order_executor.mark_trade_closed", lambda *a, **kw: None),
-        patch("core.order_executor.MODE", "backtest"),
-        patch("core.order_executor.ORDER_TYPE", "market"),
-    ):
+    mock_get_bars = _make_bar_fetcher(sim)
+
+    # Use ExitStack so all patches share one block-stack entry instead of 16,
+    # keeping the total nesting depth inside run_backtest() within CPython's
+    # CO_MAXBLOCKS=20 compile-time limit.
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(patch("core.alpaca_client.get_portfolio_value", side_effect=sim.get_portfolio_value))
+        stack.enter_context(patch("core.alpaca_client.get_cash", side_effect=sim.get_cash))
+        stack.enter_context(patch("core.alpaca_client.get_all_positions", side_effect=sim.get_all_positions))
+        stack.enter_context(patch("core.alpaca_client.get_position", side_effect=lambda s: sim.get_position(s)))
+        stack.enter_context(patch("core.alpaca_client.get_stock_latest_price", side_effect=sim.get_current_price))
+        stack.enter_context(patch("core.alpaca_client.get_crypto_latest_price", side_effect=sim.get_current_price))
+        mock_trading_client = stack.enter_context(patch("core.alpaca_client.get_trading_client"))
+        stack.enter_context(patch("core.alpaca_client.is_market_open", side_effect=lambda: sim.current_date.weekday() < 5))
+        stack.enter_context(patch("tracking.trade_log.get_open_trades", side_effect=lambda: sim.get_open_trades_for_backtest()))
+        stack.enter_context(patch("tracking.trade_log.get_trade_age_days", side_effect=lambda s: sim.get_trade_age_days(s)))
+        stack.enter_context(patch("tracking.trade_log.log_trade"))
+        stack.enter_context(patch("tracking.trade_log.mark_trade_closed"))
+        stack.enter_context(patch("core.order_executor.log_trade", lambda *a, **kw: None))
+        stack.enter_context(patch("core.order_executor.mark_trade_closed", lambda *a, **kw: None))
+        stack.enter_context(patch("core.order_executor.MODE", "backtest"))
+        stack.enter_context(patch("core.order_executor.ORDER_TYPE", "market"))
         mock_trading_client.return_value.submit_order.side_effect = sim.submit_order
         
         for dt in all_dates:
@@ -468,22 +522,6 @@ def run_backtest(
                     universe = screener.get_universe(as_of_date=dt) if screener_enabled else cfg["stocks"]["scan_universe"]
                 else:
                     universe = cfg["crypto"]["scan_universe"]
-                def mock_get_bars(symbols, timeframe="1Day", limit=60):
-                    class MockBarSet:
-                        def __init__(self): self.data = {}; self.df = pd.DataFrame()
-                        def __getitem__(self, key): return self.data.get(key)
-                    res = MockBarSet(); dfs = []
-                    for s in symbols:
-                        if s in sim.historical_data:
-                            df = sim.historical_data[s]; mask = df.index <= sim.current_date; hist_df = df[mask].tail(limit)
-                            bars_list = []
-                            for idx, row in hist_df.iterrows():
-                                bar = SimpleBar(open_price=float(row["open"]), high_price=float(row["high"]), low_price=float(row["low"]), close_price=float(row["close"]), volume=float(row["volume"]), timestamp=idx)
-                                bars_list.append(bar)
-                            res.data[s] = bars_list
-                            temp_df = hist_df.copy(); temp_df.index = pd.MultiIndex.from_product([[s], temp_df.index], names=['symbol', 'timestamp']); dfs.append(temp_df)
-                    if dfs: res.df = pd.concat(dfs)
-                    return res
                 with patch("core.alpaca_client.get_stock_bars", side_effect=mock_get_bars), \
                      patch("core.alpaca_client.get_crypto_bars", side_effect=mock_get_bars):
                     signals = strat.scan(universe, current_time=dt)
