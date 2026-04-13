@@ -13,17 +13,17 @@ Usage:
 """
 
 import argparse
+import collections
 import csv
-import json
-import os
-import re
-from datetime import datetime, timezone, timedelta
+import html
+from datetime import datetime, timezone
 from pathlib import Path
 
 try:
     import yaml
     HAS_YAML = True
 except ImportError:
+    import re
     HAS_YAML = False
 
 
@@ -63,13 +63,12 @@ def resolve_paths(project_dir_arg, output_arg, script_path):
     if project_dir_arg:
         project_dir = Path(project_dir_arg).resolve()
     else:
-        # status_ui/ lives inside the project root
         project_dir = script_dir.parent
 
-    config_path  = project_dir / "config" / "config.yaml"
-    trades_path  = project_dir / "data" / "trades.csv"
-    logs_dir     = project_dir / "logs"
-    output_path  = Path(output_arg).resolve() if output_arg else script_dir / "status.html"
+    config_path = project_dir / "config" / "config.yaml"
+    trades_path = project_dir / "data" / "trades.csv"
+    logs_dir    = project_dir / "logs"
+    output_path = Path(output_arg).resolve() if output_arg else script_dir / "status.html"
 
     return project_dir, config_path, trades_path, logs_dir, output_path
 
@@ -84,7 +83,6 @@ def load_config(config_path: Path) -> dict:
             with open(config_path, encoding="utf-8", errors="replace") as f:
                 return yaml.safe_load(f) or {}
         else:
-            # Minimal regex fallback for mode field only
             text = config_path.read_text(encoding="utf-8", errors="replace")
             m = re.search(r"^mode:\s*(['\"]?)(\w+)\1", text, re.MULTILINE)
             return {"mode": m.group(2) if m else "unknown"}
@@ -93,7 +91,6 @@ def load_config(config_path: Path) -> dict:
 
 
 def get_last_run_time(logs_dir: Path) -> str:
-    """Return ISO timestamp of most recently modified scan log, or N/A."""
     try:
         logs = sorted(logs_dir.glob("scan_*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
         if not logs:
@@ -105,7 +102,7 @@ def get_last_run_time(logs_dir: Path) -> str:
         return "N/A"
 
 
-def get_last_run_log_path(logs_dir: Path) -> Path | None:
+def get_last_run_log_path(logs_dir: Path):
     try:
         logs = sorted(logs_dir.glob("scan_*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
         return logs[0] if logs else None
@@ -114,18 +111,18 @@ def get_last_run_log_path(logs_dir: Path) -> Path | None:
 
 
 def tail_log(log_path: Path, n: int) -> list:
+    """Memory-efficient tail using deque(maxlen=n) — reads O(n) lines into memory."""
     if not log_path or not log_path.exists():
         return ["(No log file found)"]
     try:
         with open(log_path, encoding="utf-8", errors="replace") as f:
-            lines = f.readlines()
-        return [l.rstrip() for l in lines[-n:]]
+            lines = collections.deque(f, maxlen=n)
+        return [line.rstrip() for line in lines]
     except Exception as e:
         return [f"(Error reading log: {e})"]
 
 
 def load_trades(trades_path: Path) -> list:
-    """Return all rows from trades.csv as list of dicts."""
     if not trades_path.exists():
         return []
     try:
@@ -140,14 +137,12 @@ def load_trades(trades_path: Path) -> list:
 
 
 def get_open_positions(trades: list) -> list:
-    """Return trades with status='open', most recent first."""
     open_trades = [t for t in trades if t.get("status", "").strip().lower() == "open"]
     open_trades.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
     return open_trades
 
 
 def get_recent_actions(trades: list, n: int = 60) -> list:
-    """Return last N trades (all statuses), most recent first."""
     sorted_trades = sorted(trades, key=lambda x: x.get("timestamp", ""), reverse=True)
     return sorted_trades[:n]
 
@@ -178,7 +173,16 @@ def compute_stats(trades: list) -> dict:
     }
 
 
-# ── HTML Generation ───────────────────────────────────────────────────────────
+# ── HTML Helpers ──────────────────────────────────────────────────────────────
+
+# Whitelist of known-safe CSS class suffixes for status badges
+_SAFE_STATUS_CLASSES = {"open", "closed", "dry_run"}
+
+
+def _esc(val) -> str:
+    """HTML-escape a value from an untrusted source (CSV field, config)."""
+    return html.escape(str(val) if val is not None else "", quote=True)
+
 
 def _pnl_class(val_str: str) -> str:
     try:
@@ -191,37 +195,52 @@ def _pnl_class(val_str: str) -> str:
 def _fmt_pnl(val_str: str) -> str:
     try:
         v = float(str(val_str).strip())
-        return f"{v:+.2%}"
+        return html.escape(f"{v:+.2%}")
     except (ValueError, TypeError):
-        return str(val_str) if val_str else "—"
+        return _esc(val_str) if val_str else "—"
 
 
 def _fmt_price(val_str: str) -> str:
     try:
         v = float(str(val_str).strip())
-        return f"${v:,.4f}"
+        return html.escape(f"${v:,.4f}")
     except (ValueError, TypeError):
-        return str(val_str) if val_str else "—"
+        return _esc(val_str) if val_str else "—"
 
 
 def _fmt_qty(val_str: str) -> str:
     try:
         v = float(str(val_str).strip())
-        return f"{v:,.4f}".rstrip("0").rstrip(".")
+        return html.escape(f"{v:,.4f}".rstrip("0").rstrip("."))
     except (ValueError, TypeError):
-        return str(val_str) if val_str else "—"
+        return _esc(val_str) if val_str else "—"
 
 
 def _side_badge(side: str) -> str:
     s = (side or "").upper().strip()
-    css = "buy" if s == "BUY" else ("sell" if s == "SELL" else "neutral-badge")
-    return f'<span class="badge {css}">{s or "—"}</span>'
+    if s == "BUY":
+        css = "buy"
+    elif s == "SELL":
+        css = "sell"
+    else:
+        css = "neutral-badge"
+    label = _esc(s) if s else "—"
+    return f'<span class="badge {css}">{label}</span>'
 
 
 def _strat_badge(strategy: str) -> str:
-    s = (strategy or "").lower().strip()
-    return f'<span class="strat-badge">{s or "—"}</span>'
+    return f'<span class="strat-badge">{_esc(strategy) if strategy else "—"}</span>'
 
+
+def _status_badge(status: str) -> str:
+    """Sanitize status to a whitelisted CSS class; always escape displayed text."""
+    raw = (status or "").lower().strip()
+    css_class = raw if raw in _SAFE_STATUS_CLASSES else "unknown"
+    label = _esc(status.upper() if status else "—")
+    return f'<span class="status-badge {css_class}">{label}</span>'
+
+
+# ── Table Builders ────────────────────────────────────────────────────────────
 
 def build_positions_table(positions: list) -> str:
     if not positions:
@@ -232,13 +251,13 @@ def build_positions_table(positions: list) -> str:
         pnl_cls = _pnl_class(pnl_raw)
         rows_html += f"""
         <tr>
-          <td><strong>{p.get('symbol','—')}</strong></td>
+          <td><strong>{_esc(p.get('symbol',''))}</strong></td>
           <td>{_side_badge(p.get('side',''))}</td>
           <td>{_fmt_qty(p.get('qty',''))}</td>
           <td>{_fmt_price(p.get('entry_price',''))}</td>
-          <td>{p.get('strategy','—')}</td>
-          <td>{p.get('asset_class','—')}</td>
-          <td>{p.get('timestamp','—')[:19]}</td>
+          <td>{_esc(p.get('strategy',''))}</td>
+          <td>{_esc(p.get('asset_class',''))}</td>
+          <td>{_esc(p.get('timestamp','')[:19])}</td>
           <td class="{pnl_cls}">{_fmt_pnl(pnl_raw) if pnl_raw else '(live)'}</td>
         </tr>"""
     return f"""
@@ -246,7 +265,7 @@ def build_positions_table(positions: list) -> str:
       <thead>
         <tr>
           <th>Symbol</th><th>Side</th><th>Qty</th><th>Entry Price</th>
-          <th>Strategy</th><th>Asset Class</th><th>Opened (UTC)</th><th>P&L</th>
+          <th>Strategy</th><th>Asset Class</th><th>Opened (UTC)</th><th>P&amp;L</th>
         </tr>
       </thead>
       <tbody>{rows_html}</tbody>
@@ -260,27 +279,25 @@ def build_actions_table(actions: list) -> str:
     for t in actions:
         pnl_raw = t.get("pnl_pct", "")
         pnl_cls = _pnl_class(pnl_raw)
-        status = (t.get("status") or "").lower()
-        status_badge = f'<span class="status-badge {status}">{status.upper()}</span>'
         rows_html += f"""
         <tr>
-          <td>{t.get('timestamp','—')[:19]}</td>
-          <td><strong>{t.get('symbol','—')}</strong></td>
+          <td>{_esc(t.get('timestamp','')[:19])}</td>
+          <td><strong>{_esc(t.get('symbol',''))}</strong></td>
           <td>{_side_badge(t.get('side',''))}</td>
           <td>{_fmt_qty(t.get('qty',''))}</td>
           <td>{_fmt_price(t.get('entry_price',''))}</td>
           <td>{_fmt_price(t.get('exit_price',''))}</td>
           <td>{_strat_badge(t.get('strategy',''))}</td>
-          <td>{status_badge}</td>
+          <td>{_status_badge(t.get('status',''))}</td>
           <td class="{pnl_cls}">{_fmt_pnl(pnl_raw) if pnl_raw else '—'}</td>
-          <td>{t.get('exit_reason','—')}</td>
+          <td>{_esc(t.get('exit_reason',''))}</td>
         </tr>"""
     return f"""
     <table>
       <thead>
         <tr>
           <th>Timestamp (UTC)</th><th>Symbol</th><th>Side</th><th>Qty</th>
-          <th>Entry</th><th>Exit</th><th>Strategy</th><th>Status</th><th>P&L</th><th>Exit Reason</th>
+          <th>Entry</th><th>Exit</th><th>Strategy</th><th>Status</th><th>P&amp;L</th><th>Exit Reason</th>
         </tr>
       </thead>
       <tbody>{rows_html}</tbody>
@@ -288,12 +305,11 @@ def build_actions_table(actions: list) -> str:
 
 
 def build_log_section(lines: list) -> str:
-    escaped = "\n".join(
-        l.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        for l in lines
-    )
+    escaped = "\n".join(html.escape(line) for line in lines)
     return f'<pre id="log-content">{escaped}</pre>'
 
+
+# ── HTML Renderer ─────────────────────────────────────────────────────────────
 
 def render_html(
     config: dict,
@@ -309,25 +325,23 @@ def render_html(
     mode = (config.get("mode") or "unknown").upper()
     mode_class = "live" if mode == "LIVE" else "paper"
     mode_icon = "🔴" if mode == "LIVE" else "🟡"
-    mode_label = f"{mode_icon} {mode}"
+    mode_label = f"{mode_icon} {html.escape(mode)}"
 
     intraday = config.get("intraday", {}).get("enabled", False)
     screener = config.get("screener", {}).get("enabled", False)
-    max_pos = config.get("trading", {}).get("max_positions", "—")
-    stock_scan_interval = config.get("schedule", {}).get("stock_scan_interval_min", "—")
+    max_pos  = config.get("trading", {}).get("max_positions", "—")
+    stock_scan_interval  = config.get("schedule", {}).get("stock_scan_interval_min", "—")
     crypto_scan_interval = config.get("schedule", {}).get("crypto_scan_interval_min", "—")
 
-    # Enabled strategies
     strategies_cfg = config.get("strategies", {})
     enabled_strats = [k for k, v in strategies_cfg.items() if isinstance(v, dict) and v.get("enabled", False)]
-    strat_pills = "".join(f'<span class="strat-badge">{s}</span>' for s in enabled_strats) or "—"
+    strat_pills = "".join(f'<span class="strat-badge">{_esc(s)}</span>' for s in enabled_strats) or "—"
 
-    pos_count = len(open_positions)
-    refresh_tag = f'<meta http-equiv="refresh" content="{refresh_secs}">' if refresh_secs > 0 else ""
-
-    pos_table = build_positions_table(open_positions)
+    pos_count    = len(open_positions)
+    refresh_tag  = f'<meta http-equiv="refresh" content="{refresh_secs}">' if refresh_secs > 0 else ""
+    pos_table    = build_positions_table(open_positions)
     actions_table = build_actions_table(actions)
-    log_html = build_log_section(log_lines)
+    log_html     = build_log_section(log_lines)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -348,8 +362,6 @@ def render_html(
       --red: #f85149;
       --yellow: #d29922;
       --blue: #58a6ff;
-      --purple: #bc8cff;
-      --orange: #ffa657;
     }}
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{
@@ -359,8 +371,6 @@ def render_html(
       font-size: 14px;
       line-height: 1.6;
     }}
-
-    /* ── Header ── */
     .header {{
       background: var(--surface);
       border-bottom: 1px solid var(--border);
@@ -370,210 +380,110 @@ def render_html(
       gap: 16px;
       flex-wrap: wrap;
     }}
-    .header h1 {{
-      font-size: 18px;
-      font-weight: 700;
-      color: var(--blue);
-      letter-spacing: 0.5px;
-    }}
+    .header h1 {{ font-size: 18px; font-weight: 700; color: var(--blue); letter-spacing: 0.5px; }}
     .mode-badge {{
-      font-size: 13px;
-      font-weight: 700;
-      padding: 4px 14px;
-      border-radius: 20px;
-      letter-spacing: 0.8px;
+      font-size: 13px; font-weight: 700; padding: 4px 14px;
+      border-radius: 20px; letter-spacing: 0.8px;
     }}
-    .mode-badge.live {{
-      background: rgba(248,81,73,0.15);
-      color: var(--red);
-      border: 1px solid var(--red);
-    }}
-    .mode-badge.paper {{
-      background: rgba(210,153,34,0.15);
-      color: var(--yellow);
-      border: 1px solid var(--yellow);
-    }}
-    .header-meta {{
-      margin-left: auto;
-      color: var(--muted);
-      font-size: 12px;
-      text-align: right;
-    }}
+    .mode-badge.live {{ background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid var(--red); }}
+    .mode-badge.paper {{ background: rgba(210,153,34,0.15); color: var(--yellow); border: 1px solid var(--yellow); }}
+    .header-meta {{ margin-left: auto; color: var(--muted); font-size: 12px; text-align: right; }}
     .header-meta span {{ display: block; }}
-
-    /* ── Stat Cards ── */
     .cards {{
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-      gap: 12px;
-      padding: 20px 24px 0;
+      gap: 12px; padding: 20px 24px 0;
     }}
     .card {{
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 14px 16px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 14px 16px;
     }}
     .card-label {{ font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }}
     .card-value {{ font-size: 20px; font-weight: 700; color: var(--text); }}
     .card-value.green {{ color: var(--green); }}
     .card-value.red {{ color: var(--red); }}
     .card-value.blue {{ color: var(--blue); }}
-    .card-value.yellow {{ color: var(--yellow); }}
-
-    /* ── Sections ── */
+    .card-value.neutral {{ color: var(--muted); }}
     .section {{
       margin: 20px 24px 0;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      overflow: hidden;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
     }}
     .section-header {{
-      padding: 12px 16px;
-      background: var(--surface2);
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      cursor: pointer;
-      user-select: none;
+      padding: 12px 16px; background: var(--surface2); border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none;
     }}
     .section-header h2 {{ font-size: 14px; font-weight: 600; flex: 1; }}
     .section-header .count {{
-      font-size: 12px;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 1px 8px;
-      color: var(--muted);
+      font-size: 12px; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 10px; padding: 1px 8px; color: var(--muted);
     }}
-    .toggle-icon {{ font-size: 11px; color: var(--muted); transition: transform 0.2s; }}
+    .toggle-icon {{ font-size: 11px; color: var(--muted); }}
     .section-body {{ overflow-x: auto; }}
     .section-body.collapsed {{ display: none; }}
-
-    /* ── Tables ── */
-    table {{
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-    }}
+    table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
     thead tr {{ background: var(--surface2); }}
     th {{
-      padding: 9px 12px;
-      text-align: left;
-      font-weight: 600;
-      color: var(--muted);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.6px;
-      white-space: nowrap;
-      border-bottom: 1px solid var(--border);
+      padding: 9px 12px; text-align: left; font-weight: 600; color: var(--muted);
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px;
+      white-space: nowrap; border-bottom: 1px solid var(--border);
     }}
-    td {{
-      padding: 9px 12px;
-      border-bottom: 1px solid var(--border);
-      white-space: nowrap;
-    }}
+    td {{ padding: 9px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }}
     tr:last-child td {{ border-bottom: none; }}
     tr:hover td {{ background: rgba(255,255,255,0.03); }}
-
-    /* ── Badges ── */
     .badge {{
-      font-size: 11px;
-      font-weight: 700;
-      padding: 2px 8px;
-      border-radius: 4px;
-      letter-spacing: 0.5px;
+      font-size: 11px; font-weight: 700; padding: 2px 8px;
+      border-radius: 4px; letter-spacing: 0.5px;
     }}
     .badge.buy {{ background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid var(--green); }}
     .badge.sell {{ background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid var(--red); }}
     .badge.neutral-badge {{ background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }}
     .strat-badge {{
-      font-size: 11px;
-      background: rgba(88,166,255,0.1);
-      color: var(--blue);
-      border: 1px solid rgba(88,166,255,0.3);
-      border-radius: 4px;
-      padding: 1px 7px;
-      margin-right: 4px;
-      display: inline-block;
+      font-size: 11px; background: rgba(88,166,255,0.1); color: var(--blue);
+      border: 1px solid rgba(88,166,255,0.3); border-radius: 4px;
+      padding: 1px 7px; margin-right: 4px; display: inline-block;
     }}
     .status-badge {{
-      font-size: 10px;
-      font-weight: 700;
-      padding: 2px 6px;
-      border-radius: 3px;
-      letter-spacing: 0.5px;
+      font-size: 10px; font-weight: 700; padding: 2px 6px;
+      border-radius: 3px; letter-spacing: 0.5px;
     }}
     .status-badge.open {{ background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid var(--green); }}
     .status-badge.closed {{ background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }}
-
-    /* ── P&L Colors ── */
+    .status-badge.dry_run {{ background: rgba(88,166,255,0.1); color: var(--blue); border: 1px solid var(--blue); }}
+    .status-badge.unknown {{ background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }}
     .pos {{ color: var(--green); font-weight: 600; }}
     .neg {{ color: var(--red); font-weight: 600; }}
     .neutral {{ color: var(--muted); }}
-
-    /* ── Log ── */
     pre#log-content {{
-      background: var(--bg);
-      padding: 16px;
-      font-size: 12px;
+      background: var(--bg); padding: 16px; font-size: 12px;
       font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      color: var(--muted);
-      overflow-x: auto;
-      white-space: pre-wrap;
-      word-break: break-all;
-      max-height: 500px;
-      overflow-y: auto;
+      color: var(--muted); overflow-x: auto; white-space: pre-wrap;
+      word-break: break-all; max-height: 500px; overflow-y: auto;
     }}
-
-    /* ── Config Info ── */
-    .config-grid {{
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-      gap: 0;
-      padding: 0;
-    }}
-    .config-row {{
-      padding: 9px 16px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      gap: 8px;
-    }}
+    .config-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }}
+    .config-row {{ padding: 9px 16px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; }}
     .config-row:last-child {{ border-bottom: none; }}
     .config-key {{ color: var(--muted); font-size: 12px; min-width: 160px; }}
     .config-val {{ color: var(--text); font-size: 12px; font-weight: 500; }}
-
-    /* ── Empty ── */
     .empty-msg {{ color: var(--muted); padding: 20px 16px; font-style: italic; }}
-
-    /* ── Footer ── */
     .footer {{
-      padding: 20px 24px;
-      color: var(--muted);
-      font-size: 11px;
-      text-align: center;
-      border-top: 1px solid var(--border);
-      margin-top: 20px;
+      padding: 20px 24px; color: var(--muted); font-size: 11px;
+      text-align: center; border-top: 1px solid var(--border); margin-top: 20px;
     }}
   </style>
 </head>
 <body>
 
-<!-- ── Header ── -->
 <div class="header">
   <span style="font-size:22px">🦅</span>
   <h1>HawksTrade</h1>
   <span class="mode-badge {mode_class}">{mode_label} MODE</span>
   <div class="header-meta">
-    <span>📄 Generated: {generated_at}</span>
-    <span>🕐 Last run: {last_run}</span>
+    <span>📄 Generated: {html.escape(generated_at)}</span>
+    <span>🕐 Last run: {html.escape(last_run)}</span>
     {"<span>🔄 Auto-refresh: every " + str(refresh_secs) + "s</span>" if refresh_secs > 0 else ""}
   </div>
 </div>
 
-<!-- ── Stat Cards ── -->
 <div class="cards">
   <div class="card">
     <div class="card-label">Open Positions</div>
@@ -585,15 +495,15 @@ def render_html(
   </div>
   <div class="card">
     <div class="card-label">Win Rate</div>
-    <div class="card-value {'green' if stats['total'] > 0 else 'neutral'}">{stats['win_rate']}</div>
+    <div class="card-value {'green' if stats['total'] > 0 else 'neutral'}">{html.escape(stats['win_rate'])}</div>
   </div>
   <div class="card">
-    <div class="card-label">Total P&L</div>
-    <div class="card-value {_pnl_class(stats['total_pnl'].replace('%',''))}">{stats['total_pnl']}</div>
+    <div class="card-label">Total P&amp;L</div>
+    <div class="card-value {_pnl_class(stats['total_pnl'].replace('%',''))}">{html.escape(stats['total_pnl'])}</div>
   </div>
   <div class="card">
     <div class="card-label">Max Positions</div>
-    <div class="card-value">{max_pos}</div>
+    <div class="card-value">{html.escape(str(max_pos))}</div>
   </div>
   <div class="card">
     <div class="card-label">Intraday</div>
@@ -601,63 +511,55 @@ def render_html(
   </div>
 </div>
 
-<!-- ── Open Positions ── -->
 <div class="section">
-  <div class="section-header" onclick="toggle('positions-body', 'pos-icon')">
+  <div class="section-header" onclick="toggle('positions-body','pos-icon')">
     <span>📂</span>
     <h2>Open Positions</h2>
     <span class="count">{pos_count}</span>
     <span class="toggle-icon" id="pos-icon">▼</span>
   </div>
-  <div class="section-body" id="positions-body">
-    {pos_table}
-  </div>
+  <div class="section-body" id="positions-body">{pos_table}</div>
 </div>
 
-<!-- ── Recent Actions ── -->
 <div class="section">
-  <div class="section-header" onclick="toggle('actions-body', 'act-icon')">
+  <div class="section-header" onclick="toggle('actions-body','act-icon')">
     <span>⚡</span>
     <h2>Trade Actions</h2>
     <span class="count">{len(actions)}</span>
     <span class="toggle-icon" id="act-icon">▼</span>
   </div>
-  <div class="section-body" id="actions-body">
-    {actions_table}
-  </div>
+  <div class="section-body" id="actions-body">{actions_table}</div>
 </div>
 
-<!-- ── Config Info ── -->
 <div class="section">
-  <div class="section-header" onclick="toggle('config-body', 'cfg-icon')">
+  <div class="section-header" onclick="toggle('config-body','cfg-icon')">
     <span>⚙️</span>
     <h2>System Configuration</h2>
     <span class="toggle-icon" id="cfg-icon">▼</span>
   </div>
   <div class="section-body collapsed" id="config-body">
     <div class="config-grid">
-      <div class="config-row"><span class="config-key">Trading Mode</span><span class="config-val">{mode}</span></div>
+      <div class="config-row"><span class="config-key">Trading Mode</span><span class="config-val">{html.escape(mode)}</span></div>
       <div class="config-row"><span class="config-key">Intraday Trading</span><span class="config-val">{'Enabled' if intraday else 'Disabled'}</span></div>
       <div class="config-row"><span class="config-key">Dynamic Screener</span><span class="config-val">{'Enabled' if screener else 'Disabled'}</span></div>
-      <div class="config-row"><span class="config-key">Max Positions</span><span class="config-val">{max_pos}</span></div>
-      <div class="config-row"><span class="config-key">Stock Scan Interval</span><span class="config-val">{stock_scan_interval} min</span></div>
-      <div class="config-row"><span class="config-key">Crypto Scan Interval</span><span class="config-val">{crypto_scan_interval} min</span></div>
+      <div class="config-row"><span class="config-key">Max Positions</span><span class="config-val">{html.escape(str(max_pos))}</span></div>
+      <div class="config-row"><span class="config-key">Stock Scan Interval</span><span class="config-val">{html.escape(str(stock_scan_interval))} min</span></div>
+      <div class="config-row"><span class="config-key">Crypto Scan Interval</span><span class="config-val">{html.escape(str(crypto_scan_interval))} min</span></div>
       <div class="config-row"><span class="config-key">Enabled Strategies</span><span class="config-val">{strat_pills}</span></div>
     </div>
   </div>
 </div>
 
-<!-- ── Last Run Logs ── -->
 <div class="section">
-  <div class="section-header" onclick="toggle('log-body', 'log-icon')">
+  <div class="section-header" onclick="toggle('log-body','log-icon')">
     <span>📄</span>
     <h2>Last Run Logs</h2>
-    <span class="count">{log_path_str}</span>
+    <span class="count">{html.escape(log_path_str)}</span>
     <span class="toggle-icon" id="log-icon">▶</span>
   </div>
   <div class="section-body collapsed" id="log-body">
     {log_html}
-    <div style="padding:8px 16px; border-top:1px solid var(--border);">
+    <div style="padding:8px 16px;border-top:1px solid var(--border);">
       <button onclick="scrollLogToBottom()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px;">
         ↓ Scroll to bottom
       </button>
@@ -666,7 +568,7 @@ def render_html(
 </div>
 
 <div class="footer">
-  HawksTrade Status UI &nbsp;·&nbsp; Generated {generated_at} &nbsp;·&nbsp; Read-only dashboard — trading system not modified
+  HawksTrade Status UI &nbsp;·&nbsp; Generated {html.escape(generated_at)} &nbsp;·&nbsp; Read-only dashboard — trading system not modified
 </div>
 
 <script>
@@ -676,7 +578,6 @@ def render_html(
     const collapsed = body.classList.toggle('collapsed');
     icon.textContent = collapsed ? '▶' : '▼';
   }}
-
   function scrollLogToBottom() {{
     const el = document.getElementById('log-content');
     if (el) el.scrollTop = el.scrollHeight;
@@ -695,19 +596,18 @@ def main():
         args.project_dir, args.output, __file__
     )
 
-    # Load all data (read-only, failure-safe)
-    config        = load_config(config_path)
-    last_run      = get_last_run_time(logs_dir)
-    log_path      = get_last_run_log_path(logs_dir)
-    log_lines     = tail_log(log_path, args.log_lines)
-    trades        = load_trades(trades_path)
-    open_pos      = get_open_positions(trades)
-    actions       = get_recent_actions(trades, n=60)
-    stats         = compute_stats(trades)
-    generated_at  = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    log_path_str  = log_path.name if log_path else "no log found"
+    config       = load_config(config_path)
+    last_run     = get_last_run_time(logs_dir)
+    log_path     = get_last_run_log_path(logs_dir)
+    log_lines    = tail_log(log_path, args.log_lines)
+    trades       = load_trades(trades_path)
+    open_pos     = get_open_positions(trades)
+    actions      = get_recent_actions(trades, n=60)
+    stats        = compute_stats(trades)
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    log_path_str = log_path.name if log_path else "no log found"
 
-    html = render_html(
+    html_content = render_html(
         config=config,
         last_run=last_run,
         open_positions=open_pos,
@@ -720,7 +620,7 @@ def main():
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(html, encoding="utf-8")
+    output_path.write_text(html_content, encoding="utf-8")
     print(f"[HawksTrade Status] Dashboard written → {output_path}")
 
 
