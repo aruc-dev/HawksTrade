@@ -180,7 +180,79 @@ Instructions:
 
 ---
 
-## 3. Recreating with Cron on Linux / Cloud VM
+## 3. Recreating in Codex Desktop App
+
+Codex cron automations should be created as exact-time weekly schedules for any task
+that has mixed hours and minutes. Do **not** collapse these into a single RRULE such as
+`FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=6,7,8,9,10,11,12;BYMINUTE=0,35`.
+That pattern can be interpreted as only the first matching occurrence instead of every
+intended slot.
+
+Use the local Pacific schedule below when running Codex on the original laptop. Each
+automation should use local execution with internet access and the working directory set
+to `/path/to/HawksTrade`.
+
+### Codex Stock Scan Automations
+
+Create these exact weekly automations:
+
+| Automation ID | RRULE | Command |
+|---------------|-------|---------|
+| `hawkstrade-stock-scan` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=6;BYMINUTE=35` | `python scheduler/run_scan.py --stocks-only` |
+| `hawkstrade-full-scan-0700` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=7;BYMINUTE=0` | `python scheduler/run_scan.py` |
+| `hawkstrade-full-scan-0800` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=8;BYMINUTE=0` | `python scheduler/run_scan.py` |
+| `hawkstrade-full-scan-0900` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=9;BYMINUTE=0` | `python scheduler/run_scan.py` |
+| `hawkstrade-full-scan-1000` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=10;BYMINUTE=0` | `python scheduler/run_scan.py` |
+| `hawkstrade-full-scan-1100` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=11;BYMINUTE=0` | `python scheduler/run_scan.py` |
+| `hawkstrade-full-scan-1200` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=12;BYMINUTE=0` | `python scheduler/run_scan.py` |
+
+### Codex Risk Check Automations
+
+Create exact weekly automations for each risk-check slot, using this command:
+
+```bash
+python scheduler/run_risk_check.py
+```
+
+Required Pacific slots:
+
+```text
+06:45
+07:00 07:15 07:30 07:45
+08:00 08:15 08:30 08:45
+09:00 09:15 09:30 09:45
+10:00 10:15 10:30 10:45
+11:00 11:15 11:30 11:45
+12:00 12:15 12:30 12:45
+```
+
+For each slot, use an RRULE in this exact shape:
+
+```text
+FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=<hour>;BYMINUTE=<minute>
+```
+
+For example:
+
+```text
+FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=6;BYMINUTE=45
+FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=7;BYMINUTE=0
+FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=7;BYMINUTE=15
+```
+
+### Codex Simple Automations
+
+The remaining schedules do not need splitting:
+
+| Automation ID | RRULE | Command |
+|---------------|-------|---------|
+| `hawkstrade-crypto-scan` | `FREQ=HOURLY;INTERVAL=1` | `python scheduler/run_scan.py --crypto-only` |
+| `hawkstrade-daily-report` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=13;BYMINUTE=30` | `python scheduler/run_report.py` |
+| `hawkstrade-weekly-report` | `FREQ=WEEKLY;BYDAY=MO;BYHOUR=5;BYMINUTE=0` | `python scheduler/run_report.py --weekly` |
+
+---
+
+## 4. Recreating with Cron on Linux / Cloud VM
 
 If running on a Linux VM (AWS, GCP, etc.) **in the Eastern timezone**, add these to crontab:
 
@@ -229,7 +301,7 @@ If your VM is in **UTC**, subtract 4 hours from ET times (or 7 from PDT):
 
 ---
 
-## 4. Recreating with Other AI Agents (Codex, GPT, Gemini)
+## 5. Recreating with Other AI Agents (GPT, Gemini, etc.)
 
 Any AI agent with shell access can run HawksTrade by:
 1. Reading `AGENTS.md` for the operating manual
@@ -240,7 +312,7 @@ The project is fully self-contained. No external dependencies beyond Alpaca API 
 
 ---
 
-## 5. Checklist: Moving to a New System
+## 6. Checklist: Moving to a New System
 
 - [ ] Copy the entire `HawksTrade/` folder to the new system
 - [ ] Install Python 3.10+ on the new system
@@ -248,7 +320,7 @@ The project is fully self-contained. No external dependencies beyond Alpaca API 
 - [ ] Copy `config/.env` or `.env` from the old system (or create fresh from `config/.env.example`)
 - [ ] Update the **working directory path** in each scheduled task prompt
 - [ ] Determine local timezone of new system and pick correct cron expressions from above
-- [ ] Recreate the 5 scheduled tasks (Claude desktop, cron, or agent framework)
+- [ ] Recreate the 5 scheduled tasks (Claude desktop, cron, Codex desktop, or agent framework)
 - [ ] Test connection: `python -c "import sys; sys.path.insert(0,'.'); from core.alpaca_client import get_account; print('OK:', get_account().portfolio_value)"`
 - [ ] Run a manual scan to confirm: `python scheduler/run_scan.py`
 - [ ] Run unit tests before deployment: `python3 -m unittest discover -v`
