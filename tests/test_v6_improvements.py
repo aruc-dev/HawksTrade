@@ -7,7 +7,7 @@ Tests for v6 improvements:
 
 import unittest
 import pandas as pd
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import sys
 from pathlib import Path
