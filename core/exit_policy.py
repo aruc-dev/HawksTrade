@@ -58,6 +58,9 @@ def should_exit_for_hold(
         return False, ""
 
     if strategy != "momentum":
+        # Non-momentum strategies use a simple fixed-hold exit.
+        # The exit_policy field is intentionally ignored for these strategies;
+        # only momentum has policy-aware (profit-trailing) exit logic.
         return True, f"Hold {int(age_days)}d"
 
     policy = normalize_momentum_exit_policy(strategy_cfg.get("exit_policy"))
