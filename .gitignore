@@ -28,3 +28,7 @@ data/archive/
 .dolt/
 *.db
 .beads-credential-key
+
+# Status UI generated output
+status_ui/status.html
+status_ui/generator.log
