@@ -1,6 +1,6 @@
 # HawksTrade — Status UI
 
-A **read-only, zero-intrusion** dashboard generator for HawksTrade.  
+A **read-only, zero-intrusion** dashboard generator for HawksTrade.
 It reads your existing config, trade log, and scan logs — never importing or modifying any trading code.
 
 ---
@@ -23,10 +23,10 @@ It reads your existing config, trade log, and scan logs — never importing or m
 
 ```
 status_ui/
-├── generate_status.py     ← Main generator script (run this)
+├── generate_status.py      ← Main generator script (run this)
 ├── run_status_generator.sh ← Shell loop for continuous refresh
-├── status.html            ← OUTPUT — open in any browser (git-ignored)
-└── README.md              ← This file
+├── status.html             ← OUTPUT — open in any browser (git-ignored)
+└── README.md               ← This file
 ```
 
 Add `status_ui/status.html` to `.gitignore` (it's regenerated every run).
@@ -58,11 +58,11 @@ open status_ui/status.html     # macOS
 # Default: refresh every 120 seconds
 bash status_ui/run_status_generator.sh
 
-# Custom interval (e.g. 60 seconds)
+# Custom interval (e.g. 60 seconds); must be a positive integer
 bash status_ui/run_status_generator.sh 60
 ```
 
-Run in a **separate terminal** from your trading system. It will keep running until Ctrl+C.
+Run in a **separate terminal** from your trading system. Press Ctrl+C to stop.
 
 ### Continuous refresh — Option B: cron
 
@@ -71,6 +71,7 @@ crontab -e
 ```
 
 Add (adjust path):
+
 ```
 # HawksTrade status dashboard — refresh every 2 minutes
 */2 * * * * /usr/bin/python3 /path/to/HawksTrade/status_ui/generate_status.py >> /path/to/HawksTrade/status_ui/generator.log 2>&1
@@ -80,31 +81,38 @@ Add (adjust path):
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.10+
 - `pyyaml` (already in HawksTrade's `requirements.txt`)
-- No other dependencies — stdlib only (csv, os, re, datetime, pathlib)
+- No other dependencies — stdlib only (`csv`, `collections`, `html`, `datetime`, `pathlib`)
 
 ---
 
 ## How the browser auto-refresh works
 
 The generated HTML includes:
+
 ```html
 <meta http-equiv="refresh" content="60">
 ```
-If you leave the file open in a browser, it automatically reloads every 60 seconds (matching your generator interval). Pass `--refresh 0` to disable.
+
+If you leave the file open in a browser, it automatically reloads every 60 seconds.
+Pass `--refresh 0` to disable.
 
 ---
 
-## Staleness detection
+## Last run freshness
 
-If the `logs/scan_*.log` file hasn't been modified in longer than 3× the expected interval, the Last Run time will appear visually stale. Check that the trading system's cron tasks are running.
+The dashboard shows the `logs/scan_*.log` file modification time as the **Last Run** time.
+It does not apply automatic visual stale-state highlighting based on age.
+If the timestamp is older than your expected refresh interval, check that the trading
+system's cron tasks are running.
 
 ---
 
 ## .gitignore
 
 Add this to your project `.gitignore`:
+
 ```
 status_ui/status.html
 status_ui/generator.log
