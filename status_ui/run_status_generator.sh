@@ -2,20 +2,30 @@
 # ============================================================
 # HawksTrade — Status UI background loop runner
 # ============================================================
-# Run this in a separate terminal (or detach with &) to keep
-# the status.html refreshed without using cron.
-#
 # Usage:
 #   bash status_ui/run_status_generator.sh
-#   bash status_ui/run_status_generator.sh 120        # 120-second interval
-#
-# The script lives in status_ui/ inside the HawksTrade project root.
+#   bash status_ui/run_status_generator.sh 120    # 120-second interval
 # ============================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 GENERATOR="$SCRIPT_DIR/generate_status.py"
-INTERVAL="${1:-120}"   # default 120 seconds
+INTERVAL="${1:-120}"
+
+# Validate INTERVAL is a positive integer
+case "$INTERVAL" in
+    ''|*[!0-9]*)
+        echo "Error: interval must be a positive integer (seconds)." >&2
+        echo "Usage: bash status_ui/run_status_generator.sh [positive-integer-seconds]" >&2
+        exit 1
+        ;;
+esac
+
+if [ "$INTERVAL" -le 0 ]; then
+    echo "Error: interval must be greater than 0." >&2
+    echo "Usage: bash status_ui/run_status_generator.sh [positive-integer-seconds]" >&2
+    exit 1
+fi
 
 echo "[HawksTrade Status] Starting generator loop (interval=${INTERVAL}s)"
 echo "[HawksTrade Status] Project dir: $PROJECT_DIR"
