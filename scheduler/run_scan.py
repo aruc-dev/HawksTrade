@@ -33,6 +33,7 @@ from core import alpaca_client as ac
 from core import order_executor as oe
 from core import risk_manager as rm
 from core.exit_policy import should_exit_for_hold
+from core.logging_config import runtime_log_handlers
 from core.portfolio import get_open_symbols, print_snapshot
 from tracking.trade_log import get_open_trades, get_trade_age_days
 from strategies.momentum import MomentumStrategy
@@ -46,7 +47,6 @@ from screener.universe_builder import UniverseBuilder
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 LOG_DIR  = BASE_DIR / "logs"
-LOG_DIR.mkdir(exist_ok=True)
 
 
 def _utc_now():
@@ -55,10 +55,7 @@ def _utc_now():
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(LOG_DIR / f"scan_{_utc_now().strftime('%Y%m%d')}.log"),
-    ],
+    handlers=runtime_log_handlers(LOG_DIR, f"scan_{_utc_now().strftime('%Y%m%d')}.log"),
 )
 log = logging.getLogger("run_scan")
 
@@ -100,8 +97,68 @@ def _already_holding(symbol: str, open_symbols: list) -> bool:
     return any(_symbols_match(symbol, open_symbol) for open_symbol in open_symbols)
 
 
+def _normalized_symbol_set(symbols) -> set:
+    return {ac.normalize_symbol(str(symbol)) for symbol in symbols if str(symbol or "").strip()}
+
+
 def _symbols_match(left: str, right: str) -> bool:
     return ac.normalize_symbol(left) == ac.normalize_symbol(right)
+
+
+def _strategy_enabled(strategy) -> bool:
+    return CFG["strategies"].get(strategy.name, {}).get("enabled", False)
+
+
+def _enabled_strategies(strategies) -> list:
+    return [strategy for strategy in strategies if _strategy_enabled(strategy)]
+
+
+def _order_value(order, name: str, default=None):
+    if isinstance(order, dict):
+        return order.get(name, default)
+    return getattr(order, name, default)
+
+
+def _order_side(order) -> str | None:
+    side = _order_value(order, "side")
+    if side is None:
+        return None
+    return str(getattr(side, "value", side)).lower()
+
+
+def _pending_entry_symbols() -> set:
+    """Return symbols with open broker buy orders so entries are not duplicated."""
+    try:
+        orders = ac.get_open_orders()
+    except Exception as e:
+        log.warning(f"Could not check pending entry orders; continuing with position snapshot only: {e}")
+        return set()
+
+    symbols = []
+    for order in orders or []:
+        if _order_side(order) == "buy":
+            symbol = _order_value(order, "symbol")
+            if symbol:
+                symbols.append(symbol)
+    return _normalized_symbol_set(symbols)
+
+
+def _max_positions_planned(planned_symbols: set) -> bool:
+    max_positions = int(CFG["trading"]["max_positions"])
+    if len(planned_symbols) >= max_positions:
+        log.info(f"Max planned positions reached: {len(planned_symbols)}/{max_positions}")
+        return True
+    return False
+
+
+def _register_entry_result(result, symbol: str, open_symbols: list, planned_symbols: set, new_entry_symbols: set):
+    if not result:
+        return
+    normalized = ac.normalize_symbol(symbol)
+    planned_symbols.add(normalized)
+    new_entry_symbols.add(normalized)
+    if not _already_holding(symbol, open_symbols):
+        open_symbols.append(symbol)
 
 
 def _asset_class_matches(strategy_asset_class: str, position_asset_class: str) -> bool:
@@ -188,24 +245,38 @@ def _check_hold_day_exits(open_symbols: list, dry_run: bool = False):
             oe.exit_position(symbol, reason="Hold period expired", asset_class=asset_class, dry_run=dry_run)
 
 
-def _check_strategy_exits(strategies, open_symbols, dry_run: bool = False):
+def _check_strategy_exits(strategies, open_symbols, dry_run: bool = False, skip_symbols=None):
     """Ask each strategy if any open position should be exited."""
+    skip_symbols = skip_symbols or set()
+    open_trades = get_open_trades()
     for symbol in open_symbols:
-        open_trades = get_open_trades()
+        normalized_symbol = ac.normalize_symbol(symbol)
+        if normalized_symbol in skip_symbols:
+            log.info(f"Skipping same-scan strategy exit for new entry {symbol}.")
+            continue
         matching    = [
             t for t in open_trades
             if _symbols_match(t["symbol"], symbol) and t["side"] == "buy"
         ]
         if not matching:
             continue
-        entry_price = float(matching[-1]["entry_price"])
-        asset_class = matching[-1].get("asset_class", "stock")
-        relevant    = [s for s in strategies if _asset_class_matches(s.asset_class, asset_class)]
+        trade = matching[-1]
+        entry_price = float(trade["entry_price"])
+        asset_class = trade.get("asset_class", "stock")
+        trade_strategy = trade.get("strategy", "")
+        if not CFG["strategies"].get(trade_strategy, {}).get("enabled", False):
+            log.debug(f"Strategy {trade_strategy} disabled; skipping strategy exit for {symbol}.")
+            continue
+        strategy_symbol = trade.get("symbol", symbol) if asset_class == "crypto" else symbol
+        relevant = [
+            s for s in strategies
+            if s.name == trade_strategy and _asset_class_matches(s.asset_class, asset_class)
+        ]
         for strategy in relevant:
-            should_exit, reason = strategy.should_exit(symbol, entry_price)
+            should_exit, reason = strategy.should_exit(strategy_symbol, entry_price)
             if should_exit:
-                log.info(f"Strategy exit signal for {symbol}: {reason}")
-                oe.exit_position(symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
+                log.info(f"Strategy exit signal for {strategy_symbol}: {reason}")
+                oe.exit_position(strategy_symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
                 break  # position closed, no need to check further
 
 
@@ -239,27 +310,36 @@ def run(run_stocks: bool = True, run_crypto: bool = True, dry_run: bool = False)
         print_snapshot()
         return
 
+    pending_entry_symbols = set() if dry_run else _pending_entry_symbols()
+    planned_symbols = _normalized_symbol_set(open_symbols) | pending_entry_symbols
+    new_entry_symbols = set()
+    if pending_entry_symbols:
+        log.info(f"Pending entry orders counted as planned positions: {len(pending_entry_symbols)}")
+
     all_strategies = []
 
     # --- Stock scan (only when market is open) ---
     if run_stocks and market_open:
         log.info("--- Running stock strategies ---")
         stock_universe = get_stock_universe()
-        for strategy in STOCK_STRATEGIES:
-            if not CFG["strategies"].get(strategy.name, {}).get("enabled", False):
-                continue
+        enabled_stock_strategies = _enabled_strategies(STOCK_STRATEGIES)
+        for strategy in enabled_stock_strategies:
             try:
                 signals = strategy.scan(stock_universe)
                 for sig in signals:
                     sym = sig["symbol"]
-                    if _already_holding(sym, open_symbols):
+                    normalized = ac.normalize_symbol(sym)
+                    if normalized in planned_symbols:
                         log.debug(f"Already holding {sym}, skipping entry.")
                         continue
+                    if _max_positions_planned(planned_symbols):
+                        break
                     if sig["action"] == "buy":
-                        oe.enter_position(sym, strategy=strategy.name, asset_class="stock", dry_run=dry_run)
+                        result = oe.enter_position(sym, strategy=strategy.name, asset_class="stock", dry_run=dry_run)
+                        _register_entry_result(result, sym, open_symbols, planned_symbols, new_entry_symbols)
             except Exception as e:
                 log.error(f"Strategy {strategy.name} failed: {e}", exc_info=True)
-        all_strategies.extend(STOCK_STRATEGIES)
+        all_strategies.extend(enabled_stock_strategies)
 
     elif run_stocks and not market_open:
         log.info("Market closed. Stock strategies skipped.")
@@ -267,21 +347,24 @@ def run(run_stocks: bool = True, run_crypto: bool = True, dry_run: bool = False)
     # --- Crypto scan (24/7) ---
     if run_crypto:
         log.info("--- Running crypto strategies ---")
-        for strategy in CRYPTO_STRATEGIES:
-            if not CFG["strategies"].get(strategy.name, {}).get("enabled", False):
-                continue
+        enabled_crypto_strategies = _enabled_strategies(CRYPTO_STRATEGIES)
+        for strategy in enabled_crypto_strategies:
             try:
                 signals = strategy.scan(CRYPTO_UNIVERSE)
                 for sig in signals:
                     sym = sig["symbol"]
-                    if _already_holding(sym, open_symbols):
+                    normalized = ac.normalize_symbol(sym)
+                    if normalized in planned_symbols:
                         log.debug(f"Already holding {sym}, skipping entry.")
                         continue
+                    if _max_positions_planned(planned_symbols):
+                        break
                     if sig["action"] == "buy":
-                        oe.enter_position(sym, strategy=strategy.name, asset_class="crypto", dry_run=dry_run)
+                        result = oe.enter_position(sym, strategy=strategy.name, asset_class="crypto", dry_run=dry_run)
+                        _register_entry_result(result, sym, open_symbols, planned_symbols, new_entry_symbols)
             except Exception as e:
                 log.error(f"Strategy {strategy.name} failed: {e}", exc_info=True)
-        all_strategies.extend(CRYPTO_STRATEGIES)
+        all_strategies.extend(enabled_crypto_strategies)
 
     # --- Strategy-level exit checks ---
     log.info("--- Checking strategy exit conditions ---")
@@ -290,7 +373,8 @@ def run(run_stocks: bool = True, run_crypto: bool = True, dry_run: bool = False)
     except Exception as e:
         log.error(f"Could not refresh open positions; skipping exit checks: {e}", exc_info=True)
         return
-    _check_strategy_exits(all_strategies, open_symbols, dry_run=dry_run)
+    skip_symbols = set() if INTRADAY_ON else new_entry_symbols
+    _check_strategy_exits(all_strategies, open_symbols, dry_run=dry_run, skip_symbols=skip_symbols)
 
     # --- Hold-day expiry exits ---
     log.info("--- Checking hold-day expiry ---")

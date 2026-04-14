@@ -9,6 +9,7 @@ import os
 import sys
 import logging
 import argparse
+import tempfile
 import yaml
 import numpy as np
 import pandas as pd
@@ -488,6 +489,14 @@ def run_backtest(
     # keeping the total nesting depth inside run_backtest() within CPython's
     # CO_MAXBLOCKS=20 compile-time limit.
     with contextlib.ExitStack() as stack:
+        baseline_dir = tempfile.TemporaryDirectory()
+        stack.callback(baseline_dir.cleanup)
+        stack.enter_context(patch(
+            "core.risk_manager.DAILY_BASELINE_FILE",
+            Path(baseline_dir.name) / "daily_loss_baseline.json",
+        ))
+        stack.enter_context(patch("core.risk_manager._session_start_value", None))
+        stack.enter_context(patch("core.risk_manager._session_date", None))
         stack.enter_context(patch("core.alpaca_client.get_portfolio_value", side_effect=sim.get_portfolio_value))
         stack.enter_context(patch("core.alpaca_client.get_cash", side_effect=sim.get_cash))
         stack.enter_context(patch("core.alpaca_client.get_all_positions", side_effect=sim.get_all_positions))

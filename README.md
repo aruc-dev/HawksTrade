@@ -30,7 +30,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener
 
 ## Backtesting & Performance
 
-HawksTrade includes a high-fidelity historical simulator. The current default strategy set achieved **+26.53% annual return** in the 12-month backtest ending 2026-04-10 on $10,000 starting capital.
+HawksTrade includes a high-fidelity historical simulator. The current default strategy set achieved **+19.00% annual return** in the 12-month backtest ending 2026-04-10 on $10,000 starting capital, with the configured 5% max-position risk cap enforced.
 
 - **Backtest Summary**: [backtests.md](backtests.md)
 - **Configuration Guide**: [config.md](config.md)
@@ -59,7 +59,7 @@ Both filters fail open (return True) if data is unavailable, ensuring the system
 
 ### Kelly Criterion Dynamic Position Sizing
 
-Momentum strategy uses Half-Kelly position sizing with parameters derived dynamically from the last 30 closed momentum trades. When fewer than 10 trades are available, it falls back to hardcoded defaults (WR=0.567, avg_win=14.0%, avg_loss=5.4%). Position size is capped at 8% of portfolio and floored at 1%.
+Momentum strategy uses Half-Kelly position sizing with parameters derived dynamically from the last 30 closed momentum trades. When fewer than 10 trades are available, it falls back to hardcoded defaults (WR=0.567, avg_win=14.0%, avg_loss=5.4%). Position size is capped by `trading.max_position_pct` and currently cannot exceed 5% of portfolio.
 
 ### Momentum Exit Policy
 

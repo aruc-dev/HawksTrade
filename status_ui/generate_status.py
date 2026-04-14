@@ -176,7 +176,7 @@ def compute_stats(trades: list) -> dict:
 # ── HTML Helpers ──────────────────────────────────────────────────────────────
 
 # Whitelist of known-safe CSS class suffixes for status badges
-_SAFE_STATUS_CLASSES = {"open", "closed", "dry_run"}
+_SAFE_STATUS_CLASSES = {"open", "closed", "dry_run", "submitted", "partially_filled"}
 
 
 def _esc(val) -> str:
@@ -449,6 +449,8 @@ def render_html(
     .status-badge.open {{ background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid var(--green); }}
     .status-badge.closed {{ background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }}
     .status-badge.dry_run {{ background: rgba(88,166,255,0.1); color: var(--blue); border: 1px solid var(--blue); }}
+    .status-badge.submitted {{ background: rgba(210,153,34,0.12); color: var(--yellow); border: 1px solid var(--yellow); }}
+    .status-badge.partially_filled {{ background: rgba(210,153,34,0.12); color: var(--yellow); border: 1px solid var(--yellow); }}
     .status-badge.unknown {{ background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }}
     .pos {{ color: var(--green); font-weight: 600; }}
     .neg {{ color: var(--red); font-weight: 600; }}

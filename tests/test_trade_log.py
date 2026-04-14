@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 from tracking import trade_log
 
@@ -57,6 +58,130 @@ class TradeLogTests(unittest.TestCase):
         self.assertEqual(rows[1]["exit_price"], "121")
         self.assertEqual(rows[1]["pnl_pct"], "0.1")
         self.assertEqual(rows[1]["exit_reason"], "test exit")
+
+    def test_mark_trade_closed_reduces_quantity_on_partial_exit(self):
+        trade_log.log_trade({
+            "timestamp": "2026-04-14T19:05:11+00:00",
+            "mode": "paper",
+            "symbol": "AMZN",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "side": "buy",
+            "qty": "32.139315",
+            "entry_price": 248.53,
+            "order_id": "entry",
+            "status": "open",
+        })
+
+        trade_log.mark_trade_closed(
+            "AMZN",
+            exit_price=248.565,
+            pnl_pct=-0.00002,
+            reason="partial exit",
+            closed_qty="29.0",
+        )
+
+        rows = self._read_rows()
+        self.assertEqual(rows[0]["status"], "open")
+        self.assertEqual(rows[0]["qty"], "3.139315")
+        self.assertEqual(rows[0]["exit_price"], "")
+        self.assertEqual(rows[0]["pnl_pct"], "")
+
+    def test_reconcile_reopens_closed_buy_when_broker_has_residual(self):
+        trade_log.log_trade({
+            "timestamp": "2026-04-14T19:05:11+00:00",
+            "mode": "paper",
+            "symbol": "AMZN",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "side": "buy",
+            "qty": "32.139315",
+            "entry_price": 248.53,
+            "exit_price": 248.565,
+            "pnl_pct": -0.00002,
+            "exit_reason": "exit",
+            "order_id": "entry",
+            "status": "closed",
+        })
+        trade_log.log_trade({
+            "timestamp": "2026-04-14T19:05:13+00:00",
+            "mode": "paper",
+            "symbol": "AMZN",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "side": "sell",
+            "qty": "29.0",
+            "entry_price": 248.57,
+            "exit_price": 248.565,
+            "pnl_pct": -0.00002,
+            "exit_reason": "exit",
+            "order_id": "exit",
+            "status": "closed",
+        })
+
+        summary = trade_log.reconcile_open_trades_with_positions([
+            SimpleNamespace(
+                symbol="AMZN",
+                qty="3.139315",
+                avg_entry_price="248.571954",
+                asset_class="AssetClass.US_EQUITY",
+            )
+        ])
+
+        rows = self._read_rows()
+        self.assertEqual(summary["reopened_rows"], 1)
+        self.assertEqual(rows[0]["status"], "open")
+        self.assertEqual(rows[0]["qty"], "3.139315")
+        self.assertEqual(rows[0]["entry_price"], "248.571954")
+        self.assertEqual(rows[1]["status"], "closed")
+
+    def test_reconcile_marks_unfilled_sell_submitted_when_position_still_open(self):
+        trade_log.log_trade({
+            "timestamp": "2026-04-14T18:04:02+00:00",
+            "mode": "paper",
+            "symbol": "META",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "side": "buy",
+            "qty": "12.030374",
+            "entry_price": 664.625,
+            "exit_price": 666.035,
+            "pnl_pct": 0.001315,
+            "exit_reason": "exit",
+            "order_id": "entry",
+            "status": "closed",
+        })
+        trade_log.log_trade({
+            "timestamp": "2026-04-14T18:04:10+00:00",
+            "mode": "paper",
+            "symbol": "META",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "side": "sell",
+            "qty": "12.030374",
+            "entry_price": 665.16,
+            "exit_price": 666.035,
+            "pnl_pct": 0.001315,
+            "exit_reason": "exit",
+            "order_id": "exit",
+            "status": "closed",
+        })
+
+        summary = trade_log.reconcile_open_trades_with_positions([
+            SimpleNamespace(
+                symbol="META",
+                qty="12.030374",
+                avg_entry_price="665.16",
+                asset_class="AssetClass.US_EQUITY",
+            )
+        ])
+
+        rows = self._read_rows()
+        self.assertEqual(summary["reopened_rows"], 1)
+        self.assertEqual(summary["marked_unfilled_sells"], 1)
+        self.assertEqual(rows[0]["status"], "open")
+        self.assertEqual(rows[1]["status"], "submitted")
+        self.assertEqual(rows[1]["pnl_pct"], "")
 
     def test_get_trade_age_days_accepts_timezone_aware_timestamp(self):
         timestamp = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()

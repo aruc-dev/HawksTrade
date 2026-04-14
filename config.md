@@ -1,6 +1,6 @@
 # HawksTrade Configuration Guide
 
-> **Updated:** April 12, 2026
+> **Updated:** April 14, 2026
 > **Primary config file:** `config/config.yaml`
 > **Recommended profile:** growth-oriented paper trading profile validated by the latest 12-month backtest.
 
@@ -28,7 +28,9 @@ Latest recommended 12-month result:
 
 | Final Value | Return | Trades | Win Rate | Max Drawdown |
 |---:|---:|---:|---:|---:|
-| $12,652.86 | +26.53% | 274 | 34.7% | -9.34% |
+| $11,900.35 | +19.00% | 274 | 34.7% | -6.13% |
+
+These results enforce `trading.max_position_pct: 0.05` for all entries, including momentum/Kelly sizing. Earlier higher-return documentation reflected the older sizing behavior before that risk-cap fix.
 
 See [backtests.md](backtests.md) for the full comparison.
 

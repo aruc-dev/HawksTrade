@@ -1,6 +1,6 @@
 # HawksTrade Backtest Summary
 
-> **Updated:** April 12, 2026
+> **Updated:** April 14, 2026
 > **Starting Capital:** $10,000
 > **Backtest End Date:** April 10, 2026
 > **Momentum Exit Policy:** `profit_trailing`
@@ -20,10 +20,12 @@ The current recommended configuration uses:
 - `rsi_reversion` disabled
 - `gap_up` disabled
 
+These results enforce `trading.max_position_pct: 0.05` for every entry, including momentum/Kelly sizing. Earlier documentation showed higher dollar returns from the previous behavior where momentum sizing could exceed the configured 5% cap.
+
 | Period | Final Value | Return | Trades | Win Rate | Max Drawdown |
 |---|---:|---:|---:|---:|---:|
-| 12 months | $12,652.86 | +26.53% | 274 | 34.7% | -9.34% |
-| 6 months | $10,911.44 | +9.11% | 104 | 32.7% | -5.80% |
+| 12 months | $11,900.35 | +19.00% | 274 | 34.7% | -6.13% |
+| 6 months | $10,566.60 | +5.67% | 104 | 32.7% | -3.74% |
 
 ---
 
@@ -31,19 +33,19 @@ The current recommended configuration uses:
 
 | Strategy | Trades | Win Rate | Avg P&L % | Total P&L | Best | Worst |
 |---|---:|---:|---:|---:|---:|---:|
-| `momentum` | 226 | 31.0% | +0.94% | $1,846.24 | +19.10% | -12.85% |
-| `ma_crossover` | 23 | 52.2% | +3.80% | $463.43 | +18.74% | -7.40% |
-| `range_breakout` | 25 | 52.0% | +1.79% | $216.05 | +26.50% | -7.56% |
+| `momentum` | 226 | 31.0% | +0.94% | $1,143.83 | +19.10% | -12.85% |
+| `ma_crossover` | 23 | 52.2% | +3.80% | $459.31 | +18.74% | -7.40% |
+| `range_breakout` | 25 | 52.0% | +1.79% | $218.88 | +26.50% | -7.56% |
 
 ## 12-Month Quarterly Breakdown
 
 | Quarter | Start Value | End Value | Return | Trades | Win Rate |
 |---|---:|---:|---:|---:|---:|
-| Q2 2025 | $10,000.00 | $10,923.15 | +9.23% | 55 | 40.0% |
-| Q3 2025 | $10,955.62 | $11,701.20 | +6.81% | 97 | 34.0% |
-| Q4 2025 | $11,775.83 | $11,162.32 | -5.21% | 71 | 21.1% |
-| Q1 2026 | $11,114.30 | $12,530.92 | +12.75% | 50 | 50.0% |
-| Q2 2026 | $12,530.92 | $12,652.86 | +0.97% | 1 | 0.0% |
+| Q2 2025 | $10,000.00 | $10,669.60 | +6.70% | 55 | 40.0% |
+| Q3 2025 | $10,689.46 | $11,331.02 | +6.00% | 97 | 34.0% |
+| Q4 2025 | $11,376.53 | $10,988.77 | -3.41% | 71 | 21.1% |
+| Q1 2026 | $10,959.17 | $11,826.92 | +7.92% | 50 | 50.0% |
+| Q2 2026 | $11,826.92 | $11,900.35 | +0.62% | 1 | 0.0% |
 
 ---
 
@@ -51,16 +53,15 @@ The current recommended configuration uses:
 
 | Scenario | Screener | Strategies | Return | Trades | Win Rate | Max Drawdown |
 |---|---|---|---:|---:|---:|---:|
-| Old screener baseline | On | all | +8.35% | 337 | not recorded | not recorded |
-| Tight screener, all strategies | On | all | +19.78% | 316 | 30.4% | -11.50% |
-| Tight screener, default strategy set | On | `momentum`, `ma_crossover`, `range_breakout` | +26.53% | 274 | 34.7% | -9.34% |
-| Fixed universe, all strategies | Off | all | +22.55% | 229 | 35.4% | -6.96% |
-| Fixed universe, default strategy set | Off | `momentum`, `ma_crossover`, `range_breakout` | +20.16% | 172 | 39.0% | -4.64% |
+| Tight screener, default strategy set | On | `momentum`, `ma_crossover`, `range_breakout` | +19.00% | 274 | 34.7% | -6.13% |
+| Fixed universe, default strategy set | Off | `momentum`, `ma_crossover`, `range_breakout` | +14.50% | 172 | 39.0% | -3.06% |
+| Historical pre-cap recommended run | On | `momentum`, `ma_crossover`, `range_breakout` | +26.53% | 274 | 34.7% | -9.34% |
+| Historical pre-cap fixed-universe run | Off | `momentum`, `ma_crossover`, `range_breakout` | +20.16% | 172 | 39.0% | -4.64% |
 
 Interpretation:
 
-- The tightened screener fixed the main underperformance seen in the old broad screener run.
-- The highest 12-month return came from the tightened screener plus the default strategy set.
+- The tightened screener remains the recommended default because it produced higher return than the fixed universe while keeping drawdown controlled.
+- Enforcing the configured 5% position cap lowered dollar returns versus the earlier pre-cap runs, but also reduced max drawdown.
 - The fixed-universe default strategy set had lower drawdown and higher win rate, but lower total return.
 - `rsi_reversion` and `gap_up` are disabled by default because they did not improve the validated 12-month configuration.
 
