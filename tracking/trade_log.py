@@ -160,6 +160,7 @@ def mark_trade_closed(
         return False
 
     updated = False
+    partial_close_logged = False  # set True when a partial exit log is emitted
     for row in reversed(rows):
         if not (
             _symbols_match(row.get("symbol", ""), symbol)
@@ -194,6 +195,7 @@ def mark_trade_closed(
                 f"Trade partially closed: {symbol} | closed_qty={_fmt_decimal(remaining)} "
                 f"| remaining_qty={row['qty']} | reason={reason}"
             )
+            partial_close_logged = True
             remaining = Decimal("0")
             break
 
@@ -212,7 +214,8 @@ def mark_trade_closed(
             f"Closed quantity exceeded open trade log quantity for {symbol}; "
             f"unmatched_qty={_fmt_decimal(remaining)}"
         )
-    elif closed_qty is None or (remaining is not None and remaining <= QTY_EPSILON):
+    elif not partial_close_logged:
+        # Only emit "Trade closed" for full exits; partial exits already logged above.
         log.info(f"Trade closed: {symbol} | pnl={pnl_pct:.2%} | reason={reason}")
     return True
 
