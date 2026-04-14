@@ -7,6 +7,7 @@ Reads mode (paper/live) from config and picks the correct keys from .env.
 
 import os
 import logging
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -21,7 +22,7 @@ from alpaca.trading.enums import OrderSide, TimeInForce, OrderStatus, QueryOrder
 from alpaca.data.historical import StockHistoricalDataClient, CryptoHistoricalDataClient
 from alpaca.data.requests import (
     StockBarsRequest, CryptoBarsRequest,
-    StockLatestQuoteRequest, CryptoLatestOrderbookRequest
+    StockLatestQuoteRequest, StockLatestTradeRequest, CryptoLatestOrderbookRequest
 )
 from alpaca.data.enums import DataFeed, Adjustment
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
@@ -63,6 +64,7 @@ def _get_keys():
 _trading_client: Optional[TradingClient] = None
 _stock_data_client: Optional[StockHistoricalDataClient] = None
 _crypto_data_client: Optional[CryptoHistoricalDataClient] = None
+_crypto_price_increment_cache: dict[str, Decimal] = {}
 
 
 def get_trading_client() -> TradingClient:
@@ -159,18 +161,26 @@ def place_market_order(symbol: str, qty: float, side: str, time_in_force: str = 
 
 
 def place_limit_order(symbol: str, qty: float, side: str, limit_price: float,
-                      time_in_force: str = "gtc", strategy: str = "unknown"):
+                      time_in_force: str = "gtc", strategy: str = "unknown",
+                      asset_class: Optional[str] = None):
     """Place a limit order."""
     side = side.lower()
     if side not in {"buy", "sell"}:
         raise ValueError("side must be 'buy' or 'sell'")
     client = get_trading_client()
+    normalized_limit_price = normalize_limit_price(symbol, limit_price, asset_class=asset_class)
+    normalized_time_in_force = normalize_time_in_force(
+        symbol,
+        qty,
+        time_in_force,
+        asset_class=asset_class,
+    )
     req = LimitOrderRequest(
         symbol=symbol,
         qty=qty,
         side=OrderSide.BUY if side == "buy" else OrderSide.SELL,
-        limit_price=round(limit_price, 4),
-        time_in_force=TimeInForce.GTC if time_in_force == "gtc" else TimeInForce.DAY,
+        limit_price=normalized_limit_price,
+        time_in_force=normalized_time_in_force,
     )
     # Attach strategy for backtest mock visibility (bypass Pydantic strictness)
     try:
@@ -184,7 +194,10 @@ def place_limit_order(symbol: str, qty: float, side: str, limit_price: float,
     elif hasattr(order, "strategy"): order.strategy = strategy
 
     order_id = order.id if hasattr(order, "id") else order.get("order_id")
-    log.info(f"Limit order submitted: {side} {qty} {symbol} @ {limit_price} | strategy={strategy} | id={order_id}")
+    log.info(
+        f"Limit order submitted: {side} {qty} {symbol} @ {normalized_limit_price} "
+        f"| strategy={strategy} | id={order_id}"
+    )
     return order
 
 
@@ -202,11 +215,96 @@ def normalize_symbol(symbol: str) -> str:
     return symbol.replace("/", "").upper()
 
 
+def to_crypto_pair_symbol(symbol: str) -> str:
+    """Return Alpaca crypto data symbol format, e.g. DOGEUSD -> DOGE/USD."""
+    cleaned = symbol.strip().upper()
+    if "/" in cleaned:
+        return cleaned
+    for quote in ("USDT", "USDC", "USD", "BTC", "ETH"):
+        if cleaned.endswith(quote) and len(cleaned) > len(quote):
+            return f"{cleaned[:-len(quote)]}/{quote}"
+    return cleaned
+
+
+def normalize_limit_price(symbol: str, limit_price: float, asset_class: Optional[str] = None) -> float:
+    """
+    Normalize limit prices to Alpaca increment rules.
+
+    Stocks priced at or above $1 may use two decimals, while sub-dollar
+    stocks may use four. Crypto pairs use the asset price_increment when
+    Alpaca exposes it, falling back to 9 decimal places.
+    """
+    asset_class = (asset_class or "").lower()
+    is_crypto = asset_class == "crypto" or "/" in symbol
+    if is_crypto:
+        increment = _get_crypto_price_increment(symbol)
+        if increment:
+            return _round_price_to_increment(limit_price, increment)
+        return _round_price(limit_price, 9)
+    if float(limit_price) >= 1:
+        return _round_price(limit_price, 2)
+    return _round_price(limit_price, 4)
+
+
+def normalize_time_in_force(
+    symbol: str,
+    qty: float,
+    time_in_force: str,
+    asset_class: Optional[str] = None,
+) -> TimeInForce:
+    """Return Alpaca-compatible time-in-force for the requested order."""
+    time_in_force = (time_in_force or "gtc").lower()
+    requested = TimeInForce.GTC if time_in_force == "gtc" else TimeInForce.DAY
+    if _is_fractional_stock_order(symbol, qty, asset_class):
+        return TimeInForce.DAY
+    return requested
+
+
+def _is_fractional_stock_order(symbol: str, qty: float, asset_class: Optional[str] = None) -> bool:
+    asset_class = (asset_class or "").lower()
+    is_crypto = asset_class == "crypto" or "/" in symbol
+    if is_crypto:
+        return False
+    quantity = Decimal(str(qty))
+    return quantity != quantity.to_integral_value()
+
+
+def _get_crypto_price_increment(symbol: str) -> Optional[Decimal]:
+    pair_symbol = to_crypto_pair_symbol(symbol)
+    if pair_symbol in _crypto_price_increment_cache:
+        return _crypto_price_increment_cache[pair_symbol]
+    try:
+        asset = get_trading_client().get_asset(pair_symbol)
+        price_increment = getattr(asset, "price_increment", None)
+        if price_increment:
+            increment = Decimal(str(price_increment))
+            if increment > 0:
+                _crypto_price_increment_cache[pair_symbol] = increment
+                return increment
+    except Exception as e:
+        log.debug(f"Could not load crypto price increment for {pair_symbol}: {e}")
+    return None
+
+
+def _round_price(value: float, places: int) -> float:
+    quantum = Decimal("1").scaleb(-places)
+    return float(Decimal(str(value)).quantize(quantum, rounding=ROUND_HALF_UP))
+
+
+def _round_price_to_increment(value: float, increment: Decimal) -> float:
+    units = Decimal(str(value)) / increment
+    rounded_units = units.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    return float(rounded_units * increment)
+
+
 def _symbol_lookup_variants(symbol: str) -> list:
     normalized = normalize_symbol(symbol)
     variants = [symbol]
     if normalized != symbol:
         variants.append(normalized)
+    paired = to_crypto_pair_symbol(normalized)
+    if paired not in variants:
+        variants.append(paired)
     return variants
 
 
@@ -261,10 +359,33 @@ def get_stock_latest_quote(symbol: str):
     return data.get(symbol)
 
 
+def get_stock_latest_trade(symbol: str):
+    req = StockLatestTradeRequest(symbol_or_symbols=[symbol])
+    data = get_stock_data_client().get_stock_latest_trade(req)
+    return data.get(symbol)
+
+
 def get_stock_latest_price(symbol: str) -> float:
     quote = get_stock_latest_quote(symbol)
     if quote:
-        return float((quote.ask_price + quote.bid_price) / 2)
+        bid = float(getattr(quote, "bid_price", 0) or 0)
+        ask = float(getattr(quote, "ask_price", 0) or 0)
+        if bid > 0 and ask > 0:
+            return (ask + bid) / 2
+
+    try:
+        trade = get_stock_latest_trade(symbol)
+        price = float(getattr(trade, "price", 0) or 0) if trade else 0.0
+        if price > 0:
+            return price
+    except Exception as e:
+        log.warning(f"Could not get latest trade for {symbol}: {e}")
+
+    if quote:
+        if bid > 0:
+            return bid
+        if ask > 0:
+            return ask
     return 0.0
 
 
@@ -272,6 +393,7 @@ def get_stock_latest_price(symbol: str) -> float:
 
 def get_crypto_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
     """Fetch OHLCV bars for a list of crypto pairs (e.g. ['BTC/USD'])."""
+    request_symbols = [to_crypto_pair_symbol(symbol) for symbol in symbols]
     tf_map = {
         "1Min": TimeFrame(1, TimeFrameUnit.Minute),
         "5Min": TimeFrame(5, TimeFrameUnit.Minute),
@@ -283,16 +405,17 @@ def get_crypto_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
     tf = tf_map.get(timeframe, TimeFrame.Day)
     end = datetime.now(timezone.utc)
     start = end - _lookback_delta(timeframe, limit, market="crypto")
-    req = CryptoBarsRequest(symbol_or_symbols=symbols, timeframe=tf, start=start, end=end)
+    req = CryptoBarsRequest(symbol_or_symbols=request_symbols, timeframe=tf, start=start, end=end)
     return get_crypto_data_client().get_crypto_bars(req)
 
 
 def get_crypto_latest_price(symbol: str) -> float:
     """symbol e.g. 'BTC/USD'"""
+    request_symbol = to_crypto_pair_symbol(symbol)
     try:
-        req = CryptoLatestOrderbookRequest(symbol_or_symbols=[symbol])
+        req = CryptoLatestOrderbookRequest(symbol_or_symbols=[request_symbol])
         data = get_crypto_data_client().get_crypto_latest_orderbook(req)
-        ob = data.get(symbol)
+        ob = data.get(request_symbol) or data.get(symbol)
         if ob and ob.bids and ob.asks:
             best_bid = float(ob.bids[0].price)
             best_ask = float(ob.asks[0].price)

@@ -21,11 +21,11 @@ import yaml
 from core import alpaca_client as ac
 from core import risk_manager as rm
 from core import order_executor as oe
+from core.logging_config import runtime_log_handlers
 from tracking.trade_log import get_open_trades
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 LOG_DIR  = BASE_DIR / "logs"
-LOG_DIR.mkdir(exist_ok=True)
 
 
 def _utc_now():
@@ -34,10 +34,7 @@ def _utc_now():
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(LOG_DIR / f"risk_{_utc_now().strftime('%Y%m%d')}.log"),
-    ],
+    handlers=runtime_log_handlers(LOG_DIR, f"risk_{_utc_now().strftime('%Y%m%d')}.log"),
 )
 log = logging.getLogger("run_risk_check")
 
@@ -78,6 +75,7 @@ def run(dry_run: bool = False):
         except Exception as e:
             log.error(f"Could not fetch positions for emergency close: {e}", exc_info=True)
             return
+        open_trades = get_open_trades()
         for pos in positions:
             symbol      = pos.symbol
             asset_class = (
@@ -85,7 +83,9 @@ def run(dry_run: bool = False):
                 if str(getattr(pos, "asset_class", "")).lower().endswith("crypto")
                 else "stock"
             )
-            oe.exit_position(symbol, reason="Daily loss limit — emergency close",
+            trade = _find_matching_trade(symbol, open_trades)
+            exit_symbol = trade.get("symbol", symbol) if trade and asset_class == "crypto" else symbol
+            oe.exit_position(exit_symbol, reason="Daily loss limit — emergency close",
                              asset_class=asset_class, dry_run=dry_run)
         log.warning("All positions closed. Bot will not trade again today.")
         return
@@ -136,7 +136,8 @@ def run(dry_run: bool = False):
         should_exit, reason = rm.should_exit_position(symbol, entry_price, current_price)
         if should_exit:
             log.info(f"EXIT triggered for {symbol}: {reason}")
-            oe.exit_position(symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
+            exit_symbol = price_symbol if asset_class == "crypto" else symbol
+            oe.exit_position(exit_symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
         else:
             pnl = (current_price - entry_price) / entry_price
             log.info(f"  {symbol:<12} entry={entry_price:.4f} now={current_price:.4f} "

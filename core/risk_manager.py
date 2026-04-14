@@ -9,8 +9,9 @@ Enforces all risk rules before any order is placed:
   - Intraday trading gate
 """
 
+import json
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -30,17 +31,49 @@ INTRADAY_ENABLED = CFG["intraday"]["enabled"]
 log = logging.getLogger("risk_manager")
 
 
-# ── Daily P&L Tracking (in-process; reset on restart) ────────────────────────
+# ── Daily P&L Tracking ───────────────────────────────────────────────────────
 
 _session_start_value: Optional[float] = None
 _session_date: Optional[date] = None
+DAILY_BASELINE_FILE = BASE_DIR / "data" / "daily_loss_baseline.json"
+
+
+def _load_daily_baseline(today: date) -> Optional[float]:
+    if not DAILY_BASELINE_FILE.exists():
+        return None
+    try:
+        with open(DAILY_BASELINE_FILE, "r") as f:
+            data = json.load(f)
+        if data.get("date") != today.isoformat():
+            return None
+        value = float(data.get("portfolio_value", 0))
+        return value if value > 0 else None
+    except Exception as e:
+        log.warning(f"Could not read daily loss baseline; creating a new one: {e}")
+        return None
+
+
+def _save_daily_baseline(today: date, portfolio_value: float):
+    DAILY_BASELINE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = DAILY_BASELINE_FILE.with_suffix(".tmp")
+    payload = {
+        "date": today.isoformat(),
+        "portfolio_value": float(portfolio_value),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    with open(tmp_path, "w") as f:
+        json.dump(payload, f, indent=2, sort_keys=True)
+    tmp_path.replace(DAILY_BASELINE_FILE)
 
 
 def _refresh_session():
     global _session_start_value, _session_date
     today = date.today()
     if _session_date != today:
-        _session_start_value = ac.get_portfolio_value()
+        _session_start_value = _load_daily_baseline(today)
+        if _session_start_value is None:
+            _session_start_value = ac.get_portfolio_value()
+            _save_daily_baseline(today, _session_start_value)
         _session_date = today
         log.info(f"Session start portfolio value: ${_session_start_value:,.2f} on {today}")
 
@@ -98,6 +131,16 @@ def calculate_position_size(price: float) -> float:
 
     qty = affordable / price
     return round(qty, 6)  # supports fractional shares/crypto
+
+
+def cap_position_qty(price: float, qty: float) -> float:
+    """Clamp a requested quantity to the configured per-position value cap."""
+    if price <= 0 or qty <= 0:
+        return 0.0
+    max_qty = calculate_position_size(price)
+    if max_qty <= 0:
+        return 0.0
+    return round(min(float(qty), max_qty), 6)
 
 
 # ── Stop-Loss / Take-Profit ───────────────────────────────────────────────────
@@ -239,7 +282,8 @@ def kelly_position_size(win_rate: float = None, avg_win_pct: float = None,
     Half-Kelly position sizing. If win_rate/avg_win_pct/avg_loss_pct are None,
     reads the last 30 closed momentum trades from the trade log to compute them dynamically.
     Falls back to standard calculate_position_size if parameters are invalid or insufficient data.
-    Caps position at 8% of portfolio and floors at 1%.
+    Caps position at trading.max_position_pct of portfolio and floors at 1%
+    only when that floor is below the configured cap.
     """
     try:
         # Attempt to load dynamic params from recent trade history
@@ -271,7 +315,9 @@ def kelly_position_size(win_rate: float = None, avg_win_pct: float = None,
         half_kelly = kelly_f / 2
         portfolio_value = ac.get_portfolio_value()
         cash = ac.get_cash()
-        pct = max(0.01, min(half_kelly, 0.08))
+        max_pct = float(T["max_position_pct"])
+        min_pct = min(0.01, max_pct)
+        pct = max(min_pct, min(half_kelly, max_pct))
         max_value = portfolio_value * pct
         affordable = min(max_value, cash)
         if affordable < T["min_trade_value_usd"]:

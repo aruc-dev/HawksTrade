@@ -243,6 +243,22 @@ class TestLiveScreenerReliability(unittest.TestCase):
         ac.get_all_tradable_assets.return_value = ["AAPL"]
         ac.get_stock_bars.side_effect = [
             RuntimeError("batch failed"),
+            RuntimeError("batch failed again"),
+            {"AAPL": self._bars()},
+        ]
+        builder = UniverseBuilder(cfg, alpaca_client=ac)
+
+        result = builder._screen_live()
+
+        self.assertIn("AAPL", result)
+        self.assertEqual(ac.get_stock_bars.call_count, 3)
+
+    def test_batch_error_retries_before_fallback(self):
+        cfg = _base_config()
+        ac = MagicMock()
+        ac.get_all_tradable_assets.return_value = ["AAPL"]
+        ac.get_stock_bars.side_effect = [
+            RuntimeError("connection reset"),
             {"AAPL": self._bars()},
         ]
         builder = UniverseBuilder(cfg, alpaca_client=ac)

@@ -24,6 +24,9 @@ data/archive/
 # Local system files
 .DS_Store
 
+# Local agent worktrees
+.claude/worktrees/
+
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db
@@ -31,4 +34,5 @@ data/archive/
 
 # Status UI generated output
 status_ui/status.html
+status_ui/status_latest.html
 status_ui/generator.log

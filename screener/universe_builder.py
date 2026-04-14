@@ -36,6 +36,7 @@ class UniverseBuilder:
         self.min_20d_return_pct  = screener_cfg.get("min_20d_return_pct",  None)
         self.max_20d_return_pct  = screener_cfg.get("max_20d_return_pct",  None)
         self.target_atr_pct   = screener_cfg.get("target_atr_pct",    0.03)
+        self.live_batch_retries = int(screener_cfg.get("live_batch_retries", 1))
         self.lookback_days    = max(25, int(self.trend_sma_days) + 5)
         self.legacy_universe  = config.get("stocks", {}).get("scan_universe", [])
 
@@ -134,7 +135,7 @@ class UniverseBuilder:
         for i in range(0, len(candidates), 200):
             batch = candidates[i:i+200]
             try:
-                bars_batch = self.ac.get_stock_bars(batch, timeframe="1Day", limit=self.lookback_days)
+                bars_batch = self._fetch_live_batch(batch, i)
                 for symbol in batch:
                     score = self._score_live_symbol_bars(bars_batch, symbol)
                     if score is not None:
@@ -148,6 +149,20 @@ class UniverseBuilder:
 
         scores.sort(key=lambda x: x['score'], reverse=True)
         return [s['symbol'] for s in scores[:self.max_universe]]
+
+    def _fetch_live_batch(self, batch: List[str], start_index: int):
+        """Fetch one live batch, retrying transient failures before fallback."""
+        attempts = max(1, self.live_batch_retries + 1)
+        for attempt in range(1, attempts + 1):
+            try:
+                return self.ac.get_stock_bars(batch, timeframe="1Day", limit=self.lookback_days)
+            except Exception as e:
+                if attempt >= attempts:
+                    raise
+                log.info(
+                    f"[Screener] Batch {start_index}-{start_index + len(batch)} "
+                    f"attempt {attempt} error: {e}. Retrying."
+                )
 
     def _screen_live_symbol(self, symbol: str) -> Optional[Dict]:
         """Fetch and score one symbol after a batch request fails."""

@@ -17,6 +17,7 @@ class RunScanTests(unittest.TestCase):
 
     def test_strategy_exit_runs_for_stock_strategy_alias(self):
         class StockStrategy:
+            name = "momentum"
             asset_class = "stocks"
 
             def should_exit(self, symbol, entry_price):
@@ -25,6 +26,7 @@ class RunScanTests(unittest.TestCase):
         open_trade = {
             "symbol": "AAPL",
             "side": "buy",
+            "strategy": "momentum",
             "entry_price": "100",
             "asset_class": "stock",
         }
@@ -41,6 +43,7 @@ class RunScanTests(unittest.TestCase):
 
     def test_strategy_exit_matches_crypto_symbol_formats(self):
         class CryptoStrategy:
+            name = "ma_crossover"
             asset_class = "crypto"
 
             def should_exit(self, symbol, entry_price):
@@ -49,6 +52,7 @@ class RunScanTests(unittest.TestCase):
         open_trade = {
             "symbol": "BTC/USD",
             "side": "buy",
+            "strategy": "ma_crossover",
             "entry_price": "100",
             "asset_class": "crypto",
         }
@@ -60,8 +64,61 @@ class RunScanTests(unittest.TestCase):
             run_scan._check_strategy_exits([CryptoStrategy()], ["BTCUSD"], dry_run=True)
 
         exit_position.assert_called_once_with(
-            "BTCUSD", reason="exit BTCUSD 100.0", asset_class="crypto", dry_run=True
+            "BTC/USD", reason="exit BTC/USD 100.0", asset_class="crypto", dry_run=True
         )
+
+    def test_strategy_exit_only_uses_strategy_that_opened_trade(self):
+        class RSIStrategy:
+            name = "rsi_reversion"
+            asset_class = "stocks"
+
+            def should_exit(self, symbol, entry_price):
+                return True, "rsi exit"
+
+        open_trade = {
+            "symbol": "AAPL",
+            "side": "buy",
+            "strategy": "momentum",
+            "entry_price": "100",
+            "asset_class": "stock",
+        }
+
+        with (
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan.oe, "exit_position") as exit_position,
+        ):
+            run_scan._check_strategy_exits([RSIStrategy()], ["AAPL"], dry_run=True)
+
+        exit_position.assert_not_called()
+
+    def test_strategy_exit_skips_new_entries_when_intraday_disabled(self):
+        class MomentumStrategy:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def should_exit(self, symbol, entry_price):
+                return True, "same scan exit"
+
+        open_trade = {
+            "symbol": "AAPL",
+            "side": "buy",
+            "strategy": "momentum",
+            "entry_price": "100",
+            "asset_class": "stock",
+        }
+
+        with (
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan.oe, "exit_position") as exit_position,
+        ):
+            run_scan._check_strategy_exits(
+                [MomentumStrategy()],
+                ["AAPL"],
+                dry_run=True,
+                skip_symbols={run_scan.ac.normalize_symbol("AAPL")},
+            )
+
+        exit_position.assert_not_called()
 
     def test_run_skips_when_market_connection_fails(self):
         with (
@@ -88,6 +145,52 @@ class RunScanTests(unittest.TestCase):
             run_scan.run(run_stocks=False, run_crypto=False, dry_run=True)
 
         get_stock_universe.assert_not_called()
+
+    def test_run_dedupes_entries_planned_in_same_scan(self):
+        class FakeMomentum:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def scan(self, universe):
+                return [{"symbol": "AAPL", "action": "buy"}, {"symbol": "AAPL", "action": "buy"}]
+
+        with (
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "get_stock_universe", return_value=["AAPL"]),
+            patch.object(run_scan, "STOCK_STRATEGIES", [FakeMomentum()]),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+            patch.object(run_scan.oe, "enter_position", return_value={"symbol": "AAPL"}) as enter_position,
+        ):
+            run_scan.run(run_stocks=True, run_crypto=False, dry_run=True)
+
+        enter_position.assert_called_once()
+
+    def test_run_respects_max_positions_with_planned_entries(self):
+        class FakeMomentum:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def scan(self, universe):
+                return [{"symbol": "NVDA", "action": "buy"}, {"symbol": "MSFT", "action": "buy"}]
+
+        open_symbols = [f"SYM{i}" for i in range(run_scan.CFG["trading"]["max_positions"] - 1)]
+
+        with (
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(run_scan, "get_open_symbols", side_effect=[open_symbols, []]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "get_stock_universe", return_value=["NVDA", "MSFT"]),
+            patch.object(run_scan, "STOCK_STRATEGIES", [FakeMomentum()]),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+            patch.object(run_scan.oe, "enter_position", return_value={"symbol": "NVDA"}) as enter_position,
+        ):
+            run_scan.run(run_stocks=True, run_crypto=False, dry_run=True)
+
+        enter_position.assert_called_once()
 
     def test_momentum_hold_extends_profitable_trade(self):
         open_trade = {
