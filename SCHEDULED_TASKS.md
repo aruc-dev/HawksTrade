@@ -76,9 +76,9 @@ Working directory: /path/to/HawksTrade   ← UPDATE THIS PATH
 Instructions:
 1. Read CLAUDE.md in the working directory for the full operating manual.
 2. If it is the first scan of the day (6:35 AM PDT / 9:35 AM ET), run stocks-only:
-   cd /path/to/HawksTrade && python scheduler/run_scan.py --stocks-only
+   cd /path/to/HawksTrade && python3 scheduler/run_scan.py --stocks-only
 3. Otherwise run the full scan:
-   cd /path/to/HawksTrade && python scheduler/run_scan.py
+   cd /path/to/HawksTrade && python3 scheduler/run_scan.py
 4. Current default stock strategy set: momentum only; RSI reversion and gap-up are disabled.
 5. Report back: signals found, trades entered/exited, errors, open position count.
 6. If the script errors due to missing keys, remind the user to fill in their
@@ -123,7 +123,7 @@ You are the HawksTrade crypto trading agent.
 Working directory: /path/to/HawksTrade   ← UPDATE THIS PATH
 
 Instructions:
-1. Run: cd /path/to/HawksTrade && python scheduler/run_scan.py --crypto-only
+1. Run: cd /path/to/HawksTrade && python3 scheduler/run_scan.py --crypto-only
 2. Strategies: EMA Crossover and Range Breakout on BTC/USD, SOL/USD, LINK/USD, DOGE/USD, LTC/USD, DOT/USD.
 3. Report: pairs scanned, buy signals, trades entered/exited, open crypto positions with P&L.
 4. On connection error: retry once after 90 seconds.
@@ -144,7 +144,7 @@ You are the HawksTrade reporting agent.
 Working directory: /path/to/HawksTrade   ← UPDATE THIS PATH
 
 Instructions:
-1. Run: cd /path/to/HawksTrade && python scheduler/run_report.py
+1. Run: cd /path/to/HawksTrade && python3 scheduler/run_report.py
 2. Read the generated report from reports/daily_YYYY-MM-DD.txt
 3. Present a clear summary: trading mode, portfolio value, cash, open positions with
    entry/current price and unrealised P&L %, today's closed trades and P&L,
@@ -168,7 +168,7 @@ You are the HawksTrade weekly reporting agent.
 Working directory: /path/to/HawksTrade   ← UPDATE THIS PATH
 
 Instructions:
-1. Run: cd /path/to/HawksTrade && python scheduler/run_report.py --weekly
+1. Run: cd /path/to/HawksTrade && python3 scheduler/run_report.py --weekly
 2. Read from reports/weekly_YYYY-WNN.txt
 3. Present: week date range, total trades (entries/exits/win-loss), weekly P&L %,
    strategy-by-strategy table, best and worst trade, monthly P&L so far,
@@ -198,13 +198,13 @@ Create these exact weekly automations:
 
 | Automation ID | RRULE | Command |
 |---------------|-------|---------|
-| `hawkstrade-stock-scan` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=6;BYMINUTE=35` | `python scheduler/run_scan.py --stocks-only` |
-| `hawkstrade-full-scan-0700` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=7;BYMINUTE=0` | `python scheduler/run_scan.py` |
-| `hawkstrade-full-scan-0800` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=8;BYMINUTE=0` | `python scheduler/run_scan.py` |
-| `hawkstrade-full-scan-0900` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=9;BYMINUTE=0` | `python scheduler/run_scan.py` |
-| `hawkstrade-full-scan-1000` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=10;BYMINUTE=0` | `python scheduler/run_scan.py` |
-| `hawkstrade-full-scan-1100` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=11;BYMINUTE=0` | `python scheduler/run_scan.py` |
-| `hawkstrade-full-scan-1200` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=12;BYMINUTE=0` | `python scheduler/run_scan.py` |
+| `hawkstrade-stock-scan` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=6;BYMINUTE=35` | `python3 scheduler/run_scan.py --stocks-only` |
+| `hawkstrade-full-scan-0700` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=7;BYMINUTE=0` | `python3 scheduler/run_scan.py` |
+| `hawkstrade-full-scan-0800` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=8;BYMINUTE=0` | `python3 scheduler/run_scan.py` |
+| `hawkstrade-full-scan-0900` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=9;BYMINUTE=0` | `python3 scheduler/run_scan.py` |
+| `hawkstrade-full-scan-1000` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=10;BYMINUTE=0` | `python3 scheduler/run_scan.py` |
+| `hawkstrade-full-scan-1100` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=11;BYMINUTE=0` | `python3 scheduler/run_scan.py` |
+| `hawkstrade-full-scan-1200` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=12;BYMINUTE=0` | `python3 scheduler/run_scan.py` |
 
 ### Codex Risk Check Automations
 
@@ -246,9 +246,9 @@ The remaining schedules do not need splitting:
 
 | Automation ID | RRULE | Command |
 |---------------|-------|---------|
-| `hawkstrade-crypto-scan` | `FREQ=HOURLY;INTERVAL=1` | `python scheduler/run_scan.py --crypto-only` |
-| `hawkstrade-daily-report` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=13;BYMINUTE=30` | `python scheduler/run_report.py` |
-| `hawkstrade-weekly-report` | `FREQ=WEEKLY;BYDAY=MO;BYHOUR=5;BYMINUTE=0` | `python scheduler/run_report.py --weekly` |
+| `hawkstrade-crypto-scan` | `FREQ=HOURLY;INTERVAL=1` | `python3 scheduler/run_scan.py --crypto-only` |
+| `hawkstrade-daily-report` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=13;BYMINUTE=30` | `python3 scheduler/run_report.py` |
+| `hawkstrade-weekly-report` | `FREQ=WEEKLY;BYDAY=MO;BYHOUR=5;BYMINUTE=0` | `python3 scheduler/run_report.py --weekly` |
 
 ---
 
@@ -266,23 +266,23 @@ Paste (update `/path/to/HawksTrade`):
 # HawksTrade — all times in ET (Eastern Time)
 
 # First scan of day: stocks only (9:35 AM ET)
-35 9 * * 1-5       cd /path/to/HawksTrade && python scheduler/run_scan.py --stocks-only >> logs/cron.log 2>&1
+35 9 * * 1-5       cd /path/to/HawksTrade && python3 scheduler/run_scan.py --stocks-only >> logs/cron.log 2>&1
 
 # Full scan every hour from 10:00 AM-3:00 PM ET
-0 10-15 * * 1-5 cd /path/to/HawksTrade && python scheduler/run_scan.py >> logs/cron.log 2>&1
+0 10-15 * * 1-5 cd /path/to/HawksTrade && python3 scheduler/run_scan.py >> logs/cron.log 2>&1
 
 # Risk check every 15 min from 9:45 AM-3:45 PM ET
 45 9 * * 1-5        cd /path/to/HawksTrade && python3 scheduler/run_risk_check.py >> logs/cron.log 2>&1
 0,15,30,45 10-15 * * 1-5 cd /path/to/HawksTrade && python3 scheduler/run_risk_check.py >> logs/cron.log 2>&1
 
 # Crypto scan every hour, 24/7
-0 * * * *          cd /path/to/HawksTrade && python scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
+0 * * * *          cd /path/to/HawksTrade && python3 scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
 
 # Daily report at 4:30 PM ET
-30 16 * * 1-5      cd /path/to/HawksTrade && python scheduler/run_report.py >> logs/cron.log 2>&1
+30 16 * * 1-5      cd /path/to/HawksTrade && python3 scheduler/run_report.py >> logs/cron.log 2>&1
 
 # Weekly report at 8:00 AM ET every Monday
-0 8 * * 1          cd /path/to/HawksTrade && python scheduler/run_report.py --weekly >> logs/cron.log 2>&1
+0 8 * * 1          cd /path/to/HawksTrade && python3 scheduler/run_report.py --weekly >> logs/cron.log 2>&1
 ```
 
 If your VM is in **UTC**, subtract 4 hours from ET times (or 7 from PDT):
@@ -290,13 +290,13 @@ If your VM is in **UTC**, subtract 4 hours from ET times (or 7 from PDT):
 ```cron
 # HawksTrade — all times in UTC (ET+4, PDT+7)
 
-35 13 * * 1-5        cd /path/to/HawksTrade && python scheduler/run_scan.py --stocks-only >> logs/cron.log 2>&1
-0 14-19 * * 1-5  cd /path/to/HawksTrade && python scheduler/run_scan.py >> logs/cron.log 2>&1
+35 13 * * 1-5        cd /path/to/HawksTrade && python3 scheduler/run_scan.py --stocks-only >> logs/cron.log 2>&1
+0 14-19 * * 1-5  cd /path/to/HawksTrade && python3 scheduler/run_scan.py >> logs/cron.log 2>&1
 45 13 * * 1-5        cd /path/to/HawksTrade && python3 scheduler/run_risk_check.py >> logs/cron.log 2>&1
 0,15,30,45 14-19 * * 1-5 cd /path/to/HawksTrade && python3 scheduler/run_risk_check.py >> logs/cron.log 2>&1
-0 * * * *            cd /path/to/HawksTrade && python scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
-30 20 * * 1-5        cd /path/to/HawksTrade && python scheduler/run_report.py >> logs/cron.log 2>&1
-0 12 * * 1           cd /path/to/HawksTrade && python scheduler/run_report.py --weekly >> logs/cron.log 2>&1
+0 * * * *            cd /path/to/HawksTrade && python3 scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
+30 20 * * 1-5        cd /path/to/HawksTrade && python3 scheduler/run_report.py >> logs/cron.log 2>&1
+0 12 * * 1           cd /path/to/HawksTrade && python3 scheduler/run_report.py --weekly >> logs/cron.log 2>&1
 ```
 
 ---
@@ -316,13 +316,13 @@ The project is fully self-contained. No external dependencies beyond Alpaca API 
 
 - [ ] Copy the entire `HawksTrade/` folder to the new system
 - [ ] Install Python 3.10+ on the new system
-- [ ] Run: `pip install -r requirements.txt --break-system-packages`
+- [ ] Run: `pip3 install -r requirements.txt --break-system-packages`
 - [ ] Copy `config/.env` or `.env` from the old system (or create fresh from `config/.env.example`)
 - [ ] Update the **working directory path** in each scheduled task prompt
 - [ ] Determine local timezone of new system and pick correct cron expressions from above
 - [ ] Recreate the 5 scheduled tasks (Claude desktop, cron, Codex desktop, or agent framework)
-- [ ] Test connection: `python -c "import sys; sys.path.insert(0,'.'); from core.alpaca_client import get_account; print('OK:', get_account().portfolio_value)"`
-- [ ] Run a manual scan to confirm: `python scheduler/run_scan.py`
+- [ ] Test connection: `python3 -c "import sys; sys.path.insert(0,'.'); from core.alpaca_client import get_account; print('OK:', get_account().portfolio_value)"`
+- [ ] Run a manual scan to confirm: `python3 scheduler/run_scan.py`
 - [ ] Run unit tests before deployment: `python3 -m unittest discover -v`
 
 ---

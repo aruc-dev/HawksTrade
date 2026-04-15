@@ -147,29 +147,145 @@ def get_recent_actions(trades: list, n: int = 60) -> list:
     return sorted_trades[:n]
 
 
+def _normalize_sym(symbol: str) -> str:
+    """Normalize symbol for cross-source matching (e.g. DOGE/USD → DOGEUSD)."""
+    return (symbol or "").replace("/", "").upper().strip()
+
+
+def parse_portfolio_snapshot(log_path) -> dict:
+    """
+    Parse the last portfolio snapshot from the scan log.
+    Returns dict keyed by normalized symbol:
+      { "DOGEUSD": {"now": 0.096, "pnl_pct": 0.013, "entry": 0.0947, "qty": 52769.1} }
+    Snapshot lines look like:
+      [INFO] portfolio:   TQQQ   qty= 93.2589  entry=$  53.5826  now=$  55.5819  P&L=+3.73%
+    """
+    import re
+    if not log_path or not Path(log_path).exists():
+        return {}
+
+    # Regex for position lines in portfolio snapshot
+    pos_re = re.compile(
+        r"\[INFO\]\s+portfolio:\s{2,}(\S+)\s+qty=\s*([\d.]+)\s+entry=\$\s*([\d,.]+)\s+"
+        r"now=\$\s*([\d,.]+)\s+P&L=([+-]?[\d.]+%)"
+    )
+
+    # Read only the tail of the log, because only the most recent snapshot is needed.
+    # 64 KB is large enough for typical snapshot blocks while avoiding a full-file scan.
+    tail_bytes = 64 * 1024
+
+    try:
+        with open(log_path, "rb") as f:
+            f.seek(0, 2)
+            file_size = f.tell()
+            read_size = min(file_size, tail_bytes)
+            if read_size <= 0:
+                return {}
+            f.seek(-read_size, 2)
+            tail_text = f.read(read_size).decode("utf-8", errors="replace")
+
+        marker = "PORTFOLIO SNAPSHOT"
+        start_idx = tail_text.rfind(marker)
+        if start_idx == -1:
+            return {}
+
+        result = {}
+        in_snapshot = False
+        for line in tail_text[start_idx:].splitlines():
+            if marker in line:
+                result = {}
+                in_snapshot = True
+                continue
+            if not in_snapshot:
+                continue
+
+            m = pos_re.search(line)
+            if m:
+                sym, qty_s, entry_s, now_s, pnl_s = m.groups()
+                try:
+                    result[_normalize_sym(sym)] = {
+                        "symbol_raw": sym,
+                        "qty":    float(qty_s.replace(",", "")),
+                        "entry":  float(entry_s.replace(",", "")),
+                        "now":    float(now_s.replace(",", "")),
+                        "pnl_pct": float(pnl_s.replace("%", "")) / 100.0,
+                    }
+                except (ValueError, TypeError):
+                    pass
+            elif "=======" in line and result:
+                break
+
+        # Return whatever was parsed even if the closing "=======" line is absent
+        # (e.g., log truncated mid-snapshot due to a crash).
+        return result
+    except Exception:
+        pass
+    return {}
+
+
 def compute_stats(trades: list) -> dict:
-    closed = [t for t in trades if t.get("status", "").strip().lower() == "closed"]
+    closed = [t for t in trades if t.get("status", "").strip().lower() == "closed"
+              and t.get("side", "").strip().lower() == "buy"]
     if not closed:
-        return {"total": 0, "wins": 0, "losses": 0, "win_rate": "N/A", "total_pnl": "N/A"}
+        return {
+            "total": 0, "wins": 0, "losses": 0,
+            "win_rate": "N/A", "realized_pnl_pct": "N/A", "realized_pnl_usd": "N/A",
+        }
     total = len(closed)
     wins = 0
-    total_pnl = 0.0
+    total_dollar_pnl = 0.0
+    total_invested = 0.0
     for t in closed:
         try:
-            pnl = float(t.get("pnl_pct") or 0)
-            total_pnl += pnl
-            if pnl > 0:
-                wins += 1
+            ep  = float(t.get("entry_price") or 0)
+            xp  = float(t.get("exit_price") or 0)
+            qty = float(t.get("qty") or 0)
+            if ep > 0 and xp > 0 and qty > 0:
+                dollar_pnl = (xp - ep) * qty
+                total_dollar_pnl += dollar_pnl
+                total_invested += ep * qty
+                if dollar_pnl > 0:
+                    wins += 1
         except (ValueError, TypeError):
             pass
     losses = total - wins
     win_rate = f"{wins/total:.1%}" if total else "N/A"
+    pct = (total_dollar_pnl / total_invested) if total_invested else 0.0
     return {
         "total": total,
         "wins": wins,
         "losses": losses,
         "win_rate": win_rate,
-        "total_pnl": f"{total_pnl:+.2%}",
+        "realized_pnl_pct": f"{pct:+.2%}",
+        "realized_pnl_usd": f"${total_dollar_pnl:+,.2f}",
+    }
+
+
+def compute_unrealized(open_positions: list, snapshot: dict) -> dict:
+    """Compute unrealized P&L for open buy positions using the live snapshot."""
+    total_usd = 0.0
+    total_cost = 0.0
+    for t in open_positions:
+        if t.get("side", "").strip().lower() != "buy":
+            continue
+        key = _normalize_sym(t.get("symbol", ""))
+        snap = snapshot.get(key)
+        if not snap:
+            continue
+        try:
+            ep  = float(t.get("entry_price") or snap["entry"])
+            qty = float(t.get("qty") or snap["qty"])
+            now = snap["now"]
+            total_usd  += (now - ep) * qty
+            total_cost += ep * qty
+        except (ValueError, TypeError):
+            pass
+    pct = (total_usd / total_cost) if total_cost else 0.0
+    if total_cost == 0:
+        return {"unrealized_pnl_usd": "N/A", "unrealized_pnl_pct": "N/A"}
+    return {
+        "unrealized_pnl_usd": f"${total_usd:+,.2f}",
+        "unrealized_pnl_pct": f"{pct:+.2%}",
     }
 
 
@@ -242,30 +358,63 @@ def _status_badge(status: str) -> str:
 
 # ── Table Builders ────────────────────────────────────────────────────────────
 
-def build_positions_table(positions: list) -> str:
+def build_positions_table(positions: list, snapshot: dict = None) -> str:
     if not positions:
         return '<p class="empty-msg">No open positions.</p>'
+    snapshot = snapshot or {}
     rows_html = ""
     for p in positions:
-        pnl_raw = p.get("pnl_pct", "")
-        pnl_cls = _pnl_class(pnl_raw)
+        sym = p.get("symbol", "")
+        key = _normalize_sym(sym)
+        snap = snapshot.get(key)
+
+        # Prefer live snapshot P&L; fall back to trade log pnl_pct (always blank for open)
+        if snap:
+            now_price = snap["now"]
+            try:
+                ep  = float(p.get("entry_price") or snap["entry"])
+                qty = float(p.get("qty") or snap["qty"])
+                now_display = html.escape(f"${now_price:,.4f}")
+                if ep > 0:
+                    pnl_pct_val = (now_price - ep) / ep
+                    dollar_pnl  = (now_price - ep) * qty
+                    pnl_display = (
+                        f'<span class="{("pos" if pnl_pct_val >= 0 else "neg")}">'
+                        f'{pnl_pct_val:+.2%} ({dollar_pnl:+,.2f})</span>'
+                    )
+                else:
+                    pnl_display = '<span class="neutral">—</span>'
+            except (ValueError, TypeError):
+                pnl_display = '<span class="neutral">—</span>'
+                now_display = "—"
+        else:
+            pnl_raw = p.get("pnl_pct", "")
+            pnl_cls = _pnl_class(pnl_raw)
+            pnl_display = (
+                f'<span class="{pnl_cls}">{_fmt_pnl(pnl_raw)}</span>'
+                if pnl_raw else '<span class="neutral">(no snapshot)</span>'
+            )
+            now_display = "—"
+
         rows_html += f"""
         <tr>
-          <td><strong>{_esc(p.get('symbol',''))}</strong></td>
+          <td><strong>{_esc(sym)}</strong></td>
           <td>{_side_badge(p.get('side',''))}</td>
           <td>{_fmt_qty(p.get('qty',''))}</td>
           <td>{_fmt_price(p.get('entry_price',''))}</td>
+          <td>{now_display}</td>
           <td>{_esc(p.get('strategy',''))}</td>
           <td>{_esc(p.get('asset_class',''))}</td>
           <td>{_esc(p.get('timestamp','')[:19])}</td>
-          <td class="{pnl_cls}">{_fmt_pnl(pnl_raw) if pnl_raw else '(live)'}</td>
+          <td>{pnl_display}</td>
         </tr>"""
     return f"""
     <table>
       <thead>
         <tr>
           <th>Symbol</th><th>Side</th><th>Qty</th><th>Entry Price</th>
-          <th>Strategy</th><th>Asset Class</th><th>Opened (UTC)</th><th>P&amp;L</th>
+          <th>Current Price</th><th>Strategy</th><th>Asset Class</th>
+          <th>Opened (UTC)</th><th>P&amp;L % ($)</th>
         </tr>
       </thead>
       <tbody>{rows_html}</tbody>
@@ -317,10 +466,12 @@ def render_html(
     open_positions: list,
     actions: list,
     stats: dict,
+    unrealized: dict,
     log_lines: list,
     refresh_secs: int,
     log_path_str: str,
     generated_at: str,
+    snapshot: dict = None,
 ) -> str:
     mode = (config.get("mode") or "unknown").upper()
     mode_class = "live" if mode == "LIVE" else "paper"
@@ -339,7 +490,7 @@ def render_html(
 
     pos_count    = len(open_positions)
     refresh_tag  = f'<meta http-equiv="refresh" content="{refresh_secs}">' if refresh_secs > 0 else ""
-    pos_table    = build_positions_table(open_positions)
+    pos_table    = build_positions_table(open_positions, snapshot=snapshot)
     actions_table = build_actions_table(actions)
     log_html     = build_log_section(log_lines)
 
@@ -500,8 +651,18 @@ def render_html(
     <div class="card-value {'green' if stats['total'] > 0 else 'neutral'}">{html.escape(stats['win_rate'])}</div>
   </div>
   <div class="card">
-    <div class="card-label">Total P&amp;L</div>
-    <div class="card-value {_pnl_class(stats['total_pnl'].replace('%',''))}">{html.escape(stats['total_pnl'])}</div>
+    <div class="card-label">Realized P&amp;L</div>
+    <div class="card-value {_pnl_class(stats['realized_pnl_pct'].replace('%',''))}">
+      {html.escape(stats['realized_pnl_usd'])}<br>
+      <span style="font-size:13px;font-weight:400">{html.escape(stats['realized_pnl_pct'])}</span>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-label">Unrealized P&amp;L</div>
+    <div class="card-value {_pnl_class(unrealized['unrealized_pnl_pct'].replace('%','')) if unrealized['unrealized_pnl_pct'] != 'N/A' else 'neutral'}">
+      {html.escape(unrealized['unrealized_pnl_usd'])}<br>
+      <span style="font-size:13px;font-weight:400">{html.escape(unrealized['unrealized_pnl_pct'])}</span>
+    </div>
   </div>
   <div class="card">
     <div class="card-label">Max Positions</div>
@@ -606,6 +767,8 @@ def main():
     open_pos     = get_open_positions(trades)
     actions      = get_recent_actions(trades, n=60)
     stats        = compute_stats(trades)
+    snapshot     = parse_portfolio_snapshot(log_path)
+    unrealized   = compute_unrealized(open_pos, snapshot)
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     log_path_str = log_path.name if log_path else "no log found"
 
@@ -615,10 +778,12 @@ def main():
         open_positions=open_pos,
         actions=actions,
         stats=stats,
+        unrealized=unrealized,
         log_lines=log_lines,
         refresh_secs=args.refresh,
         log_path_str=log_path_str,
         generated_at=generated_at,
+        snapshot=snapshot,
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

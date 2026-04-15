@@ -31,7 +31,7 @@ Before proceeding, confirm you can answer YES to all of the following:
 ### 1. Install dependencies (first time only)
 ```bash
 cd /path/to/HawksTrade
-pip install -r requirements.txt --break-system-packages
+pip3 install -r requirements.txt --break-system-packages
 ```
 
 ### 2. Setup API keys (first time only)
@@ -43,7 +43,7 @@ cp config/.env.example config/.env
 
 ### 3. Verify connection
 ```bash
-python -c "
+python3 -c "
 import sys; sys.path.insert(0, '.')
 from core.alpaca_client import get_account
 a = get_account()
@@ -53,18 +53,18 @@ print('OK - Portfolio:', a.portfolio_value)
 
 ### 4. Run a scan
 ```bash
-python scheduler/run_scan.py --dry-run
+python3 scheduler/run_scan.py --dry-run
 ```
 
 ### 5. Run risk check
 ```bash
-python scheduler/run_risk_check.py --dry-run
+python3 scheduler/run_risk_check.py --dry-run
 ```
 
 ### 6. Generate report
 ```bash
-python scheduler/run_report.py
-python scheduler/run_report.py --weekly
+python3 scheduler/run_report.py
+python3 scheduler/run_report.py --weekly
 ```
 
 ---
@@ -74,12 +74,12 @@ python scheduler/run_report.py --weekly
 When triggered by scheduler at a scan time slot:
 ```bash
 cd /path/to/HawksTrade
-python scheduler/run_scan.py
+python3 scheduler/run_scan.py
 ```
 
 If it's after 4:00 PM ET or before 9:30 AM ET on a weekday, run crypto-only:
 ```bash
-python scheduler/run_scan.py --crypto-only
+python3 scheduler/run_scan.py --crypto-only
 ```
 
 ---
@@ -89,7 +89,7 @@ python scheduler/run_scan.py --crypto-only
 Every 15 minutes during market hours (9:30 AM – 4:00 PM ET, Mon–Fri):
 ```bash
 cd /path/to/HawksTrade
-python scheduler/run_risk_check.py
+python3 scheduler/run_risk_check.py
 ```
 
 ---
@@ -99,7 +99,7 @@ python scheduler/run_risk_check.py
 Run at 4:30 PM ET, Mon–Fri:
 ```bash
 cd /path/to/HawksTrade
-python scheduler/run_report.py
+python3 scheduler/run_report.py
 ```
 
 ---
@@ -109,7 +109,7 @@ python scheduler/run_report.py
 Run at 8:00 AM ET every Monday:
 ```bash
 cd /path/to/HawksTrade
-python scheduler/run_report.py --weekly
+python3 scheduler/run_report.py --weekly
 ```
 
 ---

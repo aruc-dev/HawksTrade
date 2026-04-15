@@ -33,8 +33,8 @@ running the scheduled scripts at the correct times and handling any errors.
 
 ```bash
 cd /path/to/HawksTrade
-python --version           # Must be 3.10+
-pip install -r requirements.txt --break-system-packages
+python3 --version           # Must be 3.10+
+pip3 install -r requirements.txt --break-system-packages
 ```
 
 ### 2b. Create your env file
@@ -74,7 +74,7 @@ If either check fails, fix the issue before proceeding. Do not commit broken cod
 ### 2c. Verify the connection
 
 ```bash
-python -c "
+python3 -c "
 import sys; sys.path.insert(0, '.')
 from core.alpaca_client import get_account
 a = get_account()
@@ -127,23 +127,23 @@ The AI agent should run these scripts on this schedule:
 
 | Time (ET) | Script | Purpose |
 |-----------|--------|---------|
-| 09:35 AM | `python scheduler/run_scan.py --stocks-only` | First stock scan after open |
-| 10:00 AM | `python scheduler/run_scan.py` | Full scan (stocks + crypto) |
-| 10:30 AM | `python scheduler/run_risk_check.py` | Risk check |
-| 11:00 AM | `python scheduler/run_scan.py` | Full scan |
-| 11:30 AM | `python scheduler/run_risk_check.py` | Risk check |
-| 12:00 PM | `python scheduler/run_scan.py` | Full scan |
-| 12:30 PM | `python scheduler/run_risk_check.py` | Risk check |
-| 01:00 PM | `python scheduler/run_scan.py` | Full scan |
-| 01:30 PM | `python scheduler/run_risk_check.py` | Risk check |
-| 02:00 PM | `python scheduler/run_scan.py` | Full scan |
-| 02:30 PM | `python scheduler/run_risk_check.py` | Risk check |
-| 03:00 PM | `python scheduler/run_scan.py` | Full scan |
-| 03:30 PM | `python scheduler/run_risk_check.py` | Risk check |
-| 04:30 PM | `python scheduler/run_report.py` | Daily report |
-| Every hour (00 min) | `python scheduler/run_scan.py --crypto-only` | Crypto-only scan (24/7) |
-| Every 15 min (market hours) | `python scheduler/run_risk_check.py` | Stop-loss enforcement |
-| Monday 08:00 AM | `python scheduler/run_report.py --weekly` | Weekly report |
+| 09:35 AM | `python3 scheduler/run_scan.py --stocks-only` | First stock scan after open |
+| 10:00 AM | `python3 scheduler/run_scan.py` | Full scan (stocks + crypto) |
+| 10:30 AM | `python3 scheduler/run_risk_check.py` | Risk check |
+| 11:00 AM | `python3 scheduler/run_scan.py` | Full scan |
+| 11:30 AM | `python3 scheduler/run_risk_check.py` | Risk check |
+| 12:00 PM | `python3 scheduler/run_scan.py` | Full scan |
+| 12:30 PM | `python3 scheduler/run_risk_check.py` | Risk check |
+| 01:00 PM | `python3 scheduler/run_scan.py` | Full scan |
+| 01:30 PM | `python3 scheduler/run_risk_check.py` | Risk check |
+| 02:00 PM | `python3 scheduler/run_scan.py` | Full scan |
+| 02:30 PM | `python3 scheduler/run_risk_check.py` | Risk check |
+| 03:00 PM | `python3 scheduler/run_scan.py` | Full scan |
+| 03:30 PM | `python3 scheduler/run_risk_check.py` | Risk check |
+| 04:30 PM | `python3 scheduler/run_report.py` | Daily report |
+| Every hour (00 min) | `python3 scheduler/run_scan.py --crypto-only` | Crypto-only scan (24/7) |
+| Every 15 min (market hours) | `python3 scheduler/run_risk_check.py` | Stop-loss enforcement |
+| Monday 08:00 AM | `python3 scheduler/run_report.py --weekly` | Weekly report |
 
 ### Weekends / After Hours
 - Crypto scans continue every hour (crypto is 24/7).
@@ -237,7 +237,7 @@ scp -r ./HawksTrade user@vm-ip:~/HawksTrade
 # 2. SSH in and install dependencies
 ssh user@vm-ip
 cd ~/HawksTrade
-pip install -r requirements.txt --break-system-packages
+pip3 install -r requirements.txt --break-system-packages
 
 # 3. Create config/.env with your keys
 cp config/.env.example config/.env
@@ -245,11 +245,11 @@ nano config/.env   # fill in your keys
 
 # 4. Run with cron or a process manager (e.g. systemd, PM2, supervisor)
 # Example cron entries:
-# */30 9-16 * * 1-5  cd ~/HawksTrade && python scheduler/run_scan.py
-# */15 9-16 * * 1-5  cd ~/HawksTrade && python scheduler/run_risk_check.py
-# 0 * * * *          cd ~/HawksTrade && python scheduler/run_scan.py --crypto-only
-# 30 16 * * 1-5      cd ~/HawksTrade && python scheduler/run_report.py
-# 0 8 * * 1          cd ~/HawksTrade && python scheduler/run_report.py --weekly
+# */30 9-16 * * 1-5  cd ~/HawksTrade && python3 scheduler/run_scan.py
+# */15 9-16 * * 1-5  cd ~/HawksTrade && python3 scheduler/run_risk_check.py
+# 0 * * * *          cd ~/HawksTrade && python3 scheduler/run_scan.py --crypto-only
+# 30 16 * * 1-5      cd ~/HawksTrade && python3 scheduler/run_report.py
+# 0 8 * * 1          cd ~/HawksTrade && python3 scheduler/run_report.py --weekly
 ```
 
 ---
@@ -276,7 +276,7 @@ Steps:
 1. Edit `config/config.yaml` → `mode: live`
 2. Ensure `ALPACA_LIVE_API_KEY` and `ALPACA_LIVE_SECRET_KEY` are in `config/.env` or `.env`
 3. Fund your Alpaca live account
-4. Run a manual test: `python scheduler/run_scan.py` and verify a real order appears in Alpaca dashboard
+4. Run a manual test: `python3 scheduler/run_scan.py` and verify a real order appears in Alpaca dashboard
 
 ---
 
