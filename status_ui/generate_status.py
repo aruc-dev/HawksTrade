@@ -372,13 +372,16 @@ def build_positions_table(positions: list, snapshot: dict = None) -> str:
             try:
                 ep  = float(p.get("entry_price") or snap["entry"])
                 qty = float(p.get("qty") or snap["qty"])
-                pnl_pct_val = (now_price - ep) / ep if ep else 0.0
-                dollar_pnl  = (now_price - ep) * qty
-                pnl_display = (
-                    f'<span class="{("pos" if pnl_pct_val >= 0 else "neg")}">'
-                    f'{pnl_pct_val:+.2%} ({dollar_pnl:+,.2f})</span>'
-                )
                 now_display = html.escape(f"${now_price:,.4f}")
+                if ep > 0:
+                    pnl_pct_val = (now_price - ep) / ep
+                    dollar_pnl  = (now_price - ep) * qty
+                    pnl_display = (
+                        f'<span class="{("pos" if pnl_pct_val >= 0 else "neg")}">'
+                        f'{pnl_pct_val:+.2%} ({dollar_pnl:+,.2f})</span>'
+                    )
+                else:
+                    pnl_display = '<span class="neutral">—</span>'
             except (ValueError, TypeError):
                 pnl_display = '<span class="neutral">—</span>'
                 now_display = "—"
