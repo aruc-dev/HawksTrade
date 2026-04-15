@@ -58,7 +58,8 @@ class RSIReversionStrategy(BaseStrategy):
             log.error(f"[RSI] Failed to fetch bars: {e}")
             return []
 
-        if not rm.market_regime_ok():
+        regime_bars = kwargs.get("regime_bars")
+        if not rm.market_regime_ok(bars_data=regime_bars):
             log.info("[RSI] Bear regime (SPY < SMA50), skipping scan.")
             return []
 

@@ -513,10 +513,29 @@ def run_backtest(
         stack.enter_context(patch("core.order_executor.mark_trade_closed", lambda *a, **kw: None))
         stack.enter_context(patch("core.order_executor.MODE", "backtest"))
         stack.enter_context(patch("core.order_executor.ORDER_TYPE", "market"))
+        stack.enter_context(patch("core.alpaca_client.get_stock_bars", side_effect=mock_get_bars))
+        stack.enter_context(patch("core.alpaca_client.get_crypto_bars", side_effect=mock_get_bars))
         mock_trading_client.return_value.submit_order.side_effect = sim.submit_order
         
         for dt in all_dates:
             sim.current_date = dt
+            regime_bars = {
+                s: [
+                    SimpleBar(
+                        open_price=float(row["open"]),
+                        high_price=float(row["high"]),
+                        low_price=float(row["low"]),
+                        close_price=float(row["close"]),
+                        volume=float(row["volume"]),
+                        timestamp=idx,
+                    )
+                    for idx, row in (
+                        sim.historical_data[s][sim.historical_data[s].index <= sim.current_date].tail(60).iterrows()
+                    )
+                ]
+                for s in ("SPY", "BTC/USD")
+                if s in sim.historical_data
+            }
             # Risk Check
             for symbol in list(sim.positions.keys()):
                 pos = sim.positions[symbol]; price = sim.get_current_price(symbol)
@@ -531,15 +550,13 @@ def run_backtest(
                     universe = screener.get_universe(as_of_date=dt) if screener_enabled else cfg["stocks"]["scan_universe"]
                 else:
                     universe = cfg["crypto"]["scan_universe"]
-                with patch("core.alpaca_client.get_stock_bars", side_effect=mock_get_bars), \
-                     patch("core.alpaca_client.get_crypto_bars", side_effect=mock_get_bars):
-                    signals = strat.scan(universe, current_time=dt)
-                    for sig in signals:
-                        if sig["symbol"] not in sim.positions:
-                            order = oe.enter_position(sig["symbol"], strat.name, strat.asset_class)
-                            # enter_position returns status="open" (not "filled") — update strategy name on any non-None return
-                            if order and sig["symbol"] in sim.positions:
-                                sim.positions[sig["symbol"]]["strategy"] = strat.name
+                signals = strat.scan(universe, current_time=dt, regime_bars=regime_bars)
+                for sig in signals:
+                    if sig["symbol"] not in sim.positions:
+                        order = oe.enter_position(sig["symbol"], strat.name, strat.asset_class)
+                        # enter_position returns status="open" (not "filled") — update strategy name on any non-None return
+                        if order and sig["symbol"] in sim.positions:
+                            sim.positions[sig["symbol"]]["strategy"] = strat.name
             # Hold Day Check — delegates to sim.get_trade_age_days() (stocks=business days, crypto=calendar days)
             for symbol in list(sim.positions.keys()):
                 pos = sim.positions[symbol]
