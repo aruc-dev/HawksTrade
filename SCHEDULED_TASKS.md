@@ -102,7 +102,7 @@ You are the HawksTrade risk enforcement agent.
 Working directory: /path/to/HawksTrade   ← UPDATE THIS PATH
 
 Instructions:
-1. Run: cd /path/to/HawksTrade && python scheduler/run_risk_check.py
+1. Run: cd /path/to/HawksTrade && python3 scheduler/run_risk_check.py
 2. Report: positions hit stop-loss or take-profit (include entry vs exit price and P&L %),
    whether daily loss limit was triggered, positions still holding.
 3. If daily loss limit is hit: warn the user all trading has been halted for the day.
@@ -211,7 +211,7 @@ Create these exact weekly automations:
 Create exact weekly automations for each risk-check slot, using this command:
 
 ```bash
-python scheduler/run_risk_check.py
+python3 scheduler/run_risk_check.py
 ```
 
 Required Pacific slots:
@@ -272,8 +272,8 @@ Paste (update `/path/to/HawksTrade`):
 0 10-15 * * 1-5 cd /path/to/HawksTrade && python scheduler/run_scan.py >> logs/cron.log 2>&1
 
 # Risk check every 15 min from 9:45 AM-3:45 PM ET
-45 9 * * 1-5        cd /path/to/HawksTrade && python scheduler/run_risk_check.py >> logs/cron.log 2>&1
-0,15,30,45 10-15 * * 1-5 cd /path/to/HawksTrade && python scheduler/run_risk_check.py >> logs/cron.log 2>&1
+45 9 * * 1-5        cd /path/to/HawksTrade && python3 scheduler/run_risk_check.py >> logs/cron.log 2>&1
+0,15,30,45 10-15 * * 1-5 cd /path/to/HawksTrade && python3 scheduler/run_risk_check.py >> logs/cron.log 2>&1
 
 # Crypto scan every hour, 24/7
 0 * * * *          cd /path/to/HawksTrade && python scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
@@ -292,8 +292,8 @@ If your VM is in **UTC**, subtract 4 hours from ET times (or 7 from PDT):
 
 35 13 * * 1-5        cd /path/to/HawksTrade && python scheduler/run_scan.py --stocks-only >> logs/cron.log 2>&1
 0 14-19 * * 1-5  cd /path/to/HawksTrade && python scheduler/run_scan.py >> logs/cron.log 2>&1
-45 13 * * 1-5        cd /path/to/HawksTrade && python scheduler/run_risk_check.py >> logs/cron.log 2>&1
-0,15,30,45 14-19 * * 1-5 cd /path/to/HawksTrade && python scheduler/run_risk_check.py >> logs/cron.log 2>&1
+45 13 * * 1-5        cd /path/to/HawksTrade && python3 scheduler/run_risk_check.py >> logs/cron.log 2>&1
+0,15,30,45 14-19 * * 1-5 cd /path/to/HawksTrade && python3 scheduler/run_risk_check.py >> logs/cron.log 2>&1
 0 * * * *            cd /path/to/HawksTrade && python scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
 30 20 * * 1-5        cd /path/to/HawksTrade && python scheduler/run_report.py >> logs/cron.log 2>&1
 0 12 * * 1           cd /path/to/HawksTrade && python scheduler/run_report.py --weekly >> logs/cron.log 2>&1
