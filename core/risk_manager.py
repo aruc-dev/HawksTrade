@@ -218,21 +218,33 @@ def market_regime_ok(bars_data=None) -> bool:
     Returns True if SPY is above its 50-day SMA — indicates bull market regime.
     When bars_data is provided (backtest), uses pre-fetched SPY bars dict.
     In live trading, fetches from Alpaca directly.
-    Fails open (returns True) if data unavailable.
+
+    Backtest mode: insufficient bars (early warmup) returns True so the
+    simulation can begin trading before the full 50-bar window is available.
+
+    Live mode: any exception or insufficient bars returns False (fail closed).
+    A regime filter is a safety control — when we cannot confirm conditions are
+    favourable, we should block new entries rather than assume they are.
     """
     try:
         if bars_data is not None:
             # backtest mode: bars_data is a dict symbol->list of bar mocks
             spy_bars = bars_data.get("SPY")
             if spy_bars is None or len(spy_bars) < 51:
+                # Early in the simulation — not enough history yet; allow trading.
                 return True
             closes = pd.Series([float(b.close) if hasattr(b, 'close') else float(b['close']) for b in spy_bars])
         else:
-            # live mode
+            # live mode — fail closed if data is unavailable or insufficient
             raw = ac.get_stock_bars(["SPY"], timeframe="1Day", limit=55)
             spy_bars = raw["SPY"]
             if spy_bars is None or len(spy_bars) < 51:
-                return True
+                log.warning(
+                    "[RegimeFilter] Insufficient SPY bars for SMA50 (%s bars); "
+                    "blocking new entries (fail closed).",
+                    len(spy_bars) if spy_bars is not None else 0,
+                )
+                return False
             closes = pd.Series([b.close for b in spy_bars])
         sma50 = closes.rolling(50).mean().iloc[-1]
         current = float(closes.iloc[-1])
@@ -240,8 +252,11 @@ def market_regime_ok(bars_data=None) -> bool:
         log.debug(f"[RegimeFilter] SPY={current:.2f} SMA50={sma50:.2f} bull={is_bull}")
         return is_bull
     except Exception as e:
-        log.warning(f"[RegimeFilter] Could not determine market regime: {e}")
-        return True  # fail open
+        log.warning(
+            "[RegimeFilter] Could not determine market regime: %s — "
+            "blocking new entries (fail closed).", e,
+        )
+        return False
 
 
 def crypto_regime_ok(bars_data=None) -> bool:
@@ -249,20 +264,32 @@ def crypto_regime_ok(bars_data=None) -> bool:
     Returns True if BTC/USD is above its 20-day EMA — indicates crypto bull regime.
     When bars_data is provided (backtest), uses pre-fetched BTC bars.
     In live trading, fetches from Alpaca directly.
-    Fails open (returns True) if data unavailable.
+
+    Backtest mode: insufficient bars (early warmup) returns True so the
+    simulation can begin trading before the full 20-bar window is available.
+
+    Live mode: any exception or insufficient bars returns False (fail closed).
+    A regime filter is a safety control — when we cannot confirm conditions are
+    favourable, we should block new entries rather than assume they are.
     """
     try:
         if bars_data is not None:
             btc_bars = bars_data.get("BTC/USD")
             if btc_bars is None or len(btc_bars) < 21:
+                # Early in the simulation — not enough history yet; allow trading.
                 return True
             closes = pd.Series([float(b.close) if hasattr(b, 'close') else float(b['close']) for b in btc_bars])
         else:
-            # live mode
+            # live mode — fail closed if data is unavailable or insufficient
             raw = ac.get_crypto_bars(["BTC/USD"], timeframe="1Day", limit=25)
             btc_bars = raw["BTC/USD"]
             if btc_bars is None or len(btc_bars) < 21:
-                return True
+                log.warning(
+                    "[CryptoRegime] Insufficient BTC/USD bars for EMA20 (%s bars); "
+                    "blocking new entries (fail closed).",
+                    len(btc_bars) if btc_bars is not None else 0,
+                )
+                return False
             closes = pd.Series([b.close for b in btc_bars])
         ema20 = closes.ewm(span=20, adjust=False).mean().iloc[-1]
         current = float(closes.iloc[-1])
@@ -270,8 +297,11 @@ def crypto_regime_ok(bars_data=None) -> bool:
         log.debug(f"[CryptoRegime] BTC={current:.2f} EMA20={ema20:.2f} bull={is_bull}")
         return is_bull
     except Exception as e:
-        log.warning(f"[CryptoRegime] Could not determine crypto regime: {e}")
-        return True  # fail open
+        log.warning(
+            "[CryptoRegime] Could not determine crypto regime: %s — "
+            "blocking new entries (fail closed).", e,
+        )
+        return False
 
 
 # ── Kelly Criterion Position Sizing ──────────────────────────────────────────

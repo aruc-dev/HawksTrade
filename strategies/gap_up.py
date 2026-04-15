@@ -44,7 +44,7 @@ class GapUpStrategy(BaseStrategy):
     name        = "gap_up"
     asset_class = "stocks"
 
-    def scan(self, universe: List[str], current_time: datetime = None) -> List[Dict]:
+    def scan(self, universe: List[str], current_time: datetime = None, **kwargs) -> List[Dict]:
         if not SCFG["enabled"]:
             return []
 
@@ -67,7 +67,8 @@ class GapUpStrategy(BaseStrategy):
             log.error(f"[GapUp] Failed to fetch bars: {e}")
             return []
 
-        if not rm.market_regime_ok():
+        regime_bars = kwargs.get("regime_bars")
+        if not rm.market_regime_ok(bars_data=regime_bars):
             log.info("[GapUp] Bear regime (SPY < SMA50), skipping scan.")
             return []
 

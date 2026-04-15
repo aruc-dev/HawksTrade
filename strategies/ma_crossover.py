@@ -74,7 +74,8 @@ class MACrossoverStrategy(BaseStrategy):
             log.error(f"[MACross] Failed to fetch bars: {e}")
             return []
 
-        if not rm.crypto_regime_ok():
+        regime_bars = kwargs.get("regime_bars")
+        if not rm.crypto_regime_ok(bars_data=regime_bars):
             log.info("[MACross] Crypto bear regime (BTC < EMA20), skipping scan.")
             return []
 

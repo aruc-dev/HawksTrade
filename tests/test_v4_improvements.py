@@ -6,6 +6,8 @@ from core import risk_manager as rm
 from strategies.rsi_reversion import RSIReversionStrategy
 
 class V4ImprovementsTests(unittest.TestCase):
+    # ── crypto_regime_ok (backtest path) ─────────────────────────────────────
+
     def test_crypto_regime_ok_bull(self):
         # BTC > EMA20
         mock_bars = {
@@ -20,9 +22,50 @@ class V4ImprovementsTests(unittest.TestCase):
         }
         self.assertFalse(rm.crypto_regime_ok(bars_data=mock_bars))
 
-    def test_crypto_regime_ok_insufficient_data(self):
+    def test_crypto_regime_ok_backtest_insufficient_data_returns_true(self):
+        # Backtest warmup: not enough history yet — allow trading so simulation starts.
         mock_bars = {"BTC/USD": [MagicMock(close=100) for _ in range(5)]}
         self.assertTrue(rm.crypto_regime_ok(bars_data=mock_bars))
+
+    # ── crypto_regime_ok (live path — fail closed) ────────────────────────────
+
+    def test_crypto_regime_ok_live_api_exception_returns_false(self):
+        # Live mode: API throws — must block new entries (fail closed).
+        with patch.object(rm.ac, "get_crypto_bars", side_effect=ConnectionError("timeout")):
+            self.assertFalse(rm.crypto_regime_ok())
+
+    def test_crypto_regime_ok_live_insufficient_bars_returns_false(self):
+        # Live mode: fewer bars than required — must block new entries (fail closed).
+        mock_barset = MagicMock()
+        mock_barset.__getitem__ = MagicMock(return_value=[MagicMock(close=100) for _ in range(5)])
+        with patch.object(rm.ac, "get_crypto_bars", return_value=mock_barset):
+            self.assertFalse(rm.crypto_regime_ok())
+
+    def test_crypto_regime_ok_live_none_bars_returns_false(self):
+        # Live mode: symbol not present in response — must block new entries (fail closed).
+        mock_barset = MagicMock()
+        mock_barset.__getitem__ = MagicMock(return_value=None)
+        with patch.object(rm.ac, "get_crypto_bars", return_value=mock_barset):
+            self.assertFalse(rm.crypto_regime_ok())
+
+    # ── market_regime_ok (live path — fail closed) ────────────────────────────
+
+    def test_market_regime_ok_live_api_exception_returns_false(self):
+        # Live mode: API throws — must block new entries (fail closed).
+        with patch.object(rm.ac, "get_stock_bars", side_effect=ConnectionError("timeout")):
+            self.assertFalse(rm.market_regime_ok())
+
+    def test_market_regime_ok_live_insufficient_bars_returns_false(self):
+        # Live mode: fewer bars than required — must block new entries (fail closed).
+        mock_barset = MagicMock()
+        mock_barset.__getitem__ = MagicMock(return_value=[MagicMock(close=100) for _ in range(10)])
+        with patch.object(rm.ac, "get_stock_bars", return_value=mock_barset):
+            self.assertFalse(rm.market_regime_ok())
+
+    def test_market_regime_ok_backtest_insufficient_data_returns_true(self):
+        # Backtest warmup: not enough SPY history yet — allow trading so simulation starts.
+        mock_bars = {"SPY": [MagicMock(close=100) for _ in range(10)]}
+        self.assertTrue(rm.market_regime_ok(bars_data=mock_bars))
 
     def test_kelly_dynamic_params(self):
         # Mock 15 trades

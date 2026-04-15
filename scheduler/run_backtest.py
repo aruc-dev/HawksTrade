@@ -531,9 +531,29 @@ def run_backtest(
                     universe = screener.get_universe(as_of_date=dt) if screener_enabled else cfg["stocks"]["scan_universe"]
                 else:
                     universe = cfg["crypto"]["scan_universe"]
+                # Build a point-in-time bars_data slice for the regime filters so
+                # they use the backtest (warmup-aware) code path rather than
+                # attempting live Alpaca API calls.
+                regime_bars = {
+                    s: [
+                        SimpleBar(
+                            open_price=float(row["open"]),
+                            high_price=float(row["high"]),
+                            low_price=float(row["low"]),
+                            close_price=float(row["close"]),
+                            volume=float(row["volume"]),
+                            timestamp=idx,
+                        )
+                        for idx, row in (
+                            sim.historical_data[s][sim.historical_data[s].index <= sim.current_date].tail(60).iterrows()
+                        )
+                    ]
+                    for s in ("SPY", "BTC/USD")
+                    if s in sim.historical_data
+                }
                 with patch("core.alpaca_client.get_stock_bars", side_effect=mock_get_bars), \
                      patch("core.alpaca_client.get_crypto_bars", side_effect=mock_get_bars):
-                    signals = strat.scan(universe, current_time=dt)
+                    signals = strat.scan(universe, current_time=dt, regime_bars=regime_bars)
                     for sig in signals:
                         if sig["symbol"] not in sim.positions:
                             order = oe.enter_position(sig["symbol"], strat.name, strat.asset_class)
