@@ -215,6 +215,8 @@ def parse_portfolio_snapshot(log_path) -> dict:
             elif "=======" in line and result:
                 break
 
+        # Return whatever was parsed even if the closing "=======" line is absent
+        # (e.g., log truncated mid-snapshot due to a crash).
         return result
     except Exception:
         pass
