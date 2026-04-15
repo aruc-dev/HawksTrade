@@ -170,40 +170,55 @@ def parse_portfolio_snapshot(log_path) -> dict:
         r"now=\$\s*([\d,.]+)\s+P&L=([+-]?[\d.]+%)"
     )
 
-    result = {}
-    in_snapshot = False
+    # Read only the tail of the log, because only the most recent snapshot is needed.
+    # 64 KB is large enough for typical snapshot blocks while avoiding a full-file scan.
+    tail_bytes = 64 * 1024
+
     try:
-        with open(log_path, encoding="utf-8", errors="replace") as f:
-            snapshot_buf = {}
-            current_snapshot = {}
-            for line in f:
-                if "PORTFOLIO SNAPSHOT" in line:
-                    current_snapshot = {}
-                    in_snapshot = True
-                    continue
-                if in_snapshot:
-                    m = pos_re.search(line)
-                    if m:
-                        sym, qty_s, entry_s, now_s, pnl_s = m.groups()
-                        try:
-                            current_snapshot[_normalize_sym(sym)] = {
-                                "symbol_raw": sym,
-                                "qty":    float(qty_s.replace(",", "")),
-                                "entry":  float(entry_s.replace(",", "")),
-                                "now":    float(now_s.replace(",", "")),
-                                "pnl_pct": float(pnl_s.replace("%", "")) / 100.0,
-                            }
-                        except (ValueError, TypeError):
-                            pass
-                    elif "=======" in line and current_snapshot:
-                        # End of snapshot block — commit it
-                        snapshot_buf = current_snapshot
-                        current_snapshot = {}
-                        in_snapshot = False
-        result = snapshot_buf
+        with open(log_path, "rb") as f:
+            f.seek(0, 2)
+            file_size = f.tell()
+            read_size = min(file_size, tail_bytes)
+            if read_size <= 0:
+                return {}
+            f.seek(-read_size, 2)
+            tail_text = f.read(read_size).decode("utf-8", errors="replace")
+
+        marker = "PORTFOLIO SNAPSHOT"
+        start_idx = tail_text.rfind(marker)
+        if start_idx == -1:
+            return {}
+
+        result = {}
+        in_snapshot = False
+        for line in tail_text[start_idx:].splitlines():
+            if marker in line:
+                result = {}
+                in_snapshot = True
+                continue
+            if not in_snapshot:
+                continue
+
+            m = pos_re.search(line)
+            if m:
+                sym, qty_s, entry_s, now_s, pnl_s = m.groups()
+                try:
+                    result[_normalize_sym(sym)] = {
+                        "symbol_raw": sym,
+                        "qty":    float(qty_s.replace(",", "")),
+                        "entry":  float(entry_s.replace(",", "")),
+                        "now":    float(now_s.replace(",", "")),
+                        "pnl_pct": float(pnl_s.replace("%", "")) / 100.0,
+                    }
+                except (ValueError, TypeError):
+                    pass
+            elif "=======" in line and result:
+                break
+
+        return result
     except Exception:
         pass
-    return result
+    return {}
 
 
 def compute_stats(trades: list) -> dict:
