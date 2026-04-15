@@ -58,7 +58,7 @@ class V4ImprovementsTests(unittest.TestCase):
     def test_market_regime_ok_live_insufficient_bars_returns_false(self):
         # Live mode: fewer bars than required — must block new entries (fail closed).
         mock_barset = MagicMock()
-        mock_barset.__getitem__ = MagicMock(return_value=[MagicMock(close=100) for _ in range(10)])
+        mock_barset.__getitem__.return_value = [MagicMock(close=100) for _ in range(10)]
         with patch.object(rm.ac, "get_stock_bars", return_value=mock_barset):
             self.assertFalse(rm.market_regime_ok())
 
