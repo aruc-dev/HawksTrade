@@ -1,7 +1,0 @@
-{
-  "database": "dolt",
-  "backend": "dolt",
-  "dolt_mode": "embedded",
-  "dolt_database": "HawksTrade",
-  "project_id": "0bc4be81-2465-41d4-a10e-5c41aee2524c"
-}

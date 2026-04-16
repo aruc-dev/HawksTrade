@@ -30,8 +30,6 @@ from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 # ── Setup ───────────────────────────────────────────────────────────────────
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / "config" / ".env")
-load_dotenv(BASE_DIR / ".env", override=True)
 
 with open(BASE_DIR / "config" / "config.yaml") as f:
     CFG = yaml.safe_load(f)
@@ -39,6 +37,27 @@ with open(BASE_DIR / "config" / "config.yaml") as f:
 MODE = CFG["mode"].strip().lower()  # "paper" or "live"
 if MODE not in {"paper", "live"}:
     raise ValueError("config mode must be 'paper' or 'live'")
+
+# Load secrets based on secrets_source setting in config.yaml:
+#   "local" (default) — load from config/.env then .env (original behaviour)
+#   "shm"             — load from /dev/shm/.hawkstrade.env (EC2; written at
+#                       boot by scripts/fetch_secrets.sh, never touches disk)
+_SECRETS_SOURCE = CFG.get("secrets_source", "local").strip().lower()
+if _SECRETS_SOURCE not in {"local", "shm"}:
+    raise ValueError("config secrets_source must be 'local' or 'shm'")
+
+if _SECRETS_SOURCE == "shm":
+    _SHM_ENV = Path("/dev/shm/.hawkstrade.env")
+    if not _SHM_ENV.exists():
+        raise EnvironmentError(
+            "secrets_source is 'shm' but /dev/shm/.hawkstrade.env does not exist. "
+            "Run scripts/fetch_secrets.sh first (or ensure the systemd boot unit ran)."
+        )
+    load_dotenv(_SHM_ENV)
+else:
+    # Default local behaviour: config/.env, then .env (root overrides)
+    load_dotenv(BASE_DIR / "config" / ".env")
+    load_dotenv(BASE_DIR / ".env", override=True)
 
 log = logging.getLogger("alpaca_client")
 
@@ -52,9 +71,13 @@ def _get_keys():
         secret = os.getenv("ALPACA_LIVE_SECRET_KEY")
 
     if not key or not secret:
+        source_hint = (
+            "/dev/shm/.hawkstrade.env" if _SECRETS_SOURCE == "shm"
+            else ".env or config/.env (see config/.env.example)"
+        )
         raise EnvironmentError(
             f"Alpaca API keys not found for mode='{MODE}'. "
-            f"Please fill in .env or config/.env (see config/.env.example)."
+            f"Check {source_hint}."
         )
     return key, secret
 
