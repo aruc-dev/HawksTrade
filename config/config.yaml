@@ -8,6 +8,11 @@
 # --- TRADING MODE ---
 mode: paper          # "paper" = simulation | "live" = real money
 
+# --- SECRETS SOURCE ---
+# "local" = load from config/.env or .env (default, for local dev)
+# "shm"   = load from /dev/shm/.hawkstrade.env (for EC2; populated at boot by scripts/fetch_secrets.sh)
+secrets_source: local
+
 # --- ALPACA ENDPOINTS ---
 alpaca:
   paper_base_url: "https://paper-api.alpaca.markets"

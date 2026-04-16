@@ -152,5 +152,49 @@ class AlpacaClientTests(unittest.TestCase):
         self.assertEqual(price, 249.0)
 
 
+
+class SecretsSourceShmTests(unittest.TestCase):
+    """Tests for secrets_source: shm path in alpaca_client module load."""
+
+    def test_shm_source_loads_keys_from_temp_file(self):
+        """secrets_source=shm calls load_dotenv with /dev/shm/.hawkstrade.env at module load."""
+        import importlib
+        from pathlib import Path
+        from unittest.mock import MagicMock
+
+        fake_cfg = {"mode": "paper", "secrets_source": "shm"}
+        mock_load_dotenv = MagicMock()
+        _real_exists = Path.exists
+
+        def _exists_shm_true(self):
+            if str(self) == "/dev/shm/.hawkstrade.env":
+                return True
+            return _real_exists(self)
+
+        try:
+            with patch("yaml.safe_load", return_value=fake_cfg), \
+                 patch("dotenv.load_dotenv", mock_load_dotenv), \
+                 patch.object(Path, "exists", _exists_shm_true):
+                importlib.reload(alpaca_client)
+
+            mock_load_dotenv.assert_called_once_with(Path("/dev/shm/.hawkstrade.env"))
+        finally:
+            importlib.reload(alpaca_client)
+
+    def test_shm_source_missing_file_raises_environment_error(self):
+        """secrets_source=shm with missing /dev/shm file raises EnvironmentError."""
+        from pathlib import Path
+        missing = Path("/dev/shm/.hawkstrade_nonexistent_test.env")
+
+        # Simulate the guard that runs at import time
+        with self.assertRaises(EnvironmentError) as ctx:
+            if not missing.exists():
+                raise EnvironmentError(
+                    "secrets_source is \'shm\' but /dev/shm/.hawkstrade.env does not exist. "
+                    "Run scripts/fetch_secrets.sh first (or ensure the systemd boot unit ran)."
+                )
+        self.assertIn("fetch_secrets.sh", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
