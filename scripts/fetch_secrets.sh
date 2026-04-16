@@ -83,7 +83,8 @@ if [[ -L "${OUTPUT_FILE}" ]]; then
     exit 1
 fi
 
-TEMP_FILE=$(umask 077 && mktemp /dev/shm/.hawkstrade.env.XXXXXX)
+umask 077
+TEMP_FILE=$(mktemp /dev/shm/.hawkstrade.env.XXXXXX)
 trap 'rm -f "${TEMP_FILE}"' EXIT
 
 {
