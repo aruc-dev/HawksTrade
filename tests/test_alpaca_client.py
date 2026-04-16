@@ -157,34 +157,29 @@ class SecretsSourceShmTests(unittest.TestCase):
     """Tests for secrets_source: shm path in alpaca_client module load."""
 
     def test_shm_source_loads_keys_from_temp_file(self):
-        """secrets_source=shm reads dotenv from /dev/shm/.hawkstrade.env."""
-        import tempfile
-        import os
+        """secrets_source=shm calls load_dotenv with /dev/shm/.hawkstrade.env at module load."""
+        import importlib
         from pathlib import Path
+        from unittest.mock import MagicMock
 
-        env_content = (
-            "ALPACA_PAPER_API_KEY=test-key\n"
-            "ALPACA_PAPER_SECRET_KEY=test-secret\n"
-        )
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
-            f.write(env_content)
-            tmp_path = Path(f.name)
+        fake_cfg = {"mode": "paper", "secrets_source": "shm"}
+        mock_load_dotenv = MagicMock()
+        _real_exists = Path.exists
+
+        def _exists_shm_true(self):
+            if str(self) == "/dev/shm/.hawkstrade.env":
+                return True
+            return _real_exists(self)
 
         try:
-            with patch.object(alpaca_client, "_SECRETS_SOURCE", "shm"), \
-                 patch.object(alpaca_client, "_SHM_ENV", tmp_path, create=True), \
-                 patch.dict(os.environ, {}, clear=True):
-                # Reload _get_keys to pick up patched env
-                with patch.dict(os.environ, {
-                    "ALPACA_PAPER_API_KEY": "test-key",
-                    "ALPACA_PAPER_SECRET_KEY": "test-secret",
-                }):
-                    with patch.object(alpaca_client, "MODE", "paper"):
-                        key, secret = alpaca_client._get_keys()
-                        self.assertEqual(key, "test-key")
-                        self.assertEqual(secret, "test-secret")
+            with patch("yaml.safe_load", return_value=fake_cfg), \
+                 patch("dotenv.load_dotenv", mock_load_dotenv), \
+                 patch.object(Path, "exists", _exists_shm_true):
+                importlib.reload(alpaca_client)
+
+            mock_load_dotenv.assert_called_once_with(Path("/dev/shm/.hawkstrade.env"))
         finally:
-            tmp_path.unlink(missing_ok=True)
+            importlib.reload(alpaca_client)
 
     def test_shm_source_missing_file_raises_environment_error(self):
         """secrets_source=shm with missing /dev/shm file raises EnvironmentError."""
