@@ -56,7 +56,9 @@ Replace that placeholder with the actual project path before installing:
 
 ```bash
 export PROJECT=/actual/path/to/HawksTrade
-sed -i "s|/path/to/HawksTrade|$PROJECT|g" \
+# macOS/BSD sed requires an empty backup-suffix argument.
+# On Linux (GNU sed), use: sed -i "s|...|...|g" (no empty string).
+sed -i '' "s|/path/to/HawksTrade|$PROJECT|g" \
     scheduler/launchd/com.hawkstrade.*.plist \
     scheduler/launchd/hawkstrade_launchd_runner.sh
 ```
@@ -145,11 +147,19 @@ Templates:
 - `scheduler/windows/run_hawkstrade_task.ps1`
 - `scheduler/windows/register_hawkstrade_tasks.ps1`
 
-Install from an elevated PowerShell session. Replace the project path first:
+Install from an elevated PowerShell session. Replace the project path first.
+
+If you have not already allowed locally-authored scripts to run, set the execution policy once (per user):
+
+```powershell
+Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+Then register the tasks:
 
 ```powershell
 cd C:\path\to\HawksTrade
-powershell -ExecutionPolicy Bypass -File scheduler\windows\register_hawkstrade_tasks.ps1 -ProjectDir "C:\path\to\HawksTrade"
+powershell -ExecutionPolicy RemoteSigned -File scheduler\windows\register_hawkstrade_tasks.ps1 -ProjectDir "C:\path\to\HawksTrade"
 ```
 
 The Windows script registers Pacific-time tasks. If the Windows host runs Eastern or
@@ -164,7 +174,7 @@ Get-ScheduledTask -TaskName "HawksTrade*"
 Run a safe dry test manually:
 
 ```powershell
-python3 scheduler/run_risk_check.py --dry-run
+py scheduler/run_risk_check.py --dry-run
 ```
 
 Remove tasks:
