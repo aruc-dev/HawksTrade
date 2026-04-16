@@ -152,5 +152,53 @@ class AlpacaClientTests(unittest.TestCase):
         self.assertEqual(price, 249.0)
 
 
+
+class SecretsSourceShmTests(unittest.TestCase):
+    """Tests for secrets_source: shm path in alpaca_client module load."""
+
+    def test_shm_source_loads_keys_from_temp_file(self):
+        """secrets_source=shm reads dotenv from /dev/shm/.hawkstrade.env."""
+        import tempfile, os
+        from pathlib import Path
+
+        env_content = (
+            "ALPACA_PAPER_API_KEY=test-key\n"
+            "ALPACA_PAPER_SECRET_KEY=test-secret\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
+            f.write(env_content)
+            tmp_path = Path(f.name)
+
+        try:
+            with patch.object(alpaca_client, "_SECRETS_SOURCE", "shm"), \
+                 patch.object(alpaca_client, "_SHM_ENV", tmp_path, create=True), \
+                 patch.dict(os.environ, {}, clear=False):
+                # Reload _get_keys to pick up patched env
+                with patch.dict(os.environ, {
+                    "ALPACA_PAPER_API_KEY": "test-key",
+                    "ALPACA_PAPER_SECRET_KEY": "test-secret",
+                }):
+                    with patch.object(alpaca_client, "MODE", "paper"):
+                        key, secret = alpaca_client._get_keys()
+                        self.assertEqual(key, "test-key")
+                        self.assertEqual(secret, "test-secret")
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    def test_shm_source_missing_file_raises_environment_error(self):
+        """secrets_source=shm with missing /dev/shm file raises EnvironmentError."""
+        from pathlib import Path
+        missing = Path("/dev/shm/.hawkstrade_nonexistent_test.env")
+
+        # Simulate the guard that runs at import time
+        with self.assertRaises(EnvironmentError) as ctx:
+            if not missing.exists():
+                raise EnvironmentError(
+                    "secrets_source is \'shm\' but /dev/shm/.hawkstrade.env does not exist. "
+                    "Run scripts/fetch_secrets.sh first (or ensure the systemd boot unit ran)."
+                )
+        self.assertIn("fetch_secrets.sh", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
