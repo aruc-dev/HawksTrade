@@ -291,7 +291,7 @@ schedule:
   weekly_report_time: "08:00"
 ```
 
-This section is reference metadata. See [SCHEDULED_TASKS.md](SCHEDULED_TASKS.md) for automation setup.
+This section is reference metadata. See [scheduler/README.md](scheduler/README.md) for automation setup.
 
 ---
 

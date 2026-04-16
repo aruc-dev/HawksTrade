@@ -6,7 +6,7 @@
 
 > **Timezone:** All schedule times in this file are given in **ET (Eastern Time)**, because
 > US stock markets operate on ET. The system this was built on runs **PDT (UTC−7)**.
-> If you are an AI agent running scheduled tasks, see `SCHEDULED_TASKS.md` for the
+> If you are an AI agent running scheduled tasks, see `scheduler/README.md` for the
 > correct cron expressions in ET, PDT, and UTC — and for full instructions on
 > recreating these automations on any new system.
 
@@ -292,17 +292,17 @@ To stop all trading immediately:
 ## 15. Recreating Automations on a New System
 
 If you are setting up HawksTrade on a new machine (new laptop, cloud VM, or new AI agent),
-refer to **`SCHEDULED_TASKS.md`** for:
+refer to **`scheduler/README.md`** for:
 
-- All 5 task IDs, cron expressions, and full prompts ready to copy-paste
+- OS scheduler templates for macOS `launchd`, Linux `cron`, and Windows Task Scheduler
 - Cron expressions in **ET**, **PDT**, and **UTC** — pick the right one for the system
-- Instructions for recreating in Claude desktop app, Linux cron, or other AI agents
+- Instructions for moving operational schedules out of AI app automations
 - A checklist for migrating the entire project to a new system
 
 The project folder is fully self-contained and portable. The only things to update when
 moving to a new system are:
-1. The **working directory path** in each scheduled task prompt
-2. The **cron timezone** to match the new system's local time
+1. The **working directory path** in each scheduler template
+2. The **scheduler timezone** to match the new system's local time
 
 ---
 

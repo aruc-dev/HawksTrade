@@ -1,0 +1,25 @@
+# HawksTrade cron schedule for systems running Eastern time.
+# Install with: crontab scheduler/cron/hawkstrade-eastern.cron
+
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+HAWKSTRADE_DIR=/path/to/HawksTrade
+
+# First stock-only scan after open: 9:35 AM ET
+35 9 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_scan.py --stocks-only >> logs/cron.log 2>&1
+
+# Full stock + crypto scans: hourly from 10:00 AM through 3:00 PM ET
+0 10-15 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_scan.py >> logs/cron.log 2>&1
+
+# Stop-loss / take-profit enforcement: 9:45 AM through 3:45 PM ET
+45 9 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_risk_check.py >> logs/cron.log 2>&1
+0,15,30,45 10-15 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_risk_check.py >> logs/cron.log 2>&1
+
+# Crypto-only scan: hourly, every day
+0 * * * * cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
+
+# Daily report: 4:30 PM ET, weekdays
+30 16 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_report.py >> logs/cron.log 2>&1
+
+# Weekly report: 8:00 AM ET, Mondays
+0 8 * * 1 cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_report.py --weekly >> logs/cron.log 2>&1

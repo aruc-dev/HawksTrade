@@ -97,6 +97,12 @@ All settings are in `config/config.yaml`. See [config.md](config.md) for the ava
 
 ---
 
+## Scheduling
+
+Operational schedules are documented in [scheduler/README.md](scheduler/README.md). That directory includes templates for macOS `launchd`, Linux `cron`, and Windows Task Scheduler.
+
+---
+
 ## Project Structure
 
 ```
@@ -104,7 +110,7 @@ HawksTrade/
 ├── config/            ← config.yaml + .env.example
 ├── core/              ← Alpaca client, risk manager, order executor
 ├── strategies/        ← Momentum, RSI, Gap-Up, EMA, Breakout
-├── scheduler/         ← Scanner, Risk Check, Backtester
+├── scheduler/         ← Scanner, risk check, backtester, scheduler templates
 ├── tracking/          ← Trade logs and performance metrics
 └── assets/            ← Generated equity curves and branding
 ```
