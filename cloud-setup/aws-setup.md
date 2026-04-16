@@ -203,7 +203,7 @@ Run these checks before leaving the instance:
 cd ~/HawksTrade
 
 # 1. Confirm secrets are in RAM
-cat /dev/shm/.hawkstrade.env   # should show your key names (not values, for safety)
+cut -d= -f1 /dev/shm/.hawkstrade.env   # shows only key names, not values
 
 # 2. Confirm Alpaca connection works
 python3 -c "
