@@ -1,0 +1,25 @@
+# HawksTrade cron schedule for systems running Pacific time.
+# Install with: crontab scheduler/cron/hawkstrade-pacific.cron
+
+SHELL=/bin/bash
+PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+HAWKSTRADE_DIR=/Users/arunbabuchandrababu/Desktop/AIPROJECTS/HawksTrade
+
+# First stock-only scan after open: 6:35 AM PT / 9:35 AM ET
+35 6 * * 1-5 cd "$HAWKSTRADE_DIR" && python3 scheduler/run_scan.py --stocks-only >> logs/cron.log 2>&1
+
+# Full stock + crypto scans: hourly from 7:00 AM through 12:00 PM PT
+0 7-12 * * 1-5 cd "$HAWKSTRADE_DIR" && python3 scheduler/run_scan.py >> logs/cron.log 2>&1
+
+# Stop-loss / take-profit enforcement: 6:45 AM through 12:45 PM PT
+45 6 * * 1-5 cd "$HAWKSTRADE_DIR" && python3 scheduler/run_risk_check.py >> logs/cron.log 2>&1
+0,15,30,45 7-12 * * 1-5 cd "$HAWKSTRADE_DIR" && python3 scheduler/run_risk_check.py >> logs/cron.log 2>&1
+
+# Crypto-only scan: hourly, every day
+0 * * * * cd "$HAWKSTRADE_DIR" && python3 scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
+
+# Daily report: 1:30 PM PT / 4:30 PM ET, weekdays
+30 13 * * 1-5 cd "$HAWKSTRADE_DIR" && python3 scheduler/run_report.py >> logs/cron.log 2>&1
+
+# Weekly report: 5:00 AM PT / 8:00 AM ET, Mondays
+0 5 * * 1 cd "$HAWKSTRADE_DIR" && python3 scheduler/run_report.py --weekly >> logs/cron.log 2>&1

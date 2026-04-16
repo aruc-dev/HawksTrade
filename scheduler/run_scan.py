@@ -1,7 +1,7 @@
 """
 HawksTrade - Main Scanner & Trade Executor
 ==========================================
-Entry point called by Claude scheduled tasks (or manually).
+Entry point called by OS schedulers or manually.
 
 What it does each run:
   1. Checks if market is open (for stock strategies)
@@ -14,7 +14,7 @@ What it does each run:
 Run directly:
   python scheduler/run_scan.py [--crypto-only] [--stocks-only] [--dry-run]
 
-Claude scheduled task will call this script automatically.
+See scheduler/README.md for launchd, cron, and Windows Task Scheduler setup.
 """
 
 import sys

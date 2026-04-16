@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.hawkstrade.full-scan</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>/Users/arunbabuchandrababu/Desktop/AIPROJECTS/HawksTrade/scheduler/launchd/hawkstrade_launchd_runner.sh</string>
+    <string>full-scan</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/arunbabuchandrababu/Desktop/AIPROJECTS/HawksTrade</string>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
+  </array>
+  <key>StandardOutPath</key>
+  <string>/Users/arunbabuchandrababu/Desktop/AIPROJECTS/HawksTrade/logs/launchd_full_scan.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/arunbabuchandrababu/Desktop/AIPROJECTS/HawksTrade/logs/launchd_full_scan.err</string>
+</dict>
+</plist>

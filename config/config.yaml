@@ -144,7 +144,7 @@ strategies:
     hold_days: 3
     weight: 0.9
 
-# --- SCHEDULING (for reference — actual cron set in Claude scheduled tasks) ---
+# --- SCHEDULING (reference only; OS scheduler templates live in scheduler/) ---
 schedule:
   stock_scan_interval_min: 30        # Every 30 min during market hours
   crypto_scan_interval_min: 60       # Every 60 min, 24/7
