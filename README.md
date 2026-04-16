@@ -120,3 +120,12 @@ HawksTrade/
 ## Disclaimer
 
 Trading involves significant risk. This software is for educational use. Past performance (backtests) does not guarantee future results. Start with paper trading.
+
+## License
+
+HawksTrade uses a dual-license model:
+
+- Open-source use: GNU Affero General Public License v3.0 or later
+- Commercial use: separate commercial license by written agreement
+
+See [LICENSE](/Users/arunbabuchandrababu/Desktop/AIPROJECTS/HawksTrade/LICENSE) for details.
