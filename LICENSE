@@ -1,5 +1,5 @@
 Copyright (c) 2024-2026 HawksTrade Contributors
-All rights reserved.
+All rights reserved except as granted below.
 
 HawksTrade is offered under a dual-license model:
 
@@ -21,8 +21,8 @@ HawksTrade is offered under a dual-license model:
      bait.wall.store@staycloaked.com
 
 If you use HawksTrade under the AGPL-3.0-or-later, you must comply with the
-terms of that license, including making source code available to users of
-any network-accessible deployment.
+terms of that license, including, if you modify it and deploy it for remote
+network interaction, providing Corresponding Source to those users.
 
 If you require proprietary use, closed-source embedding, redistribution,
 or other use cases that are not compatible with the AGPL, you must obtain a
