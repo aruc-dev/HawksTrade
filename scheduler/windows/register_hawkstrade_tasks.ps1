@@ -11,7 +11,7 @@ function New-HawksAction {
     param([string]$Task)
     New-ScheduledTaskAction `
         -Execute "powershell.exe" `
-        -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$Runner`" -Task $Task -ProjectDir `"$ProjectDir`""
+        -Argument "-NoProfile -ExecutionPolicy RemoteSigned -File `"$Runner`" -Task $Task -ProjectDir `"$ProjectDir`""
 }
 
 function Register-HawksTask {
