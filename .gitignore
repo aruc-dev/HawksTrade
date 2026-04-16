@@ -1,0 +1,38 @@
+# Secrets
+.env
+config/.env
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Runtime artifacts
+logs/
+reports/
+data/*.csv
+data/*.json
+data/archive/
+
+# Local system files
+.DS_Store
+
+# Local agent worktrees
+.claude/worktrees/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+
+# Status UI generated output
+status_ui/status.html
+status_ui/status_latest.html
+status_ui/generator.log

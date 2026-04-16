@@ -1,0 +1,19 @@
+# HawksTrade Dependencies
+# Install with: pip install -r requirements.txt --break-system-packages
+
+# Alpaca Markets SDK (official v2)
+alpaca-py>=0.15.0
+websockets>=10.4,<14.0
+
+# Data & Analysis
+pandas>=2.0.0
+numpy>=1.24.0
+matplotlib>=3.7
+
+# Config & Environment
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# Timezone support (built-in from Python 3.9+, explicit for older envs)
+tzdata>=2023.1
+pytz>=2024.1
