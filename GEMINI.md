@@ -1,16 +1,10 @@
-# HawksTrade — AGENTS.md
-## Universal AI Agent Instruction File
-### Compatible with: Claude, OpenAI Codex, GPT-4o, Gemini, and any code-executing AI agent
+# HawksTrade — Gemini Agent Instructions
+## Derived from AGENTS.md
 
----
-
-## Purpose
-
-This file tells any AI agent how to operate the HawksTrade automated trading bot.
-Read this file completely before executing any commands or placing any trades.
-
-The full operating manual is in `CLAUDE.md` — this file is a concise task-oriented
-version for agents that need quick, structured instructions.
+This file adapts the shared `AGENTS.md` operating instructions for Gemini.
+Read `AGENTS.md` completely before executing commands, changing code, or running
+any trading-related script. If this file and `AGENTS.md` disagree, follow
+`AGENTS.md` unless a human explicitly instructs otherwise.
 
 ---
 
@@ -69,7 +63,7 @@ python3 scheduler/run_report.py --weekly
 
 ---
 
-## Task: Run a Scheduled Scan
+## Scheduled Operations
 
 When triggered by scheduler at a scan time slot:
 ```bash
@@ -77,36 +71,24 @@ cd /path/to/HawksTrade
 python3 scheduler/run_scan.py
 ```
 
-If it's after 4:00 PM ET or before 9:30 AM ET on a weekday, run crypto-only:
+If it is after 4:00 PM ET or before 9:30 AM ET on a weekday, run crypto-only:
 ```bash
 python3 scheduler/run_scan.py --crypto-only
 ```
 
----
-
-## Task: Run Risk Check
-
-Every 15 minutes during market hours (9:30 AM – 4:00 PM ET, Mon–Fri):
+Every 15 minutes during market hours, 9:30 AM to 4:00 PM ET, Monday through Friday:
 ```bash
 cd /path/to/HawksTrade
 python3 scheduler/run_risk_check.py
 ```
 
----
-
-## Task: Generate Daily Report
-
-Run at 4:30 PM ET, Mon–Fri:
+Run the daily report at 4:30 PM ET, Monday through Friday:
 ```bash
 cd /path/to/HawksTrade
 python3 scheduler/run_report.py
 ```
 
----
-
-## Task: Generate Weekly Report
-
-Run at 8:00 AM ET every Monday:
+Run the weekly report at 8:00 AM ET every Monday:
 ```bash
 cd /path/to/HawksTrade
 python3 scheduler/run_report.py --weekly
@@ -114,36 +96,36 @@ python3 scheduler/run_report.py --weekly
 
 ---
 
-## Decision Tree for AI Agents
+## Decision Tree
 
-```
+```text
 Is market open (9:30-4:00 ET, Mon-Fri)?
-  YES →
+  YES ->
     Run: run_scan.py (every 30 min)
     Run: run_risk_check.py (every 15 min)
     At 4:30 PM: run_report.py
-  NO →
+  NO ->
     Run: run_scan.py --crypto-only (every 60 min)
     Skip stock scans and risk checks
 
 Is it Monday at 8:00 AM?
-  YES → Run: run_report.py --weekly
+  YES -> Run: run_report.py --weekly
 
 Did any script fail?
-  YES → Log error, retry once after 2 min, report to human if still failing
-  NO  → Continue normal schedule
+  YES -> Log error, retry once after 2 min, report to human if still failing
+  NO  -> Continue normal schedule
 ```
 
 ---
 
-## Absolute Rules (Never Break These)
+## Absolute Rules
 
 1. **Never switch `mode: paper` to `mode: live`** unless the human explicitly says so in chat.
-2. **Never change risk parameters** (stop-loss, position size, daily loss limit) without human approval.
-3. **Never place a trade if Alpaca connection fails** — log the error and skip.
-4. **Never ignore a `DailyLossLimitExceeded` condition** — stop all trading immediately.
-5. **Always log every action** — use the log files in `logs/`.
-6. **Intraday trading is OFF by default** — do not enable it.
+2. **Never change risk parameters** such as stop-loss, position size, or daily loss limit without human approval.
+3. **Never place a trade if Alpaca connection fails**. Log the error and skip.
+4. **Never ignore a `DailyLossLimitExceeded` condition**. Stop all trading immediately.
+5. **Always log every action** using the log files in `logs/`.
+6. **Intraday trading is OFF by default**. Do not enable it.
 
 ---
 
@@ -152,7 +134,7 @@ Did any script fail?
 | What | Where |
 |------|-------|
 | Configuration | `config/config.yaml` |
-| API Keys | `config/.env` or `.env` (created from `config/.env.example`) |
+| API Keys | `config/.env` or `.env` created from `config/.env.example` |
 | Trade Log | `data/trades.csv` |
 | Performance | `data/performance.csv` |
 | Reports | `reports/` |
@@ -166,6 +148,8 @@ Did any script fail?
 - All packages in `requirements.txt`
 - `config/.env` or `.env` file with valid Alpaca API keys
 - Internet access to `api.alpaca.markets` and `data.alpaca.markets`
+
+---
 
 ## Validation Before Push / Deployment
 
@@ -181,33 +165,33 @@ python3 scheduler/run_report.py
 
 Only run a real paper-order lifecycle test when the human explicitly asks for it.
 
----
+After every code change, run both checks before committing:
+```bash
+python3 -m unittest discover -v
+python3 scheduler/run_backtest.py --days 30 --fund 10000
+```
 
-## Quality & Documentation
-
-You MUST adhere to these standards for every change:
-1. **Unit Testing**: Implement or update unit tests in the `tests/` directory for ALL logic changes.
-2. **Validation**: After EVERY change, run unit tests AND a 1-month backtest to confirm nothing is broken:
-   ```bash
-   python3 -m unittest discover -v
-   python3 scheduler/run_backtest.py --days 30 --fund 10000
-   ```
-   Both must pass before committing. If either fails, fix the issue first.
-3. **Documentation**: Update `README.md`, strategy tables, or backtest reports immediately if your changes affect system behavior or performance.
+If either fails, fix the issue before proceeding.
 
 ---
 
-## Reporting Back to the Human
+## Documentation
 
-After each run, summarise:
+Update `README.md`, strategy tables, or backtest reports immediately if changes
+affect system behavior or performance.
+
+---
+
+## Reporting Back
+
+After each run, summarize:
+
 - Number of signals found
-- Number of trades entered / exited
+- Number of trades entered or exited
 - Current portfolio value and open positions
 - Any errors encountered
 
 ---
-
-*See CLAUDE.md for the full operating manual.*
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
 ## Beads Issue Tracker
