@@ -158,7 +158,8 @@ class SecretsSourceShmTests(unittest.TestCase):
 
     def test_shm_source_loads_keys_from_temp_file(self):
         """secrets_source=shm reads dotenv from /dev/shm/.hawkstrade.env."""
-        import tempfile, os
+        import tempfile
+        import os
         from pathlib import Path
 
         env_content = (
