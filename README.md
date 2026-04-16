@@ -125,7 +125,7 @@ Trading involves significant risk. This software is for educational use. Past pe
 
 HawksTrade uses a dual-license model:
 
-- Open-source use: GNU Affero General Public License v3.0 or later
-- Commercial use: separate commercial license by written agreement
+- Open-source use: GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)
+- Proprietary/closed-source use: separate commercial license by written agreement — contact [bait.wall.store@staycloaked.com](mailto:bait.wall.store@staycloaked.com)
 
-See [LICENSE](/Users/arunbabuchandrababu/Desktop/AIPROJECTS/HawksTrade/LICENSE) for details.
+See [LICENSE](./LICENSE) and [LICENSE-AGPL](./LICENSE-AGPL) for full details.
