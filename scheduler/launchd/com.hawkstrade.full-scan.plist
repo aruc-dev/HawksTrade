@@ -8,11 +8,11 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
-    <string>/Users/arunbabuchandrababu/Desktop/AIPROJECTS/HawksTrade/scheduler/launchd/hawkstrade_launchd_runner.sh</string>
+    <string>/path/to/HawksTrade/scheduler/launchd/hawkstrade_launchd_runner.sh</string>
     <string>full-scan</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/Users/arunbabuchandrababu/Desktop/AIPROJECTS/HawksTrade</string>
+  <string>/path/to/HawksTrade</string>
   <key>StartCalendarInterval</key>
   <array>
     <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
@@ -23,8 +23,8 @@
     <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
   </array>
   <key>StandardOutPath</key>
-  <string>/Users/arunbabuchandrababu/Desktop/AIPROJECTS/HawksTrade/logs/launchd_full_scan.log</string>
+  <string>/path/to/HawksTrade/logs/launchd_full_scan.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/arunbabuchandrababu/Desktop/AIPROJECTS/HawksTrade/logs/launchd_full_scan.err</string>
+  <string>/path/to/HawksTrade/logs/launchd_full_scan.err</string>
 </dict>
 </plist>

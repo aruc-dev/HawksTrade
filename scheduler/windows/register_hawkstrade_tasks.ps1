@@ -5,50 +5,59 @@ param(
 $ErrorActionPreference = "Stop"
 
 $Runner = Join-Path $ProjectDir "scheduler\windows\run_hawkstrade_task.ps1"
-$Days = @("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
+$Weekdays = @("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
 
-function Register-HawksTradeTask {
+function New-HawksAction {
+    param([string]$Task)
+    New-ScheduledTaskAction `
+        -Execute "powershell.exe" `
+        -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$Runner`" -Task $Task -ProjectDir `"$ProjectDir`""
+}
+
+function Register-HawksTask {
     param(
         [string]$Name,
         [string]$Task,
-        [DateTime]$At,
-        [string[]]$DaysOfWeek = $Days
+        [object]$Trigger
     )
-
-    $Action = New-ScheduledTaskAction `
-        -Execute "powershell.exe" `
-        -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$Runner`" -Task $Task -ProjectDir `"$ProjectDir`""
-
-    $Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $DaysOfWeek -At $At
     $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -StartWhenAvailable
-
     Register-ScheduledTask `
         -TaskName $Name `
-        -Action $Action `
+        -Action (New-HawksAction -Task $Task) `
         -Trigger $Trigger `
         -Settings $Settings `
         -Description "HawksTrade scheduled task: $Task" `
         -Force
 }
 
-Register-HawksTradeTask -Name "HawksTrade Stock Scan 0635" -Task "stock-scan" -At "06:35"
+# Stock scan: once at 6:35 AM, weekdays (Pacific)
+$Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $Weekdays -At "06:35"
+Register-HawksTask -Name "HawksTrade Stock Scan" -Task "stock-scan" -Trigger $Trigger
 
-foreach ($hour in 7..12) {
-    Register-HawksTradeTask -Name ("HawksTrade Full Scan {0:00}00" -f $hour) -Task "full-scan" -At ("{0:00}:00" -f $hour)
-}
+# Full scan: hourly from 7:00 AM, 6 runs through 12:00 PM, weekdays (Pacific)
+$Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $Weekdays -At "07:00"
+$Trigger.Repetition.Interval = "PT1H"
+$Trigger.Repetition.Duration = "PT6H"
+Register-HawksTask -Name "HawksTrade Full Scan" -Task "full-scan" -Trigger $Trigger
 
-Register-HawksTradeTask -Name "HawksTrade Risk Check 0645" -Task "risk-check" -At "06:45"
-foreach ($hour in 7..12) {
-    foreach ($minute in 0, 15, 30, 45) {
-        Register-HawksTradeTask -Name ("HawksTrade Risk Check {0:00}{1:00}" -f $hour, $minute) -Task "risk-check" -At ("{0:00}:{1:00}" -f $hour, $minute)
-    }
-}
+# Risk check: every 15 min from 6:45 AM through 12:45 PM, weekdays (Pacific)
+$Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $Weekdays -At "06:45"
+$Trigger.Repetition.Interval = "PT15M"
+$Trigger.Repetition.Duration = "PT6H"
+Register-HawksTask -Name "HawksTrade Risk Check" -Task "risk-check" -Trigger $Trigger
 
-foreach ($hour in 0..23) {
-    Register-HawksTradeTask -Name ("HawksTrade Crypto Scan {0:00}00" -f $hour) -Task "crypto-scan" -At ("{0:00}:00" -f $hour) -DaysOfWeek @("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
-}
+# Crypto scan: every hour, all day every day
+$Trigger = New-ScheduledTaskTrigger -Daily -At "00:00"
+$Trigger.Repetition.Interval = "PT1H"
+$Trigger.Repetition.Duration = "P1D"
+Register-HawksTask -Name "HawksTrade Crypto Scan" -Task "crypto-scan" -Trigger $Trigger
 
-Register-HawksTradeTask -Name "HawksTrade Daily Report 1330" -Task "daily-report" -At "13:30"
-Register-HawksTradeTask -Name "HawksTrade Weekly Report Monday 0500" -Task "weekly-report" -At "05:00" -DaysOfWeek @("Monday")
+# Daily report: 1:30 PM, weekdays (Pacific)
+$Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $Weekdays -At "13:30"
+Register-HawksTask -Name "HawksTrade Daily Report" -Task "daily-report" -Trigger $Trigger
+
+# Weekly report: 5:00 AM Monday (Pacific)
+$Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek @("Monday") -At "05:00"
+Register-HawksTask -Name "HawksTrade Weekly Report" -Task "weekly-report" -Trigger $Trigger
 
 Write-Host "Registered HawksTrade scheduled tasks for $ProjectDir"

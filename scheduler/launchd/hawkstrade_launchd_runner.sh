@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
-PROJECT_DIR="/Users/arunbabuchandrababu/Desktop/AIPROJECTS/HawksTrade"
+PROJECT_DIR="${HAWKSTRADE_DIR:-/path/to/HawksTrade}"
 LOG_DIR="$PROJECT_DIR/logs"
 TASK="${1:-}"
 
@@ -28,7 +28,7 @@ case "$TASK" in
     ;;
   risk-check)
     is_weekday || exit 0
-    [[ "$hhmm" -ge 0645 && "$hhmm" -le 1245 ]] || exit 0
+    [[ 10#$hhmm -ge 645 && 10#$hhmm -le 1245 ]] || exit 0
     exec /usr/bin/env python3 scheduler/run_risk_check.py
     ;;
   crypto-scan)

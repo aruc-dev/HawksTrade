@@ -8,11 +8,11 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
-    <string>/Users/arunbabuchandrababu/Desktop/AIPROJECTS/HawksTrade/scheduler/launchd/hawkstrade_launchd_runner.sh</string>
+    <string>/path/to/HawksTrade/scheduler/launchd/hawkstrade_launchd_runner.sh</string>
     <string>weekly-report</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/Users/arunbabuchandrababu/Desktop/AIPROJECTS/HawksTrade</string>
+  <string>/path/to/HawksTrade</string>
   <key>StartCalendarInterval</key>
   <dict>
     <key>Weekday</key>
@@ -23,8 +23,8 @@
     <integer>0</integer>
   </dict>
   <key>StandardOutPath</key>
-  <string>/Users/arunbabuchandrababu/Desktop/AIPROJECTS/HawksTrade/logs/launchd_weekly_report.log</string>
+  <string>/path/to/HawksTrade/logs/launchd_weekly_report.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/arunbabuchandrababu/Desktop/AIPROJECTS/HawksTrade/logs/launchd_weekly_report.err</string>
+  <string>/path/to/HawksTrade/logs/launchd_weekly_report.err</string>
 </dict>
 </plist>

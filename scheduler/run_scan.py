@@ -12,7 +12,7 @@ What it does each run:
   6. Prints portfolio snapshot
 
 Run directly:
-  python scheduler/run_scan.py [--crypto-only] [--stocks-only] [--dry-run]
+  python3 scheduler/run_scan.py [--crypto-only] [--stocks-only] [--dry-run]
 
 See scheduler/README.md for launchd, cron, and Windows Task Scheduler setup.
 """

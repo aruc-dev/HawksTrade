@@ -51,19 +51,22 @@ Template files:
 - `scheduler/launchd/com.hawkstrade.weekly-report.plist`
 - `scheduler/launchd/hawkstrade_launchd_runner.sh`
 
-The templates are already configured for:
+The templates use `/path/to/HawksTrade` as a placeholder.
+Replace that placeholder with the actual project path before installing:
 
-```text
-/Users/arunbabuchandrababu/Desktop/AIPROJECTS/HawksTrade
+```bash
+export PROJECT=/actual/path/to/HawksTrade
+sed -i "s|/path/to/HawksTrade|$PROJECT|g" \
+    scheduler/launchd/com.hawkstrade.*.plist \
+    scheduler/launchd/hawkstrade_launchd_runner.sh
 ```
 
-If the project moves, replace that path in all plist files and in
-`hawkstrade_launchd_runner.sh`.
+Or set the `HAWKSTRADE_DIR` environment variable; the runner script reads it automatically.
 
 Install:
 
 ```bash
-cd /Users/arunbabuchandrababu/Desktop/AIPROJECTS/HawksTrade
+cd /path/to/HawksTrade
 chmod +x scheduler/launchd/hawkstrade_launchd_runner.sh
 cp scheduler/launchd/com.hawkstrade.*.plist ~/Library/LaunchAgents/
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.hawkstrade.stock-scan.plist
@@ -161,7 +164,7 @@ Get-ScheduledTask -TaskName "HawksTrade*"
 Run a safe dry test manually:
 
 ```powershell
-python scheduler/run_risk_check.py --dry-run
+python3 scheduler/run_risk_check.py --dry-run
 ```
 
 Remove tasks:

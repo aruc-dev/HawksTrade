@@ -3,7 +3,7 @@
 
 SHELL=/bin/bash
 PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
-HAWKSTRADE_DIR=/Users/arunbabuchandrababu/Desktop/AIPROJECTS/HawksTrade
+HAWKSTRADE_DIR=/path/to/HawksTrade
 
 # First stock-only scan after open: 6:35 AM PT / 9:35 AM ET
 35 6 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_scan.py --stocks-only >> logs/cron.log 2>&1
