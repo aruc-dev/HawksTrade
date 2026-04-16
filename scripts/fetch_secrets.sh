@@ -98,11 +98,9 @@ trap 'rm -f "${TEMP_FILE}"' EXIT
         ALPACA_LIVE_SECRET_KEY \
         NEWS_API_KEY; do
         # Use @sh to produce a safely shell-quoted value that dotenv can parse
-        value=$(echo "${SECRET_JSON}" | jq -r --arg k "${key}" '.[$k] // empty')
+        value=$(echo "${SECRET_JSON}" | jq -r --arg k "${key}" 'if (.[$k] // "") != "" then .[$k] | @sh else empty end')
         if [[ -n "${value}" ]]; then
-            # Wrap value in single quotes, escaping any embedded single quotes
-            safe_value=$(printf '%s' "${value}" | sed "s/'/'\\\\''/g")
-            echo "${key}='${safe_value}'"
+            echo "${key}=${value}"
         fi
     done
 } > "${TEMP_FILE}"
