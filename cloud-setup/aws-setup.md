@@ -34,7 +34,7 @@ IAM setup, secrets management via AWS Secrets Manager, and scheduling via Linux 
 
 > **Note:** The secret name `hawkstrade/keys` is referenced in `scripts/fetch_secrets.sh`
 > as the default. If you use a different name, set the `HAWKSTRADE_SECRET_NAME` environment
-> variable in the systemd unit (Step 4).
+> variable in the systemd unit (Step 7).
 
 ---
 
