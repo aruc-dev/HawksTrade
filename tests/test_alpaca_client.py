@@ -173,7 +173,7 @@ class SecretsSourceShmTests(unittest.TestCase):
         try:
             with patch.object(alpaca_client, "_SECRETS_SOURCE", "shm"), \
                  patch.object(alpaca_client, "_SHM_ENV", tmp_path, create=True), \
-                 patch.dict(os.environ, {}, clear=False):
+                 patch.dict(os.environ, {}, clear=True):
                 # Reload _get_keys to pick up patched env
                 with patch.dict(os.environ, {
                     "ALPACA_PAPER_API_KEY": "test-key",
