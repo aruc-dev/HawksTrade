@@ -42,7 +42,10 @@ if MODE not in {"paper", "live"}:
 #   "local" (default) — load from config/.env then .env (original behaviour)
 #   "shm"             — load from /dev/shm/.hawkstrade.env (EC2; written at
 #                       boot by scripts/fetch_secrets.sh, never touches disk)
-_SECRETS_SOURCE = CFG.get("secrets_source", "local").strip().lower()
+_raw_secrets_source = CFG.get("secrets_source", "local")
+if not isinstance(_raw_secrets_source, str):
+    raise ValueError("config secrets_source must be a string: 'local' or 'shm'")
+_SECRETS_SOURCE = _raw_secrets_source.strip().lower()
 if _SECRETS_SOURCE not in {"local", "shm"}:
     raise ValueError("config secrets_source must be 'local' or 'shm'")
 
