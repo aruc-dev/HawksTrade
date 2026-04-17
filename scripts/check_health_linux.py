@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import html
-import os
 import re
 import sys
 from dataclasses import dataclass, field
@@ -66,11 +65,7 @@ class Ansi:
 
 
 def _supports_color(force: bool = False) -> bool:
-    if force:
-        return True
-    if os.environ.get("NO_COLOR"):
-        return False
-    return sys.stdout.isatty()
+    return True
 
 
 def _paint(text: str, colour: str, enabled: bool) -> str:

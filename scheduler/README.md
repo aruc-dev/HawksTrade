@@ -152,8 +152,9 @@ python3 scripts/check_health_linux.py
 By default it inspects the last 4 hours of cron and log activity and writes
 `reports/health_check_linux.html`. Use `--hours 8` to widen the health window,
 `--cron-template` or `--cron-file` if the installed cron schedule differs from
-the host timezone, `--force-color` to keep ANSI colors even when piping output,
-and `--no-color` if you want plain terminal output.
+the host timezone. Terminal output is colorized by default; use `--no-color`
+if you want plain text. `--force-color` remains available for wrappers that try
+to suppress ANSI colors.
 
 ## Windows Task Scheduler
 
