@@ -124,6 +124,108 @@ PATH=/usr/local/bin:/usr/bin:/bin
             self.assertEqual(crypto.status, "green")
             self.assertEqual(health._display_missed_runs(report), 0)
 
+    def test_load_runtime_records_prefers_structured_markers_and_dedupes_cron_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            log_dir = tmp_path / "logs"
+            scan_log = log_dir / "scan_20260417.log"
+            cron_log = log_dir / "cron.log"
+            structured_lines = """
+2026-04-17 18:00:00,000 [INFO] run_scan: RUN_START script=run_scan run_id=scan-1 scan_kind=full run_stocks=1 run_crypto=1 dry_run=0
+2026-04-17 18:00:01,000 [INFO] run_scan: RUN_END script=run_scan run_id=scan-1 status=ok duration_s=1.000 outcome=completed
+""".strip() + "\n"
+            self._write(scan_log, structured_lines)
+            self._write(cron_log, structured_lines)
+
+            runtime = health.load_runtime_records(log_dir)
+
+            scan_records = runtime["scan"]
+            self.assertEqual(len(scan_records), 1)
+            self.assertEqual(scan_records[0].job_key, "full_scan")
+            self.assertEqual(scan_records[0].run_id, "scan-1")
+            self.assertEqual(scan_records[0].source_file.name, "scan_20260417.log")
+            self.assertTrue(scan_records[0].success)
+
+    def test_build_report_lists_troubleshooting_logs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            cron_file = tmp_path / "health.cron"
+            log_dir = tmp_path / "logs"
+            html_output = tmp_path / "health.html"
+            self._write(
+                cron_file,
+                """
+0 18 * * * cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
+""".strip()
+                + "\n",
+            )
+            scan_lines = """
+2026-04-17 18:00:00,000 [INFO] run_scan: RUN_START script=run_scan run_id=scan-2 scan_kind=crypto run_stocks=0 run_crypto=1 dry_run=0
+2026-04-17 18:00:00,500 [WARNING] run_scan: Quote fetch timeout for AMD
+2026-04-17 18:00:01,000 [ERROR] run_scan: Order rejected for AAPL
+2026-04-17 18:00:02,000 [INFO] run_scan: RUN_END script=run_scan run_id=scan-2 status=ok duration_s=2.000 outcome=completed
+""".strip() + "\n"
+            self._write(log_dir / "scan_20260417.log", scan_lines)
+            self._write(log_dir / "cron.log", scan_lines)
+
+            alpaca_state = health.AlpacaState(
+                connected=True,
+                account_error=None,
+                positions_error=None,
+                portfolio_value=101213.36,
+                cash=51104.76,
+                buying_power=289061.23,
+                broker_positions=[],
+                trade_log_open_rows=[],
+            )
+            summary = {
+                "generated_at": "2026-04-17T18:05:00",
+                "total_trades": 1,
+                "wins": 1,
+                "losses": 0,
+                "win_rate": 1.0,
+                "avg_win_pct": 0.01,
+                "avg_loss_pct": 0.0,
+                "total_pnl_pct": 0.01,
+                "realized_pnl_pct": 0.01,
+                "realized_pnl_dollars": 0.46,
+                "open_positions": 0,
+                "unrealized_pnl_dollars": 0.0,
+                "total_pnl_dollars": 0.46,
+                "monthly_pnl": {},
+                "by_strategy": {},
+            }
+
+            with (
+                patch.object(health, "load_closed_trades", return_value=pd.DataFrame()),
+                patch.object(health, "compute_summary", return_value=summary),
+            ):
+                report = health.build_health_report(
+                    cron_template="custom",
+                    cron_file=cron_file,
+                    log_dir=log_dir,
+                    html_output=html_output,
+                    now=datetime(2026, 4, 17, 18, 5, 0),
+                    lookback_hours=1.0,
+                    alpaca_state=alpaca_state,
+                )
+
+            terminal = health.format_terminal_report(report, use_color=False)
+            html_text = health.write_html_report(report).read_text(encoding="utf-8")
+
+            self.assertEqual(len(report.log_errors), 1)
+            self.assertEqual(len(report.log_warnings), 1)
+            self.assertIn("TROUBLESHOOTING", terminal)
+            self.assertIn("Latest errors:", terminal)
+            self.assertIn("Latest warnings:", terminal)
+            self.assertIn("scan_20260417.log", terminal)
+            self.assertIn("Quote fetch timeout for AMD", terminal)
+            self.assertIn("Order rejected for AAPL", terminal)
+            self.assertIn("Troubleshooting", html_text)
+            self.assertIn("Log Warnings", html_text)
+            self.assertIn("Quote fetch timeout for AMD", html_text)
+            self.assertIn("Order rejected for AAPL", html_text)
+
     def test_build_report_renders_html_and_terminal_output(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import yaml
 from core.portfolio import get_snapshot, print_snapshot
+from core.run_markers import run_scope
 from tracking.performance import compute_summary, format_report, save_performance_snapshot
 
 BASE_DIR    = Path(__file__).resolve().parent.parent
@@ -104,7 +105,13 @@ if __name__ == "__main__":
     parser.add_argument("--weekly", action="store_true", help="Generate weekly report")
     args = parser.parse_args()
 
-    if args.weekly:
-        run_weekly_report()
-    else:
-        run_daily_report()
+    with run_scope(
+        log,
+        "run_report",
+        weekly=args.weekly,
+        report_kind="weekly" if args.weekly else "daily",
+    ):
+        if args.weekly:
+            run_weekly_report()
+        else:
+            run_daily_report()

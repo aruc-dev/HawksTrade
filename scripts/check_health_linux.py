@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import html
 import re
+import shlex
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -114,6 +115,11 @@ class RunRecord:
     source_file: Path
     lines: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    run_id: str | None = None
+    script: str | None = None
+    start_fields: dict[str, str] = field(default_factory=dict)
+    end_fields: dict[str, str] = field(default_factory=dict)
+    source_files: list[Path] = field(default_factory=list)
 
     @property
     def duration(self) -> timedelta | None:
@@ -187,6 +193,9 @@ LOG_LINE_RE = re.compile(
     r"^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) "
     r"\[(?P<level>[A-Z]+)\] (?P<logger>[^:]+): (?P<message>.*)$"
 )
+
+RUN_MARKER_RE = re.compile(r"^(?P<event>RUN_START|RUN_END)\s+(?P<fields>.*)$")
+TRUTHY_VALUES = {"1", "true", "yes", "on", "y"}
 
 
 def _parse_int_tokens(spec: str, minimum: int, maximum: int, *, normalize_dow: bool = False) -> tuple[int, ...]:
@@ -358,6 +367,175 @@ def _parse_log_line(line: str, source_file: Path) -> LogFinding | None:
     )
 
 
+def _parse_marker_fields(message: str) -> tuple[str, dict[str, str]] | None:
+    match = RUN_MARKER_RE.match(message.strip())
+    if not match:
+        return None
+
+    fields: dict[str, str] = {}
+    raw_fields = match.group("fields").strip()
+    if raw_fields:
+        for token in shlex.split(raw_fields):
+            if "=" not in token:
+                continue
+            key, value = token.split("=", 1)
+            fields[key] = value
+    return match.group("event"), fields
+
+
+def _field_truthy(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in TRUTHY_VALUES
+
+
+def _marker_job_info(script: str | None, fields: dict[str, str]) -> tuple[str, str]:
+    script_name = (script or "").strip().lower()
+    if script_name == "run_scan":
+        scan_kind = (fields.get("scan_kind") or "").strip().lower()
+        if scan_kind in {"stock", "stocks"}:
+            return "stock_scan", "Stock scan"
+        if scan_kind in {"crypto", "crypto_only"}:
+            return "crypto_scan", "Crypto scan"
+        if scan_kind in {"full", "full_scan", "combined"}:
+            return "full_scan", "Full scan"
+
+        run_stocks = _field_truthy(fields.get("run_stocks"))
+        run_crypto = _field_truthy(fields.get("run_crypto"))
+        if run_stocks and run_crypto:
+            return "full_scan", "Full scan"
+        if run_crypto and not run_stocks:
+            return "crypto_scan", "Crypto scan"
+        if run_stocks and not run_crypto:
+            return "stock_scan", "Stock scan"
+        return "scan_unknown", "Scan"
+
+    if script_name == "run_risk_check":
+        return "risk_check", "Risk check"
+
+    if script_name == "run_report":
+        report_kind = (fields.get("report_kind") or "").strip().lower()
+        if report_kind == "weekly" or _field_truthy(fields.get("weekly")):
+            return "weekly_report", "Weekly report"
+        return "daily_report", "Daily report"
+
+    if script_name:
+        return script_name, script_name.replace("_", " ").title()
+    return "unknown_run", "Run"
+
+
+def _prefer_source_file(current: Path | None, candidate: Path) -> Path:
+    if current is None:
+        return candidate
+    if current.name == "cron.log" and candidate.name != "cron.log":
+        return candidate
+    return current
+
+
+def _append_unique_path(items: list[Path], path: Path) -> None:
+    if path not in items:
+        items.append(path)
+
+
+def _append_unique_text(items: list[str], value: str) -> None:
+    if value not in items:
+        items.append(value)
+
+
+def _merge_marker_record(
+    records_by_id: dict[str, RunRecord],
+    *,
+    event: str,
+    finding: LogFinding,
+    fields: dict[str, str],
+) -> None:
+    run_id = fields.get("run_id")
+    if not run_id:
+        run_id = f"{fields.get('script', 'run')}-{finding.timestamp.strftime('%Y%m%d%H%M%S') if finding.timestamp else 'unknown'}-{finding.source_file.name}"
+
+    script = fields.get("script")
+    record = records_by_id.get(run_id)
+    if record is None:
+        job_key, label = _marker_job_info(script, fields)
+        record = RunRecord(
+            job_key=job_key,
+            label=label,
+            start_time=finding.timestamp or datetime.now(),
+            end_time=None,
+            success=False,
+            source_file=finding.source_file,
+            lines=[],
+            notes=[],
+            run_id=run_id,
+            script=script,
+        )
+        records_by_id[run_id] = record
+    else:
+        if script and not record.script:
+            record.script = script
+        record.source_file = _prefer_source_file(record.source_file, finding.source_file)
+
+    _append_unique_path(record.source_files, finding.source_file)
+    record.lines.append(finding.raw)
+
+    effective_fields = dict(record.start_fields)
+    effective_fields.update(fields)
+    job_key, label = _marker_job_info(record.script or script, effective_fields)
+    record.job_key = job_key
+    record.label = label
+
+    if event == "RUN_START":
+        if finding.timestamp is not None and finding.timestamp < record.start_time:
+            record.start_time = finding.timestamp
+        record.start_fields.update(fields)
+        if record.script is None and script:
+            record.script = script
+        return
+
+    if finding.timestamp is not None:
+        if record.end_time is None or finding.timestamp > record.end_time:
+            record.end_time = finding.timestamp
+    record.end_fields.update(fields)
+    status = (fields.get("status") or "").strip().lower()
+    if status:
+        record.success = status not in {"error", "failed", "failure"}
+        if status != "ok":
+            _append_unique_text(record.notes, f"marker status={status}")
+    elif record.end_time is not None:
+        record.success = True
+
+    outcome = fields.get("outcome")
+    if outcome and outcome != "completed":
+        _append_unique_text(record.notes, f"outcome={outcome}")
+    error_type = fields.get("error_type")
+    if error_type:
+        _append_unique_text(record.notes, f"error_type={error_type}")
+
+
+def _split_structured_records(findings_by_file: dict[Path, list[LogFinding]]) -> list[RunRecord]:
+    records_by_id: dict[str, RunRecord] = {}
+    for path in sorted(findings_by_file):
+        for finding in findings_by_file[path]:
+            if finding.logger not in {"run_scan", "run_risk_check", "run_report"}:
+                continue
+            parsed = _parse_marker_fields(finding.message)
+            if parsed is None:
+                continue
+            event, fields = parsed
+            if event not in {"RUN_START", "RUN_END"}:
+                continue
+            _merge_marker_record(records_by_id, event=event, finding=finding, fields=fields)
+
+    records = sorted(
+        records_by_id.values(),
+        key=lambda record: (record.start_time, record.run_id or "", record.label),
+    )
+    for record in records:
+        if any("[ERROR]" in line or "Traceback" in line for line in record.lines):
+            _append_unique_text(record.notes, "error in run")
+    return records
+
+
 def _read_log_lines(path: Path) -> list[LogFinding]:
     findings: list[LogFinding] = []
     if not path.exists():
@@ -371,20 +549,33 @@ def _read_log_lines(path: Path) -> list[LogFinding]:
 
 
 def _find_matching_error_lines(
-    paths: Iterable[Path],
+    findings_by_file: dict[Path, list[LogFinding]],
     since: datetime | None = None,
 ) -> tuple[list[LogFinding], list[LogFinding]]:
-    errors: list[LogFinding] = []
-    warnings: list[LogFinding] = []
-    for path in paths:
-        for finding in _read_log_lines(path):
+    errors_by_sig: dict[tuple[datetime | None, str, str, str], LogFinding] = {}
+    warnings_by_sig: dict[tuple[datetime | None, str, str, str], LogFinding] = {}
+
+    def _prefer_candidate(existing: LogFinding, candidate: LogFinding) -> bool:
+        if existing.source_file.name == "cron.log" and candidate.source_file.name != "cron.log":
+            return True
+        return False
+
+    for path in findings_by_file:
+        for finding in findings_by_file[path]:
             if since is not None and finding.timestamp is not None and finding.timestamp < since:
                 continue
             msg = finding.message.lower()
+            signature = (finding.timestamp, finding.level, finding.logger, finding.message)
             if finding.level == "ERROR" or "traceback" in msg:
-                errors.append(finding)
+                existing = errors_by_sig.get(signature)
+                if existing is None or _prefer_candidate(existing, finding):
+                    errors_by_sig[signature] = finding
             elif finding.level == "WARNING":
-                warnings.append(finding)
+                existing = warnings_by_sig.get(signature)
+                if existing is None or _prefer_candidate(existing, finding):
+                    warnings_by_sig[signature] = finding
+    errors = list(errors_by_sig.values())
+    warnings = list(warnings_by_sig.values())
     errors.sort(key=lambda item: (item.timestamp or datetime.min, item.source_file.name))
     warnings.sort(key=lambda item: (item.timestamp or datetime.min, item.source_file.name))
     return errors, warnings
@@ -411,13 +602,13 @@ def _log_files(log_dir: Path) -> list[Path]:
     return unique
 
 
-def _split_scan_records(log_files: Iterable[Path]) -> list[RunRecord]:
+def _split_scan_records(findings_by_file: dict[Path, list[LogFinding]]) -> list[RunRecord]:
     records: list[RunRecord] = []
-    for path in sorted(log_files):
+    for path in sorted(findings_by_file):
         if not path.name.startswith("scan_"):
             continue
         current: RunRecord | None = None
-        for finding in _read_log_lines(path):
+        for finding in findings_by_file[path]:
             if finding.logger != "run_scan":
                 if current is not None:
                     current.lines.append(finding.raw)
@@ -475,13 +666,13 @@ def _finalize_scan_record(record: RunRecord, records: list[RunRecord]) -> None:
     records.append(record)
 
 
-def _split_risk_records(log_files: Iterable[Path]) -> list[RunRecord]:
+def _split_risk_records(findings_by_file: dict[Path, list[LogFinding]]) -> list[RunRecord]:
     records: list[RunRecord] = []
-    for path in sorted(log_files):
+    for path in sorted(findings_by_file):
         if not path.name.startswith("risk_"):
             continue
         current: RunRecord | None = None
-        for finding in _read_log_lines(path):
+        for finding in findings_by_file[path]:
             if finding.logger != "run_risk_check":
                 if current is not None:
                     current.lines.append(finding.raw)
@@ -522,13 +713,13 @@ def _finalize_risk_record(record: RunRecord, records: list[RunRecord]) -> None:
     records.append(record)
 
 
-def _split_report_records(log_files: Iterable[Path]) -> list[RunRecord]:
+def _split_report_records(findings_by_file: dict[Path, list[LogFinding]]) -> list[RunRecord]:
     records: list[RunRecord] = []
-    for path in sorted(log_files):
+    for path in sorted(findings_by_file):
         if not path.name.startswith("report_"):
             continue
         current: RunRecord | None = None
-        for finding in _read_log_lines(path):
+        for finding in findings_by_file[path]:
             if finding.logger != "run_report":
                 if current is not None:
                     current.lines.append(finding.raw)
@@ -583,15 +774,32 @@ def _finalize_report_record(record: RunRecord, records: list[RunRecord]) -> None
     records.append(record)
 
 
-def load_runtime_records(log_dir: Path) -> dict[str, list[RunRecord]]:
+def load_runtime_records(log_dir: Path) -> dict[str, object]:
     files = _log_files(log_dir)
-    report_records = _split_report_records(files)
+    findings_by_file = {path: _read_log_lines(path) for path in files}
+    structured_records = _split_structured_records(findings_by_file)
+    structured_files = {
+        path
+        for path, findings in findings_by_file.items()
+        if any(_parse_marker_fields(finding.message) is not None for finding in findings)
+    }
+    legacy_findings = {path: findings for path, findings in findings_by_file.items() if path not in structured_files}
+    legacy_scan_records = _split_scan_records(legacy_findings)
+    legacy_risk_records = _split_risk_records(legacy_findings)
+    legacy_report_records = _split_report_records(legacy_findings)
+
+    structured_scan_records = [r for r in structured_records if r.job_key in {"stock_scan", "full_scan", "crypto_scan", "scan_unknown"}]
+    structured_risk_records = [r for r in structured_records if r.job_key == "risk_check"]
+    structured_daily_report_records = [r for r in structured_records if r.job_key == "daily_report"]
+    structured_weekly_report_records = [r for r in structured_records if r.job_key == "weekly_report"]
+    sort_key = lambda record: (record.start_time, record.run_id or "", record.source_file.name)
     return {
-        "scan": _split_scan_records(files),
-        "risk_check": _split_risk_records(files),
-        "daily_report": [r for r in report_records if r.job_key == "daily_report"],
-        "weekly_report": [r for r in report_records if r.job_key == "weekly_report"],
+        "scan": sorted(structured_scan_records + legacy_scan_records, key=sort_key),
+        "risk_check": sorted(structured_risk_records + legacy_risk_records, key=sort_key),
+        "daily_report": sorted(structured_daily_report_records + [r for r in legacy_report_records if r.job_key == "daily_report"], key=sort_key),
+        "weekly_report": sorted(structured_weekly_report_records + [r for r in legacy_report_records if r.job_key == "weekly_report"], key=sort_key),
         "all_files": files,
+        "findings_by_file": findings_by_file,
     }
 
 
@@ -984,9 +1192,9 @@ def build_health_report(
 
     job_health = evaluate_job_health(jobs, all_records, now=now, lookback_hours=lookback_hours)
 
-    log_files = runtime["all_files"]
+    findings_by_file = runtime["findings_by_file"]
     window_start = now - timedelta(hours=lookback_hours)
-    errors, warnings = _find_matching_error_lines(log_files, since=window_start)
+    errors, warnings = _find_matching_error_lines(findings_by_file, since=window_start)
 
     overall = _overall_status(alpaca_state, job_health, errors)
 
@@ -1088,6 +1296,18 @@ def _display_missed_runs(job_health: list[JobHealth]) -> int:
     scan_jobs = [job for job in job_health if job.key in combined_keys]
     other_jobs = [job for job in job_health if job.key not in combined_keys]
     return max((job.missed_runs for job in scan_jobs), default=0) + sum(job.missed_runs for job in other_jobs)
+
+
+def _recent_findings(findings: list[LogFinding], limit: int = 10) -> list[LogFinding]:
+    ordered = sorted(findings, key=lambda item: (item.timestamp or datetime.min, item.source_file.name, item.logger))
+    if limit <= 0:
+        return ordered[::-1]
+    return ordered[-limit:][::-1]
+
+
+def _format_finding_entry(finding: LogFinding) -> str:
+    timestamp = _fmt_timestamp(finding.timestamp)
+    return f"{timestamp} | {finding.source_file.name} | {finding.level} | {finding.logger} | {finding.message}"
 
 
 def _row_status(job: JobHealth, enabled: bool = False) -> str:
@@ -1212,13 +1432,20 @@ def format_terminal_report(report: HealthReport, *, use_color: bool = False) -> 
     lines.append("LOG HEALTH")
     errors_yesno = "YES [NOK]" if report.log_errors else "NO [OK]"
     warnings_yesno = "YES [WARN]" if report.log_warnings else "NO [OK]"
-    lines.append(f"Errors in logs     : {errors_yesno} ({_count_value(len(report.log_errors))})")
-    lines.append(f"Warnings in logs   : {warnings_yesno} ({_count_value(len(report.log_warnings))})")
-    if report.log_errors:
-        lines.append("Most recent errors:")
-        for finding in report.log_errors[-5:]:
-            ts = _fmt_timestamp(finding.timestamp)
-            lines.append(f"  {ts} | {finding.source_file.name} | {finding.message}")
+    lines.append(f"Errors in logs     : {errors_yesno} ({len(report.log_errors)})")
+    lines.append(f"Warnings in logs   : {warnings_yesno} ({len(report.log_warnings)})")
+    lines.append("")
+    lines.append("TROUBLESHOOTING")
+    lines.append("Latest errors:")
+    for finding in _recent_findings(report.log_errors, limit=10):
+        lines.append(f"  {_format_finding_entry(finding)}")
+    if not report.log_errors:
+        lines.append("  None in window.")
+    lines.append("Latest warnings:")
+    for finding in _recent_findings(report.log_warnings, limit=10):
+        lines.append(f"  {_format_finding_entry(finding)}")
+    if not report.log_warnings:
+        lines.append("  None in window.")
     lines.append("")
     lines.append("=" * table_width)
     return "\n".join(lines)
@@ -1244,6 +1471,7 @@ def render_html_report(report: HealthReport) -> str:
         ("Realized P/L", "green" if float(report.trade_summary.get("realized_pnl_dollars", 0) or 0) >= 0 else "red", f"{_fmt_money(report.trade_summary.get('realized_pnl_dollars'))} ({_fmt_pct(report.trade_summary.get('realized_pnl_pct'))})"),
         ("Unrealized P/L", "green" if float(report.trade_summary.get("unrealized_pnl_dollars", 0) or 0) >= 0 else "red", _fmt_money(report.trade_summary.get("unrealized_pnl_dollars"))),
         ("Log Errors", "red" if report.log_errors else "green", f"{len(report.log_errors)}"),
+        ("Log Warnings", "yellow" if report.log_warnings else "green", f"{len(report.log_warnings)}"),
         ("Missed Runs", "red" if any(job.missed_runs > 0 for job in report.job_health) else "green", str(_display_missed_runs(report.job_health))),
     ]
 
@@ -1295,13 +1523,26 @@ def render_html_report(report: HealthReport) -> str:
                 """
             )
 
-    error_items = []
-    for finding in report.log_errors[-10:]:
-        error_items.append(
-            f"<li><code>{esc(_fmt_timestamp(finding.timestamp))}</code> "
-            f"<span>{esc(finding.source_file.name)}</span> "
-            f"<span>{esc(finding.message)}</span></li>"
-        )
+    def finding_rows(findings: list[LogFinding], *, row_class: str, empty_message: str) -> str:
+        recent = _recent_findings(findings, limit=10)
+        if not recent:
+            return f'<tr><td colspan="4" class="muted">{esc(empty_message)}</td></tr>'
+        rows = []
+        for finding in recent:
+            rows.append(
+                f"""
+                <tr class="{row_class}">
+                  <td><code>{esc(_fmt_timestamp(finding.timestamp))}</code></td>
+                  <td><code>{esc(finding.source_file.name)}</code></td>
+                  <td><code>{esc(finding.logger)}</code></td>
+                  <td>{esc(finding.message)}</td>
+                </tr>
+                """
+            )
+        return "".join(rows)
+
+    error_rows = finding_rows(report.log_errors, row_class="red", empty_message="No error lines found in runtime logs.")
+    warning_rows = finding_rows(report.log_warnings, row_class="yellow", empty_message="No warning lines found in runtime logs.")
 
     warning_count = len(report.log_warnings)
     generated_local = esc(report.generated_at.strftime("%Y-%m-%d %H:%M:%S"))
@@ -1473,6 +1714,38 @@ def render_html_report(report: HealthReport) -> str:
       color: var(--muted);
       font-size: 0.88rem;
     }}
+    .trouble-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 16px;
+    }}
+    .finding-panel {{
+      background: rgba(15, 23, 42, 0.72);
+      border: 1px solid var(--panel-border);
+      border-radius: 18px;
+      padding: 16px;
+    }}
+    .finding-panel h3 {{
+      margin: 0 0 12px;
+      font-size: 1rem;
+    }}
+    .finding-panel.red {{
+      border-color: rgba(239, 68, 68, 0.32);
+      background: rgba(239, 68, 68, 0.08);
+    }}
+    .finding-panel.yellow {{
+      border-color: rgba(245, 158, 11, 0.32);
+      background: rgba(245, 158, 11, 0.08);
+    }}
+    .finding-table thead th {{
+      font-size: 0.72rem;
+    }}
+    .finding-table td {{
+      font-size: 0.9rem;
+    }}
+    .finding-table td:last-child {{
+      word-break: break-word;
+    }}
     @media (max-width: 900px) {{
       table, thead, tbody, th, td, tr {{ font-size: 0.92rem; }}
       .hero {{ padding: 20px; }}
@@ -1540,11 +1813,42 @@ def render_html_report(report: HealthReport) -> str:
     </section>
 
     <section>
-      <h2>Log Health</h2>
+      <h2>Troubleshooting</h2>
       <p class="muted">Errors in logs: <strong>{'YES' if report.log_errors else 'NO'}</strong> | Warnings: <strong>{warning_count}</strong></p>
-      <ul class="errors">
-        {''.join(error_items) if error_items else '<li class="muted">No error lines found in runtime logs.</li>'}
-      </ul>
+      <div class="trouble-grid">
+        <div class="finding-panel red">
+          <h3>Errors</h3>
+          <table class="finding-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>File</th>
+                <th>Logger</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              {error_rows}
+            </tbody>
+          </table>
+        </div>
+        <div class="finding-panel yellow">
+          <h3>Warnings</h3>
+          <table class="finding-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>File</th>
+                <th>Logger</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              {warning_rows}
+            </tbody>
+          </table>
+        </div>
+      </div>
       <div class="footnote">The dashboard is generated from cron templates, runtime logs, and the current Alpaca snapshot when available. Full scan and Crypto scan are evaluated together as one hourly cycle when both are scheduled.</div>
     </section>
   </div>

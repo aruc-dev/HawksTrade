@@ -153,8 +153,14 @@ By default it inspects the last 4 hours of cron and log activity and writes
 `reports/health_check_linux.html`. Use `--hours 8` to widen the health window,
 `--cron-template` or `--cron-file` if the installed cron schedule differs from
 the host timezone. Terminal output uses plain status tags like `[OK]`, `[WARN]`,
-and `[NOK]` so it stays readable in cron logs and copied output. The hourly
-full scan and crypto scan are evaluated as one combined cycle when both are
+and `[NOK]` so it stays readable in cron logs and copied output. The HTML report
+includes the generation time, the active lookback window, and troubleshooting
+sections for the latest warnings and errors.
+
+The scheduled entrypoints now emit structured `RUN_START` / `RUN_END` markers
+with unique `run_id` values. The health checker uses those markers first and
+falls back to the older log-text parser for historical logs. The hourly full
+scan and crypto scan are still evaluated as one combined cycle when both are
 scheduled, which avoids false missed-run alerts from overlapping cron slots.
 
 ## Windows Task Scheduler
