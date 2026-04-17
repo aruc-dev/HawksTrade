@@ -140,6 +140,21 @@ For Linux servers, prefer a host timezone that matches the selected template. Th
 template is written for US daylight saving time. Re-check offsets when the US switches
 between daylight and standard time.
 
+## Linux Health Check
+
+Run the health dashboard script to inspect cron health, Alpaca connectivity, open
+positions, and realized/unrealized P&L:
+
+```bash
+python3 scripts/check_health_linux.py
+```
+
+By default it inspects the last 4 hours of cron and log activity and writes
+`reports/health_check_linux.html`. Use `--hours 8` to widen the health window,
+`--cron-template` or `--cron-file` if the installed cron schedule differs from
+the host timezone, `--force-color` to keep ANSI colors even when piping output,
+and `--no-color` if you want plain terminal output.
+
 ## Windows Task Scheduler
 
 Templates:
