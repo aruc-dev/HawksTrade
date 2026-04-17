@@ -10,7 +10,7 @@ Usage:
   python3 scripts/check_health_linux.py
   python3 scripts/check_health_linux.py --cron-template pacific
   python3 scripts/check_health_linux.py --cron-file scheduler/cron/hawkstrade-pacific.cron
-  python3 scripts/check_health_linux.py --hours 8 --force-color
+  python3 scripts/check_health_linux.py --hours 8
 """
 
 from __future__ import annotations
@@ -47,36 +47,6 @@ DEFAULT_CRON_FILES = {
     "pacific": BASE_DIR / "scheduler" / "cron" / "hawkstrade-pacific.cron",
     "utc": BASE_DIR / "scheduler" / "cron" / "hawkstrade-utc.cron",
 }
-
-
-# ── ANSI colours ──────────────────────────────────────────────────────────────
-
-
-class Ansi:
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    DIM = "\033[2m"
-    RED = "\033[31m"
-    GREEN = "\033[32m"
-    YELLOW = "\033[33m"
-    BLUE = "\033[34m"
-    CYAN = "\033[36m"
-    GREY = "\033[90m"
-
-
-def _supports_color(force: bool = False) -> bool:
-    return True
-
-
-def _paint(text: str, colour: str, enabled: bool) -> str:
-    if not enabled:
-        return text
-    return f"{colour}{text}{Ansi.RESET}"
-
-
-def _status_text(status: str) -> str:
-    return status.upper()
-
 
 # ── Dataclasses ──────────────────────────────────────────────────────────────
 
@@ -1003,43 +973,30 @@ def _fmt_timestamp(ts: datetime | None) -> str:
     return ts.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _severity_label(status: str, enabled: bool) -> str:
+def _severity_label(status: str, enabled: bool = False) -> str:
     mapping = {
-        "green": ("OK", Ansi.GREEN),
-        "yellow": ("WARN", Ansi.YELLOW),
-        "red": ("ISSUE", Ansi.RED),
+        "green": "[OK]",
+        "yellow": "[WARN]",
+        "red": "[NOK]",
     }
-    text, colour = mapping.get(status, ("UNKNOWN", Ansi.GREY))
-    return _paint(text, colour, enabled)
+    return mapping.get(status, "[UNKNOWN]")
 
 
-def _signed_value(value: float | None, *, enabled: bool, money: bool = False, pct: bool = False) -> str:
+def _signed_value(value: float | None, *, enabled: bool = False, money: bool = False, pct: bool = False) -> str:
     if value is None:
         return "N/A"
     if pct:
-        text = f"{value:+.2%}"
-    elif money:
-        text = f"${value:+,.2f}"
-    else:
-        text = f"{value:+,.2f}"
-    colour = Ansi.GREEN if value >= 0 else Ansi.RED
-    return _paint(text, colour, enabled)
+        return f"{value:+.2%}"
+    if money:
+        return f"${value:+,.2f}"
+    return f"{value:+,.2f}"
 
 
-def _count_value(value: int, *, enabled: bool) -> str:
-    colour = Ansi.GREEN if value == 0 else Ansi.RED
-    return _paint(str(value), colour, enabled)
+def _count_value(value: int, *, enabled: bool = False) -> str:
+    return f"{value} {'[OK]' if value == 0 else '[NOK]'}"
 
 
-def _status_symbol(status: str) -> str:
-    if status == "green":
-        return "green"
-    if status == "yellow":
-        return "yellow"
-    return "red"
-
-
-def _row_status(job: JobHealth, enabled: bool) -> str:
+def _row_status(job: JobHealth, enabled: bool = False) -> str:
     return _severity_label(job.status, enabled)
 
 
@@ -1053,51 +1010,47 @@ def _line(text: str = "", width: int = 88) -> str:
     return text
 
 
-def format_terminal_report(report: HealthReport, *, use_color: bool = True) -> str:
-    enabled = use_color
+def format_terminal_report(report: HealthReport, *, use_color: bool = False) -> str:
     table_width = 128
-    title = _paint("HAWKSTRADE LINUX HEALTH CHECK", Ansi.BOLD + Ansi.CYAN, enabled)
-    generated = _paint(report.generated_at.strftime("%Y-%m-%d %H:%M:%S"), Ansi.BOLD, enabled)
     generated_tz = report.generated_at.astimezone().tzname() or report.local_timezone
-    overall = _severity_label(report.overall_status, enabled)
+    overall = _severity_label(report.overall_status)
     window_label = f"last {report.lookback_hours:g}h"
 
     lines: list[str] = []
     lines.append("=" * table_width)
-    lines.append(f"{title}")
-    lines.append(f"Generated : {generated} {generated_tz}")
+    lines.append("HAWKSTRADE LINUX HEALTH CHECK")
+    lines.append(f"Generated : {report.generated_at.strftime('%Y-%m-%d %H:%M:%S')} {generated_tz}")
     lines.append(f"Cron file : {report.cron_file}")
     lines.append(f"Template  : {report.cron_template} | Local TZ: {report.local_timezone}")
     lines.append(f"Window    : {window_label}")
     lines.append(f"Overall   : {overall}")
+    lines.append("Legend    : [OK]=healthy | [WARN]=review | [NOK]=attention")
     lines.append("=" * table_width)
     lines.append("")
 
-    lines.append(_paint("CRON HEALTH", Ansi.BOLD + Ansi.BLUE, enabled))
+    lines.append("CRON HEALTH")
     lines.append(
-        f"{'Job':<16} {'Schedule':<44} {'Last Run':<19} {'Age':<10} {'Dur':<10} {'Missed':<8} {'Status'}"
+        f"{'Job':<16} {'Schedule':<44} {'Last Run':<19} {'Age':<10} {'Dur':<10} {'Missed':<15} {'Status'}"
     )
     lines.append("-" * table_width)
     for job in report.job_health:
         schedule = " ; ".join(job.schedule_lines)
         last_run = _fmt_timestamp(job.last_run_at)
         age = _fmt_duration(job.age)
-        age_colour = Ansi.GREEN if job.status == "green" else Ansi.RED
-        age = _paint(age, age_colour, enabled)
         duration = _fmt_duration(job.last_duration)
-        status = _row_status(job, enabled)
-        missed = _count_value(job.missed_runs, enabled=enabled)
+        status = _row_status(job)
+        missed = _count_value(job.missed_runs)
         lines.append(
             f"{job.label:<16} {schedule[:44]:<44} {last_run:<19} {age:<10} {duration:<10} "
-            f"{missed:<8} {status}"
+            f"{missed:<15} {status}"
         )
     lines.append("")
-    lines.append(_paint("Missed counts reflect gaps detected between observed runs and the cron template.", Ansi.DIM, enabled))
+    lines.append("Missed counts reflect gaps detected between observed runs and the cron template.")
     lines.append("")
 
     issues = [job for job in report.job_health if job.status != "green"]
     if issues:
-        lines.append(_paint("ISSUE SUMMARY", Ansi.BOLD + Ansi.RED, enabled))
+        lines.append("ISSUE SUMMARY")
         for job in issues:
             reason_bits = []
             if job.missed_runs:
@@ -1105,14 +1058,14 @@ def format_terminal_report(report: HealthReport, *, use_color: bool = True) -> s
             if job.latest_note:
                 reason_bits.append(job.latest_note)
             reason = "; ".join(reason_bits) if reason_bits else "status requires attention"
-            lines.append(f"  - {job.label}: {reason}")
+            lines.append(f"  - [NOK] {job.label}: {reason}")
         lines.append("")
 
-    lines.append(_paint("PORTFOLIO", Ansi.BOLD + Ansi.BLUE, enabled))
+    lines.append("PORTFOLIO")
     if report.alpaca.connected:
-        lines.append(f"Alpaca connectivity : {_paint('OK', Ansi.GREEN, enabled)}")
+        lines.append(f"Alpaca connectivity : OK [OK]")
     else:
-        lines.append(f"Alpaca connectivity : {_paint('FAILED', Ansi.RED, enabled)}")
+        lines.append(f"Alpaca connectivity : FAILED [NOK]")
         if report.alpaca.account_error:
             lines.append(f"  Account error    : {report.alpaca.account_error}")
         if report.alpaca.positions_error:
@@ -1120,31 +1073,32 @@ def format_terminal_report(report: HealthReport, *, use_color: bool = True) -> s
     lines.append(f"Portfolio value     : {_fmt_money(report.alpaca.portfolio_value)}")
     lines.append(f"Cash                : {_fmt_money(report.alpaca.cash)}")
     lines.append(f"Buying power        : {_fmt_money(report.alpaca.buying_power)}")
-    open_positions_colour = Ansi.GREEN if report.alpaca.open_position_count > 0 else Ansi.YELLOW
-    lines.append(f"Open positions      : {_paint(str(report.alpaca.open_position_count), open_positions_colour, enabled)}")
+    open_positions_tag = "[OK]" if report.alpaca.open_position_count > 0 else "[WARN]"
+    lines.append(f"Open positions      : {report.alpaca.open_position_count} {open_positions_tag}")
     lines.append(f"Closed trades       : {report.trade_summary.get('total_trades', 0)}")
     lines.append(
-        f"Realized P/L        : {_signed_value(report.trade_summary.get('realized_pnl_dollars'), enabled=enabled, money=True)} "
-        f"({_signed_value(report.trade_summary.get('realized_pnl_pct'), enabled=enabled, pct=True)})"
+        f"Realized P/L        : {_signed_value(report.trade_summary.get('realized_pnl_dollars'), money=True)} "
+        f"({_signed_value(report.trade_summary.get('realized_pnl_pct'), pct=True)})"
     )
     unrealized = report.trade_summary.get("unrealized_pnl_dollars")
-    lines.append(f"Unrealized P/L      : {_signed_value(unrealized, enabled=enabled, money=True)}")
-    lines.append(f"Total P/L           : {_signed_value(report.trade_summary.get('total_pnl_dollars'), enabled=enabled, money=True)}")
+    lines.append(f"Unrealized P/L      : {_signed_value(unrealized, money=True)}")
+    lines.append(f"Total P/L           : {_signed_value(report.trade_summary.get('total_pnl_dollars'), money=True)}")
     lines.append("")
 
-    lines.append(_paint("OPEN POSITIONS", Ansi.BOLD + Ansi.BLUE, enabled))
+    lines.append("OPEN POSITIONS")
     if report.alpaca.connected and report.alpaca.broker_positions:
-        lines.append(f"{'Symbol':<10} {'Qty':>12} {'Entry':>12} {'Now':>12} {'P/L $':>12} {'P/L %':>10}")
-        lines.append("-" * 76)
+        lines.append(f"{'Symbol':<10} {'Qty':>12} {'Entry':>12} {'Now':>12} {'P/L $':>12} {'P/L %':>10} {'State':>8}")
+        lines.append("-" * 86)
         for pos in report.alpaca.broker_positions:
             pnl_dollars = float(pos.get("unrealized_pnl") or 0)
             pnl_pct = float(pos.get("unrealized_pnl_pct") or 0)
-            colour = Ansi.GREEN if pnl_dollars >= 0 else Ansi.RED
+            state = "[OK]" if pnl_dollars >= 0 else "[NOK]"
             lines.append(
                 f"{pos['symbol']:<10} {pos['qty']:>12.4f} {pos['avg_entry_price']:>12.4f} "
                 f"{pos['current_price']:>12.4f} "
-                f"{_paint(f'{pnl_dollars:+,.2f}', colour, enabled):>12} "
-                f"{_paint(f'{pnl_pct:+.2%}', colour, enabled):>10}"
+                f"{_signed_value(pnl_dollars, money=True):>12} "
+                f"{_signed_value(pnl_pct, pct=True):>10} "
+                f"{state:>8}"
             )
     else:
         lines.append("Broker positions unavailable; showing local open trade rows only.")
@@ -1160,11 +1114,11 @@ def format_terminal_report(report: HealthReport, *, use_color: bool = True) -> s
             lines.append("No open positions detected.")
     lines.append("")
 
-    lines.append(_paint("LOG HEALTH", Ansi.BOLD + Ansi.BLUE, enabled))
-    errors_yesno = _paint("YES", Ansi.RED, enabled) if report.log_errors else _paint("NO", Ansi.GREEN, enabled)
-    warnings_yesno = _paint("YES", Ansi.YELLOW, enabled) if report.log_warnings else _paint("NO", Ansi.GREEN, enabled)
-    lines.append(f"Errors in logs     : {errors_yesno} ({_count_value(len(report.log_errors), enabled=enabled)})")
-    lines.append(f"Warnings in logs   : {warnings_yesno} ({_count_value(len(report.log_warnings), enabled=enabled)})")
+    lines.append("LOG HEALTH")
+    errors_yesno = "YES [NOK]" if report.log_errors else "NO [OK]"
+    warnings_yesno = "YES [WARN]" if report.log_warnings else "NO [OK]"
+    lines.append(f"Errors in logs     : {errors_yesno} ({_count_value(len(report.log_errors))})")
+    lines.append(f"Warnings in logs   : {warnings_yesno} ({_count_value(len(report.log_warnings))})")
     if report.log_errors:
         lines.append("Most recent errors:")
         for finding in report.log_errors[-5:]:
@@ -1552,12 +1506,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--no-color",
         action="store_true",
-        help="Disable ANSI colour output in the terminal",
+        help="Legacy compatibility flag; terminal output now uses plain status tags",
     )
     parser.add_argument(
         "--force-color",
         action="store_true",
-        help="Force ANSI colour output even when stdout is not a TTY",
+        help="Legacy compatibility flag; terminal output now uses plain status tags",
     )
     return parser.parse_args(argv)
 
@@ -1573,8 +1527,7 @@ def main(argv: list[str] | None = None) -> int:
         html_output=args.html_output,
         lookback_hours=args.lookback_hours,
     )
-    use_color = _supports_color(force=args.force_color) and not args.no_color
-    terminal = format_terminal_report(report, use_color=use_color).replace("\r", "")
+    terminal = format_terminal_report(report, use_color=False).replace("\r", "")
     terminal = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", terminal)
     print(terminal)
     output_path = write_html_report(report)
