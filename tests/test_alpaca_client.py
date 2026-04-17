@@ -195,6 +195,33 @@ class SecretsSourceShmTests(unittest.TestCase):
                 )
         self.assertIn("fetch_secrets.sh", str(ctx.exception))
 
+    def test_shm_source_falls_back_to_local_when_shm_mount_missing(self):
+        """On dev machines without /dev/shm, shm config should fall back to local dotenv files."""
+        import importlib
+        from pathlib import Path
+        from unittest.mock import MagicMock
+
+        fake_cfg = {"mode": "paper", "secrets_source": "shm"}
+        mock_load_dotenv = MagicMock()
+        _real_exists = Path.exists
+
+        def _exists_without_shm(self):
+            if str(self) in {"/dev/shm", "/dev/shm/.hawkstrade.env"}:
+                return False
+            return _real_exists(self)
+
+        try:
+            with patch("yaml.safe_load", return_value=fake_cfg), \
+                 patch("dotenv.load_dotenv", mock_load_dotenv), \
+                 patch.object(Path, "exists", _exists_without_shm):
+                importlib.reload(alpaca_client)
+
+            mock_load_dotenv.assert_any_call(alpaca_client.BASE_DIR / "config" / ".env")
+            mock_load_dotenv.assert_any_call(alpaca_client.BASE_DIR / ".env", override=True)
+            self.assertEqual(alpaca_client._SECRETS_SOURCE, "local")
+        finally:
+            importlib.reload(alpaca_client)
+
 
 if __name__ == "__main__":
     unittest.main()
