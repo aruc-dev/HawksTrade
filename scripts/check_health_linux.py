@@ -612,6 +612,13 @@ def _generate_expected_times(pattern: CronPattern, start: datetime, end: datetim
     return expected
 
 
+def _expected_runs_for_jobs(jobs: list[CronJob], start: datetime, end: datetime) -> list[datetime]:
+    expected: list[datetime] = []
+    for job in jobs:
+        expected.extend(_generate_expected_times(job.pattern, start, end))
+    return sorted(set(expected))
+
+
 def _match_expected_runs(expected: list[datetime], actual: list[datetime], tolerance_minutes: int) -> tuple[int, list[datetime]]:
     missed = 0
     used: set[int] = set()
@@ -649,6 +656,91 @@ def _job_status(latest_recent: RunRecord | None, missed_runs: int, expected_runs
     return "green"
 
 
+def _build_job_health(
+    *,
+    key: str,
+    label: str,
+    schedule_lines: list[str],
+    jobs_for_key: list[CronJob],
+    recent_records: list[RunRecord],
+    all_records: list[RunRecord],
+    expected_runs: list[datetime],
+    lookback_hours: float,
+) -> JobHealth:
+    latest_recent = recent_records[-1] if recent_records else None
+    latest_any = all_records[-1] if all_records else None
+    latest_visible = latest_recent or latest_any
+    last_success = max((record.start_time for record in recent_records if record.success), default=None)
+    if last_success is None:
+        last_success = max((record.start_time for record in all_records if record.success), default=None)
+    if expected_runs:
+        if latest_recent is None:
+            latest_note = f"No run in last {lookback_hours:g} hours"
+        else:
+            latest_note = _latest_note(latest_visible)
+    else:
+        latest_note = _latest_note(latest_visible)
+    missed, _ = _match_expected_runs(expected_runs, [r.start_time for r in recent_records], _tolerance_minutes(jobs_for_key))
+    return JobHealth(
+        key=key,
+        label=label,
+        schedule_lines=schedule_lines,
+        last_run_at=latest_visible.start_time if latest_visible else None,
+        last_success_at=last_success,
+        last_duration=latest_visible.duration if latest_visible else None,
+        missed_runs=missed,
+        expected_runs=len(expected_runs),
+        status=_job_status(latest_recent, missed, len(expected_runs)),
+        latest_note=latest_note,
+    )
+
+
+def _combined_scan_health(
+    *,
+    full_jobs: list[CronJob],
+    crypto_jobs: list[CronJob],
+    scan_records: list[RunRecord],
+    window_start: datetime,
+    now: datetime,
+    lookback_hours: float,
+) -> dict[str, JobHealth] | None:
+    full_expected = _expected_runs_for_jobs(full_jobs, window_start, now)
+    crypto_expected = _expected_runs_for_jobs(crypto_jobs, window_start, now)
+    if not full_expected or not crypto_expected:
+        return None
+
+    combined_jobs = [*full_jobs, *crypto_jobs]
+    combined_expected = sorted(set(full_expected).union(crypto_expected))
+    all_combined_records = sorted(
+        [record for record in scan_records if record.start_time >= window_start],
+        key=lambda item: item.start_time,
+    )
+    recent_combined_records = [record for record in all_combined_records if record.start_time >= window_start]
+
+    return {
+        "full_scan": _build_job_health(
+            key="full_scan",
+            label=full_jobs[0].label if full_jobs else "Full scan",
+            schedule_lines=[_human_cron_line(job.pattern) for job in full_jobs],
+            jobs_for_key=combined_jobs,
+            recent_records=recent_combined_records,
+            all_records=all_combined_records,
+            expected_runs=combined_expected,
+            lookback_hours=lookback_hours,
+        ),
+        "crypto_scan": _build_job_health(
+            key="crypto_scan",
+            label=crypto_jobs[0].label if crypto_jobs else "Crypto scan",
+            schedule_lines=[_human_cron_line(job.pattern) for job in crypto_jobs],
+            jobs_for_key=combined_jobs,
+            recent_records=recent_combined_records,
+            all_records=all_combined_records,
+            expected_runs=combined_expected,
+            lookback_hours=lookback_hours,
+        ),
+    }
+
+
 def evaluate_job_health(
     jobs: list[CronJob],
     records: list[RunRecord],
@@ -668,47 +760,42 @@ def evaluate_job_health(
 
     window_start = now - timedelta(hours=lookback_hours)
     health_rows: list[JobHealth] = []
+
+    combined_scan_health = None
+    full_jobs = grouped.get("full_scan", [])
+    crypto_jobs = grouped.get("crypto_scan", [])
+    if full_jobs and crypto_jobs:
+        scan_records = [record for record in records if record.job_key in {"stock_scan", "full_scan", "crypto_scan", "scan_unknown"}]
+        combined_scan_health = _combined_scan_health(
+            full_jobs=full_jobs,
+            crypto_jobs=crypto_jobs,
+            scan_records=scan_records,
+            window_start=window_start,
+            now=now,
+            lookback_hours=lookback_hours,
+        )
+
     for key, jobs_for_key in grouped.items():
+        if combined_scan_health and key in combined_scan_health:
+            health_rows.append(combined_scan_health[key])
+            continue
+
         all_expected: list[datetime] = []
         for job in jobs_for_key:
             all_expected.extend(_generate_expected_times(job.pattern, window_start, now))
         all_expected = sorted(set(all_expected))
         key_records = sorted(by_key.get(key, []), key=lambda item: item.start_time)
         recent_records = [record for record in key_records if record.start_time >= window_start]
-        actual_runs = [r.start_time for r in recent_records]
-        tolerance = _tolerance_minutes(jobs_for_key)
-        missed, _matched = _match_expected_runs(all_expected, actual_runs, tolerance)
-        latest_any = key_records[-1] if key_records else None
-        latest_recent = recent_records[-1] if recent_records else None
-        latest_visible = latest_recent or latest_any
-        last_success = max(
-            (record.start_time for record in recent_records if record.success),
-            default=None,
-        )
-        if last_success is None:
-            last_success = max(
-                (record.start_time for record in key_records if record.success),
-                default=None,
-            )
-        if expected_runs := len(all_expected):
-            if latest_recent is None:
-                latest_note = f"No run in last {lookback_hours:g} hours"
-            else:
-                latest_note = _latest_note(latest_visible)
-        else:
-            latest_note = _latest_note(latest_visible)
         health_rows.append(
-            JobHealth(
+            _build_job_health(
                 key=key,
                 label=jobs_for_key[0].label if jobs_for_key else key,
                 schedule_lines=[_human_cron_line(job.pattern) for job in jobs_for_key],
-                last_run_at=latest_visible.start_time if latest_visible else None,
-                last_success_at=last_success,
-                last_duration=latest_visible.duration if latest_visible else None,
-                missed_runs=missed,
-                expected_runs=len(all_expected),
-                status=_job_status(latest_recent, missed, len(all_expected)),
-                latest_note=latest_note,
+                jobs_for_key=jobs_for_key,
+                recent_records=recent_records,
+                all_records=key_records,
+                expected_runs=all_expected,
+                lookback_hours=lookback_hours,
             )
         )
 
@@ -996,6 +1083,13 @@ def _count_value(value: int, *, enabled: bool = False) -> str:
     return f"{value} {'[OK]' if value == 0 else '[NOK]'}"
 
 
+def _display_missed_runs(job_health: list[JobHealth]) -> int:
+    combined_keys = {"full_scan", "crypto_scan"}
+    scan_jobs = [job for job in job_health if job.key in combined_keys]
+    other_jobs = [job for job in job_health if job.key not in combined_keys]
+    return max((job.missed_runs for job in scan_jobs), default=0) + sum(job.missed_runs for job in other_jobs)
+
+
 def _row_status(job: JobHealth, enabled: bool = False) -> str:
     return _severity_label(job.status, enabled)
 
@@ -1046,6 +1140,7 @@ def format_terminal_report(report: HealthReport, *, use_color: bool = False) -> 
         )
     lines.append("")
     lines.append("Missed counts reflect gaps detected between observed runs and the cron template.")
+    lines.append("Full scan and Crypto scan are evaluated together as one hourly cycle when both are scheduled.")
     lines.append("")
 
     issues = [job for job in report.job_health if job.status != "green"]
@@ -1149,7 +1244,7 @@ def render_html_report(report: HealthReport) -> str:
         ("Realized P/L", "green" if float(report.trade_summary.get("realized_pnl_dollars", 0) or 0) >= 0 else "red", f"{_fmt_money(report.trade_summary.get('realized_pnl_dollars'))} ({_fmt_pct(report.trade_summary.get('realized_pnl_pct'))})"),
         ("Unrealized P/L", "green" if float(report.trade_summary.get("unrealized_pnl_dollars", 0) or 0) >= 0 else "red", _fmt_money(report.trade_summary.get("unrealized_pnl_dollars"))),
         ("Log Errors", "red" if report.log_errors else "green", f"{len(report.log_errors)}"),
-        ("Missed Runs", "red" if any(job.missed_runs > 0 for job in report.job_health) else "green", str(sum(job.missed_runs for job in report.job_health))),
+        ("Missed Runs", "red" if any(job.missed_runs > 0 for job in report.job_health) else "green", str(_display_missed_runs(report.job_health))),
     ]
 
     job_rows = []
@@ -1450,7 +1545,7 @@ def render_html_report(report: HealthReport) -> str:
       <ul class="errors">
         {''.join(error_items) if error_items else '<li class="muted">No error lines found in runtime logs.</li>'}
       </ul>
-      <div class="footnote">The dashboard is generated from cron templates, runtime logs, and the current Alpaca snapshot when available.</div>
+      <div class="footnote">The dashboard is generated from cron templates, runtime logs, and the current Alpaca snapshot when available. Full scan and Crypto scan are evaluated together as one hourly cycle when both are scheduled.</div>
     </section>
   </div>
 </body>

@@ -72,6 +72,58 @@ PATH=/usr/local/bin:/usr/bin:/bin
             self.assertEqual(crypto.status, "red")
             self.assertEqual(crypto.last_run_at, datetime(2026, 4, 17, 10, 0, 0, 100000))
 
+    def test_evaluate_job_health_combines_overlapping_scan_cycles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cron_file = Path(tmp) / "hawkstrade-utc.cron"
+            self._write(
+                cron_file,
+                """
+0 14-19 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_scan.py >> logs/cron.log 2>&1
+0 * * * * cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
+""".strip()
+                + "\n",
+            )
+
+            jobs = health.load_cron_jobs(cron_file)
+            records = [
+                health.RunRecord(
+                    job_key="full_scan",
+                    label="Full scan",
+                    start_time=datetime(2026, 4, 17, 18, 0, 0),
+                    end_time=datetime(2026, 4, 17, 18, 0, 5),
+                    success=True,
+                    source_file=cron_file,
+                    lines=["full"],
+                ),
+                health.RunRecord(
+                    job_key="crypto_scan",
+                    label="Crypto scan",
+                    start_time=datetime(2026, 4, 17, 19, 0, 0),
+                    end_time=datetime(2026, 4, 17, 19, 0, 5),
+                    success=True,
+                    source_file=cron_file,
+                    lines=["crypto"],
+                ),
+            ]
+
+            report = health.evaluate_job_health(
+                jobs,
+                records,
+                now=datetime(2026, 4, 17, 19, 59, 0),
+                lookback_hours=2.0,
+            )
+
+            full = next(job for job in report if job.key == "full_scan")
+            crypto = next(job for job in report if job.key == "crypto_scan")
+
+            self.assertEqual(full.expected_runs, 2)
+            self.assertEqual(crypto.expected_runs, 2)
+            self.assertEqual(full.missed_runs, 0)
+            self.assertEqual(crypto.missed_runs, 0)
+            self.assertEqual(full.status, "green")
+            self.assertEqual(crypto.status, "green")
+            self.assertEqual(health._display_missed_runs(report), 0)
+
     def test_build_report_renders_html_and_terminal_output(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
