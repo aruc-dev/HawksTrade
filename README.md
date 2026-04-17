@@ -103,6 +103,12 @@ Operational schedules are documented in [scheduler/README.md](scheduler/README.m
 
 ---
 
+## Cloud Deployment
+
+For running HawksTrade on AWS EC2 with IAM-based secrets management (no keys on disk), see [cloud-setup/aws-setup.md](cloud-setup/aws-setup.md).
+
+---
+
 ## Project Structure
 
 ```
