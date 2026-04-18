@@ -100,6 +100,31 @@ class AlpacaClientTests(unittest.TestCase):
 
         self.assertEqual(req.client_order_id, "client-1")
 
+    def test_limit_order_recovers_existing_order_on_duplicate_client_order_id(self):
+        class FakeClient:
+            def submit_order(self, req):
+                self.req = req
+                raise self.error
+
+            def get_order_by_client_id(self, client_order_id):
+                self.lookup = client_order_id
+                return SimpleNamespace(id="existing-order")
+
+        fake_client = FakeClient()
+        fake_client.error = self._api_error(422, "client_order_id already exists")
+        with patch.object(alpaca_client, "get_trading_client", return_value=fake_client):
+            order = alpaca_client.place_limit_order(
+                "AAPL",
+                1,
+                "buy",
+                100,
+                asset_class="stock",
+                client_order_id="client-1",
+            )
+
+        self.assertEqual(order.id, "existing-order")
+        self.assertEqual(fake_client.lookup, "client-1")
+
     def test_fractional_stock_limit_order_uses_day_time_in_force(self):
         req = self._capture_limit_order("TQQQ", 51.9369, asset_class="stock", qty=94.396685)
 

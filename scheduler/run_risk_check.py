@@ -70,6 +70,19 @@ def _mark_unhealthy_exit_result(marker: RunScope | None, result: dict | None, st
         )
 
 
+def _mark_alpaca_error(marker: RunScope | None, stage: str, exc: Exception):
+    info = ac.classify_alpaca_error(exc)
+    if marker is not None:
+        marker.mark_error(
+            stage=stage,
+            error_type=type(exc).__name__,
+            error_category=info.category,
+            retryable=info.retryable,
+            status_code=info.status_code,
+        )
+    return info
+
+
 def run(dry_run: bool = False, marker: RunScope | None = None):
     log.info(f"--- Risk Check | dry_run={'ON' if dry_run else 'OFF'} ---")
 
@@ -77,9 +90,16 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
     try:
         loss_exceeded = rm.daily_loss_exceeded()
     except Exception as e:
-        if marker is not None:
-            marker.mark_error(stage="daily_loss_check", error_type=type(e).__name__)
-        log.error(f"Daily loss check failed; skipping risk check: {e}", exc_info=True)
+        info = _mark_alpaca_error(marker, "daily_loss_check", e)
+        log.error(
+            "Daily loss check failed; skipping risk check: %s "
+            "| category=%s retryable=%s status_code=%s",
+            e,
+            info.category,
+            info.retryable,
+            info.status_code or "",
+            exc_info=True,
+        )
         return
 
     if loss_exceeded:
@@ -87,7 +107,16 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
         try:
             positions = ac.get_all_positions()
         except Exception as e:
-            log.error(f"Could not fetch positions for emergency close: {e}", exc_info=True)
+            info = _mark_alpaca_error(marker, "emergency_fetch_positions", e)
+            log.error(
+                "Could not fetch positions for emergency close: %s "
+                "| category=%s retryable=%s status_code=%s",
+                e,
+                info.category,
+                info.retryable,
+                info.status_code or "",
+                exc_info=True,
+            )
             return
         open_trades = get_open_trades()
         for pos in positions:
@@ -116,9 +145,16 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
     try:
         positions = ac.get_all_positions()
     except Exception as e:
-        if marker is not None:
-            marker.mark_error(stage="fetch_positions", error_type=type(e).__name__)
-        log.error(f"Could not fetch positions for risk check: {e}", exc_info=True)
+        info = _mark_alpaca_error(marker, "fetch_positions", e)
+        log.error(
+            "Could not fetch positions for risk check: %s "
+            "| category=%s retryable=%s status_code=%s",
+            e,
+            info.category,
+            info.retryable,
+            info.status_code or "",
+            exc_info=True,
+        )
         return
 
     if not positions:
@@ -149,7 +185,15 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
             else:
                 current_price = ac.get_stock_latest_price(price_symbol)
         except Exception as e:
-            log.warning(f"Could not get price for {symbol}: {e}")
+            info = ac.classify_alpaca_error(e)
+            log.warning(
+                "Could not get price for %s: %s | category=%s retryable=%s status_code=%s",
+                symbol,
+                e,
+                info.category,
+                info.retryable,
+                info.status_code or "",
+            )
             continue
 
         if current_price <= 0:

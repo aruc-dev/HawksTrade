@@ -1,5 +1,9 @@
+import json
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
+
+from alpaca.common.exceptions import APIError
 
 from scheduler import run_scan
 
@@ -19,6 +23,14 @@ class FakeMarker:
 
 
 class RunScanTests(unittest.TestCase):
+    def _api_error(self, status_code, message):
+        error = json.dumps({"code": status_code, "message": message})
+        http_error = SimpleNamespace(
+            response=SimpleNamespace(status_code=status_code),
+            request=SimpleNamespace(),
+        )
+        return APIError(error, http_error)
+
     def test_asset_class_matching_normalizes_stock_aliases(self):
         self.assertTrue(run_scan._asset_class_matches("stocks", "stock"))
         self.assertTrue(run_scan._asset_class_matches("stock", "stocks"))
@@ -195,6 +207,21 @@ class RunScanTests(unittest.TestCase):
         get_stock_universe.assert_not_called()
         enter_position.assert_not_called()
         exit_position.assert_not_called()
+
+    def test_run_marks_alpaca_error_category_on_connection_failure(self):
+        marker = FakeMarker()
+        with (
+            patch.object(run_scan.ac, "is_market_open", side_effect=self._api_error(401, "unauthorized.")),
+            patch.object(run_scan, "get_stock_universe") as get_stock_universe,
+        ):
+            run_scan.run(dry_run=True, marker=marker)
+
+        self.assertEqual(marker.status, "error")
+        self.assertEqual(marker.fields["stage"], "initial_connection")
+        self.assertEqual(marker.fields["error_category"], "auth")
+        self.assertEqual(marker.fields["status_code"], 401)
+        self.assertFalse(marker.fields["retryable"])
+        get_stock_universe.assert_not_called()
 
     def test_crypto_only_does_not_build_stock_universe(self):
         with (

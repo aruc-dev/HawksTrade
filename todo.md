@@ -53,7 +53,7 @@ file is a readable reliability roadmap.
   - Action: Calculate the baseline date using a configured timezone or `America/New_York` market-session boundary.
   - Done when: Daily loss limits reset at the intended trading session boundary, not at arbitrary host midnight.
 
-- [ ] Add shared Alpaca retry and error classification.
+- [x] Add shared Alpaca retry and error classification.
   - Problem: Alpaca calls are direct and exceptions are handled inconsistently.
   - Action: Add a helper that retries timeouts, 429, and 5xx with bounded backoff; never retries 401/403; returns structured error categories.
   - Done when: Entry points can distinguish retryable outage, auth failure, broker rejection, and not-found.

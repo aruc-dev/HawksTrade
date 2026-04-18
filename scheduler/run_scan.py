@@ -193,6 +193,19 @@ def _mark_unhealthy_exit_result(marker: RunScope | None, result: dict | None, st
         )
 
 
+def _mark_alpaca_error(marker: RunScope | None, stage: str, exc: Exception):
+    info = ac.classify_alpaca_error(exc)
+    if marker is not None:
+        marker.mark_error(
+            stage=stage,
+            error_type=type(exc).__name__,
+            error_category=info.category,
+            retryable=info.retryable,
+            status_code=info.status_code,
+        )
+    return info
+
+
 def _estimate_peak_price_since_entry(symbol: str, asset_class: str, current_price: float, age_days: float) -> float:
     """Estimate high-water price for trailing exits from recent daily bars."""
     limit = max(int(age_days) + 5, 15)
@@ -321,9 +334,16 @@ def run(
         market_open  = ac.is_market_open()
         open_symbols = get_open_symbols()
     except Exception as e:
-        if marker is not None:
-            marker.mark_error(stage="initial_connection", error_type=type(e).__name__)
-        log.error(f"Alpaca connection failed before scan; skipping run: {e}", exc_info=True)
+        info = _mark_alpaca_error(marker, "initial_connection", e)
+        log.error(
+            "Alpaca connection failed before scan; skipping run: %s "
+            "| category=%s retryable=%s status_code=%s",
+            e,
+            info.category,
+            info.retryable,
+            info.status_code or "",
+            exc_info=True,
+        )
         return
 
     log.info(f"Market open: {market_open} | Open positions: {len(open_symbols)}")
@@ -332,9 +352,16 @@ def run(
     try:
         loss_exceeded = rm.daily_loss_exceeded()
     except Exception as e:
-        if marker is not None:
-            marker.mark_error(stage="daily_loss_check", error_type=type(e).__name__)
-        log.error(f"Daily loss check failed; skipping scan to avoid unsafe trading: {e}", exc_info=True)
+        info = _mark_alpaca_error(marker, "daily_loss_check", e)
+        log.error(
+            "Daily loss check failed; skipping scan to avoid unsafe trading: %s "
+            "| category=%s retryable=%s status_code=%s",
+            e,
+            info.category,
+            info.retryable,
+            info.status_code or "",
+            exc_info=True,
+        )
         return
 
     if loss_exceeded:
@@ -405,9 +432,16 @@ def run(
     try:
         open_symbols = get_open_symbols()  # refresh after entries
     except Exception as e:
-        if marker is not None:
-            marker.mark_error(stage="refresh_open_positions", error_type=type(e).__name__)
-        log.error(f"Could not refresh open positions; skipping exit checks: {e}", exc_info=True)
+        info = _mark_alpaca_error(marker, "refresh_open_positions", e)
+        log.error(
+            "Could not refresh open positions; skipping exit checks: %s "
+            "| category=%s retryable=%s status_code=%s",
+            e,
+            info.category,
+            info.retryable,
+            info.status_code or "",
+            exc_info=True,
+        )
         return
     skip_symbols = set() if INTRADAY_ON else new_entry_symbols
     _check_strategy_exits(

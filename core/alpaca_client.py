@@ -27,6 +27,13 @@ from alpaca.data.requests import (
 )
 from alpaca.data.enums import DataFeed, Adjustment
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+from core.alpaca_errors import (
+    call_alpaca,
+    classify_alpaca_error,
+    exception_status_code,
+    exception_text,
+    is_not_found_error,
+)
 
 # ── Setup ───────────────────────────────────────────────────────────────────
 
@@ -175,7 +182,7 @@ def get_crypto_data_client() -> CryptoHistoricalDataClient:
 # ── Account ──────────────────────────────────────────────────────────────────
 
 def get_account():
-    return get_trading_client().get_account()
+    return call_alpaca("trading.get_account", lambda: get_trading_client().get_account())
 
 
 def get_portfolio_value() -> float:
@@ -196,58 +203,56 @@ def get_buying_power() -> float:
 # ── Positions ────────────────────────────────────────────────────────────────
 
 def get_all_positions():
-    return get_trading_client().get_all_positions()
+    return call_alpaca("trading.get_all_positions", lambda: get_trading_client().get_all_positions())
 
 
 def _exception_status_code(exc: Exception) -> int | None:
     """Best-effort HTTP status extraction across Alpaca and requests errors."""
-    for candidate in (
-        getattr(exc, "status_code", None),
-        getattr(getattr(exc, "response", None), "status_code", None),
-        getattr(getattr(getattr(exc, "_http_error", None), "response", None), "status_code", None),
-        getattr(getattr(getattr(exc, "http_error", None), "response", None), "status_code", None),
-    ):
-        if candidate is None:
-            continue
-        try:
-            return int(candidate)
-        except (TypeError, ValueError):
-            continue
-    return None
+    return exception_status_code(exc)
 
 
 def _exception_text(exc: Exception) -> str:
-    pieces = [str(exc)]
-    for attr in ("message", "_error"):
-        try:
-            value = getattr(exc, attr, None)
-        except Exception:
-            continue
-        if value:
-            pieces.append(str(value))
-    return " ".join(pieces).lower()
+    return exception_text(exc).lower()
 
 
 def _is_position_not_found_error(exc: Exception) -> bool:
-    status_code = _exception_status_code(exc)
-    if status_code == 404:
-        return True
-    if status_code is not None:
-        return False
+    return is_not_found_error(exc)
 
+
+def _is_duplicate_client_order_id_error(exc: Exception) -> bool:
     text = _exception_text(exc)
     return (
-        "position does not exist" in text
-        or "position not found" in text
-        or ("not found" in text and "position" in text)
+        ("client_order_id" in text or "client order id" in text)
+        and ("duplicate" in text or "already" in text or "unique" in text)
     )
+
+
+def _submit_order(client, req, operation: str, client_order_id: Optional[str] = None):
+    if not client_order_id:
+        return client.submit_order(req)
+    try:
+        return call_alpaca(operation, lambda: client.submit_order(req))
+    except Exception as exc:
+        if not _is_duplicate_client_order_id_error(exc):
+            raise
+        log.warning(
+            "Order submit reported duplicate client_order_id; loading existing broker order: %s",
+            client_order_id,
+        )
+        return call_alpaca(
+            f"trading.get_order_by_client_id[{client_order_id}]",
+            lambda: client.get_order_by_client_id(client_order_id),
+        )
 
 
 def get_position(symbol: str):
     client = get_trading_client()
     for candidate in _symbol_lookup_variants(symbol):
         try:
-            return client.get_open_position(candidate)
+            return call_alpaca(
+                f"trading.get_open_position[{candidate}]",
+                lambda candidate=candidate: client.get_open_position(candidate),
+            )
         except Exception as e:
             if _is_position_not_found_error(e):
                 log.debug(f"No open position for {candidate}: {e}")
@@ -284,7 +289,12 @@ def place_market_order(
     except Exception:
         pass
 
-    order = client.submit_order(req)
+    order = _submit_order(
+        client,
+        req,
+        f"trading.submit_market_order[{side}:{symbol}]",
+        client_order_id=client_order_id,
+    )
     # Store strategy in mock-friendly way for backtests
     if hasattr(order, "__setitem__"): order["strategy"] = strategy
     elif hasattr(order, "strategy"): order.strategy = strategy
@@ -327,7 +337,12 @@ def place_limit_order(symbol: str, qty: float, side: str, limit_price: float,
     except Exception:
         pass
 
-    order = client.submit_order(req)
+    order = _submit_order(
+        client,
+        req,
+        f"trading.submit_limit_order[{side}:{symbol}]",
+        client_order_id=client_order_id,
+    )
     # Store strategy in mock-friendly way for backtests
     if hasattr(order, "__setitem__"): order["strategy"] = strategy
     elif hasattr(order, "strategy"): order.strategy = strategy
@@ -341,13 +356,16 @@ def place_limit_order(symbol: str, qty: float, side: str, limit_price: float,
 
 
 def cancel_order(order_id: str):
-    get_trading_client().cancel_order_by_id(order_id)
+    call_alpaca(
+        f"trading.cancel_order[{order_id}]",
+        lambda: get_trading_client().cancel_order_by_id(order_id),
+    )
     log.info(f"Order cancelled: {order_id}")
 
 
 def get_open_orders():
     req = GetOrdersRequest(status=QueryOrderStatus.OPEN)
-    return get_trading_client().get_orders(filter=req)
+    return call_alpaca("trading.get_open_orders", lambda: get_trading_client().get_orders(filter=req))
 
 
 def normalize_symbol(symbol: str) -> str:
@@ -413,7 +431,10 @@ def _get_crypto_price_increment(symbol: str) -> Optional[Decimal]:
     if pair_symbol in _crypto_price_increment_cache:
         return _crypto_price_increment_cache[pair_symbol]
     try:
-        asset = get_trading_client().get_asset(pair_symbol)
+        asset = call_alpaca(
+            f"trading.get_asset[{pair_symbol}]",
+            lambda: get_trading_client().get_asset(pair_symbol),
+        )
         price_increment = getattr(asset, "price_increment", None)
         if price_increment:
             increment = Decimal(str(price_increment))
@@ -489,18 +510,27 @@ def get_stock_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
         feed=feed,
         adjustment=Adjustment.ALL
     )
-    return get_stock_data_client().get_stock_bars(req)
+    return call_alpaca(
+        f"stock_data.get_stock_bars[{len(symbols)}:{timeframe}]",
+        lambda: get_stock_data_client().get_stock_bars(req),
+    )
 
 
 def get_stock_latest_quote(symbol: str):
     req = StockLatestQuoteRequest(symbol_or_symbols=[symbol])
-    data = get_stock_data_client().get_stock_latest_quote(req)
+    data = call_alpaca(
+        f"stock_data.get_latest_quote[{symbol}]",
+        lambda: get_stock_data_client().get_stock_latest_quote(req),
+    )
     return data.get(symbol)
 
 
 def get_stock_latest_trade(symbol: str):
     req = StockLatestTradeRequest(symbol_or_symbols=[symbol])
-    data = get_stock_data_client().get_stock_latest_trade(req)
+    data = call_alpaca(
+        f"stock_data.get_latest_trade[{symbol}]",
+        lambda: get_stock_data_client().get_stock_latest_trade(req),
+    )
     return data.get(symbol)
 
 
@@ -545,7 +575,10 @@ def get_crypto_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
     end = datetime.now(timezone.utc)
     start = end - _lookback_delta(timeframe, limit, market="crypto")
     req = CryptoBarsRequest(symbol_or_symbols=request_symbols, timeframe=tf, start=start, end=end)
-    return get_crypto_data_client().get_crypto_bars(req)
+    return call_alpaca(
+        f"crypto_data.get_crypto_bars[{len(request_symbols)}:{timeframe}]",
+        lambda: get_crypto_data_client().get_crypto_bars(req),
+    )
 
 
 def get_crypto_latest_price(symbol: str) -> float:
@@ -553,7 +586,10 @@ def get_crypto_latest_price(symbol: str) -> float:
     request_symbol = to_crypto_pair_symbol(symbol)
     try:
         req = CryptoLatestOrderbookRequest(symbol_or_symbols=[request_symbol])
-        data = get_crypto_data_client().get_crypto_latest_orderbook(req)
+        data = call_alpaca(
+            f"crypto_data.get_latest_orderbook[{request_symbol}]",
+            lambda: get_crypto_data_client().get_crypto_latest_orderbook(req),
+        )
         ob = data.get(request_symbol) or data.get(symbol)
         if ob and ob.bids and ob.asks:
             best_bid = float(ob.bids[0].price)
@@ -567,7 +603,7 @@ def get_crypto_latest_price(symbol: str) -> float:
 # ── Market Hours ─────────────────────────────────────────────────────────────
 
 def is_market_open() -> bool:
-    clock = get_trading_client().get_clock()
+    clock = call_alpaca("trading.get_clock", lambda: get_trading_client().get_clock())
     return clock.is_open
 
 
@@ -590,7 +626,10 @@ def get_all_tradable_assets(asset_class: str = "us_equity") -> list:
         asset_class=asset_class_map.get(asset_class, AssetClass.US_EQUITY),
         status=AssetStatus.ACTIVE,
     )
-    assets = client.get_all_assets(request)
+    assets = call_alpaca(
+        f"trading.get_all_assets[{asset_class}]",
+        lambda: client.get_all_assets(request),
+    )
     symbols = [
         a.symbol for a in assets
         if a.tradable

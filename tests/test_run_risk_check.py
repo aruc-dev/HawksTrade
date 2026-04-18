@@ -1,6 +1,9 @@
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
+
+from alpaca.common.exceptions import APIError
 
 from scheduler import run_risk_check
 
@@ -20,6 +23,14 @@ class FakeMarker:
 
 
 class RunRiskCheckTests(unittest.TestCase):
+    def _api_error(self, status_code, message):
+        error = json.dumps({"code": status_code, "message": message})
+        http_error = SimpleNamespace(
+            response=SimpleNamespace(status_code=status_code),
+            request=SimpleNamespace(),
+        )
+        return APIError(error, http_error)
+
     def test_run_skips_when_daily_loss_check_fails(self):
         with (
             patch.object(run_risk_check.rm, "daily_loss_exceeded", side_effect=RuntimeError("unauthorized")),
@@ -28,6 +39,25 @@ class RunRiskCheckTests(unittest.TestCase):
             run_risk_check.run(dry_run=True)
 
         exit_position.assert_not_called()
+
+    def test_run_marks_retryable_category_when_fetch_positions_fails(self):
+        marker = FakeMarker()
+        with (
+            patch.object(run_risk_check.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_risk_check, "get_open_trades", return_value=[]),
+            patch.object(
+                run_risk_check.ac,
+                "get_all_positions",
+                side_effect=self._api_error(503, "service unavailable"),
+            ),
+        ):
+            run_risk_check.run(dry_run=True, marker=marker)
+
+        self.assertEqual(marker.status, "error")
+        self.assertEqual(marker.fields["stage"], "fetch_positions")
+        self.assertEqual(marker.fields["error_category"], "server_error")
+        self.assertEqual(marker.fields["status_code"], 503)
+        self.assertTrue(marker.fields["retryable"])
 
     def test_stale_open_trade_log_rows_are_skipped_when_no_broker_positions(self):
         with (

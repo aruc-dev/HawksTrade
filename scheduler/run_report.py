@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import yaml
+from core import alpaca_client as ac
 from core.portfolio import get_snapshot, print_snapshot
 from core.run_markers import run_scope
 from tracking.performance import compute_summary, format_report, save_performance_snapshot
@@ -110,8 +111,27 @@ if __name__ == "__main__":
         "run_report",
         weekly=args.weekly,
         report_kind="weekly" if args.weekly else "daily",
-    ):
-        if args.weekly:
-            run_weekly_report()
-        else:
-            run_daily_report()
+    ) as marker:
+        try:
+            if args.weekly:
+                run_weekly_report()
+            else:
+                run_daily_report()
+        except Exception as e:
+            info = ac.classify_alpaca_error(e)
+            marker.mark_error(
+                stage="report_generation",
+                error_type=type(e).__name__,
+                error_category=info.category,
+                retryable=info.retryable,
+                status_code=info.status_code,
+            )
+            log.error(
+                "Report generation failed: %s | category=%s retryable=%s status_code=%s",
+                e,
+                info.category,
+                info.retryable,
+                info.status_code or "",
+                exc_info=True,
+            )
+            raise
