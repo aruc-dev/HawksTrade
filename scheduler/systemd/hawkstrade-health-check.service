@@ -1,0 +1,18 @@
+[Unit]
+Description=HawksTrade Linux health check
+Documentation=file:/home/ec2-user/HawksTrade/scheduler/systemd/README.md
+Wants=network-online.target hawkstrade-secrets.service
+After=network-online.target hawkstrade-secrets.service
+
+[Service]
+Type=oneshot
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/home/ec2-user/HawksTrade
+EnvironmentFile=/etc/hawkstrade/hawkstrade.env
+Environment=HAWKSTRADE_REQUIRE_SHM=1
+ExecStart=/usr/bin/bash -lc 'cd "$HAWKSTRADE_DIR" && mkdir -p logs reports && PY=.venv/bin/python; if [ ! -x "$PY" ]; then PY=.venv/bin/python3; fi; if [ ! -x "$PY" ]; then PY=python3; fi; exec "$PY" scripts/check_health_linux.py --hours "${HAWKSTRADE_HEALTH_HOURS:-4}"'
+Restart=no
+TimeoutStartSec=15min
+StandardOutput=journal
+StandardError=journal

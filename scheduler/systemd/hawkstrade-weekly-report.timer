@@ -1,0 +1,11 @@
+[Unit]
+Description=Run HawksTrade weekly report at 12:00 UTC on Mondays
+
+[Timer]
+OnCalendar=Mon *-*-* 12:00:00
+Persistent=true
+AccuracySec=1min
+Unit=hawkstrade-weekly-report.service
+
+[Install]
+WantedBy=timers.target

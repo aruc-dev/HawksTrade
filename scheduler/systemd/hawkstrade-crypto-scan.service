@@ -1,0 +1,19 @@
+[Unit]
+Description=HawksTrade crypto-only scan
+Documentation=file:/home/ec2-user/HawksTrade/scheduler/systemd/README.md
+Wants=network-online.target
+After=network-online.target hawkstrade-secrets.service
+Requires=hawkstrade-secrets.service
+
+[Service]
+Type=oneshot
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/home/ec2-user/HawksTrade
+EnvironmentFile=/etc/hawkstrade/hawkstrade.env
+Environment=HAWKSTRADE_REQUIRE_SHM=1
+ExecStart=/home/ec2-user/HawksTrade/scripts/run_hawkstrade_job.sh scheduler/run_scan.py --crypto-only
+Restart=no
+TimeoutStartSec=45min
+StandardOutput=journal
+StandardError=journal

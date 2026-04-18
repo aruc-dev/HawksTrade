@@ -1,0 +1,11 @@
+[Unit]
+Description=Run HawksTrade full scans hourly from 14:00 through 19:00 UTC on weekdays
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 14..19:00:00
+Persistent=true
+AccuracySec=1min
+Unit=hawkstrade-full-scan.service
+
+[Install]
+WantedBy=timers.target

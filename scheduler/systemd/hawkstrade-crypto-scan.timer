@@ -1,0 +1,11 @@
+[Unit]
+Description=Run HawksTrade crypto-only scans hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+AccuracySec=1min
+Unit=hawkstrade-crypto-scan.service
+
+[Install]
+WantedBy=timers.target

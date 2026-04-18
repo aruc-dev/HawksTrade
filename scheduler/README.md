@@ -6,7 +6,7 @@ creating a new Codex thread for every run.
 Use OS schedulers for operational trading tasks:
 
 - macOS: `launchd`
-- Linux: `cron`
+- Linux: `systemd` for production servers, or `cron` for simple deployments
 - Windows: Task Scheduler through PowerShell
 
 Codex or Claude automations can still be useful for summaries, but stop-loss
@@ -111,6 +111,17 @@ Logs:
 
 macOS caveat: user `LaunchAgents` run while the user session is available. If the Mac
 sleeps, executions may be missed or delayed.
+
+## Linux Systemd
+
+Production Linux servers should prefer systemd timers over cron when available.
+The templates in `scheduler/systemd/` add `network-online.target` ordering,
+`/dev/shm` secret loading, journal logs, and explicit one-shot services for scans,
+risk checks, reports, and health checks. The scan, risk-check, and report services
+still run through `scripts/run_hawkstrade_job.sh`, so they keep the `.venv`
+selection, Alpaca preflight checks, and shared trade-mutation lock used by cron.
+
+See `scheduler/systemd/README.md` for installation and operating commands.
 
 ## Linux Cron
 

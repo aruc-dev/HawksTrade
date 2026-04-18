@@ -80,7 +80,7 @@ file is a readable reliability roadmap.
   - Action: Send alerts for Alpaca auth failures, missed cron runs, repeated price failures, pending unfilled exits, and `[NOK]` health status.
   - Done when: A critical failure creates a visible notification without waiting for manual log review.
 
-- [ ] Add systemd units/timers for production Linux deployment.
+- [x] Add systemd units/timers for production Linux deployment.
   - Problem: Cron cannot express dependencies on secret loading, network readiness, lock handling, or restart policy well.
   - Action: Provide systemd service/timer templates for scans, risk checks, reports, health checks, and secret loading.
   - Done when: EC2 deployment can run through systemd with `After=network-online.target`, secret dependency checks, and journal logs.
