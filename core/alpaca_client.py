@@ -70,7 +70,7 @@ def _shm_max_age_seconds() -> int | None:
 
 
 def _validate_shm_secret_file(path: Path) -> bool:
-    """Return True when the shm secret file is usable; raise when fail-closed is required."""
+    """Return True when shm secrets are usable; return False unless fail-closed is required."""
     require_shm = _env_truthy("HAWKSTRADE_REQUIRE_SHM")
     if not path.exists():
         if require_shm:
@@ -79,20 +79,28 @@ def _validate_shm_secret_file(path: Path) -> bool:
             )
         return False
     if path.is_symlink():
-        raise EnvironmentError(f"shm secret path must not be a symlink: {path}")
+        if require_shm:
+            raise EnvironmentError(f"shm secret path must not be a symlink: {path}")
+        return False
     if not path.is_file():
-        raise EnvironmentError(f"shm secret path is not a regular file: {path}")
+        if require_shm:
+            raise EnvironmentError(f"shm secret path is not a regular file: {path}")
+        return False
     if not os.access(path, os.R_OK):
-        raise PermissionError(f"shm secret file is not readable: {path}")
+        if require_shm:
+            raise PermissionError(f"shm secret file is not readable: {path}")
+        return False
 
     max_age_seconds = _shm_max_age_seconds()
     if max_age_seconds is not None:
         age_seconds = max(0.0, time.time() - path.stat().st_mtime)
         if age_seconds > max_age_seconds:
-            raise EnvironmentError(
-                f"shm secret file is stale: {path} age={age_seconds:.0f}s "
-                f"max_age={max_age_seconds}s"
-            )
+            if require_shm:
+                raise EnvironmentError(
+                    f"shm secret file is stale: {path} age={age_seconds:.0f}s "
+                    f"max_age={max_age_seconds}s"
+                )
+            return False
     return True
 
 
@@ -113,7 +121,7 @@ if _SECRETS_SOURCE == "shm":
     if _validate_shm_secret_file(_SHM_ENV):
         load_dotenv(_SHM_ENV)
     else:
-        # Fall back to local dotenv files if the shm secret file is missing.
+        # Fall back to local dotenv files if shm secrets are missing or unusable.
         # This keeps imports safe on CI and developer machines while still
         # allowing EC2 to prefer shm when the boot-time secret loader ran.
         _SECRETS_SOURCE = "local"

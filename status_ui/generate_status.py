@@ -14,10 +14,17 @@ Usage:
 
 import argparse
 import collections
+import contextlib
 import csv
 import html
 from datetime import datetime, timezone
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback
+    fcntl = None
+    import msvcrt
 
 try:
     import yaml
@@ -75,6 +82,42 @@ def resolve_paths(project_dir_arg, output_arg, script_path):
 
 # ── Data Loaders ──────────────────────────────────────────────────────────────
 
+def _lock_path(path: Path) -> Path:
+    return path.with_name(f"{path.name}.lock")
+
+
+def _lock_file(lock_file):
+    if fcntl is not None:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_SH)
+    else:  # pragma: no cover - Windows fallback
+        lock_file.seek(0, 2)
+        if lock_file.tell() == 0:
+            lock_file.write(b"\0")
+            lock_file.flush()
+        lock_file.seek(0)
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_RLCK, 1)
+
+
+def _unlock_file(lock_file):
+    if fcntl is not None:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    else:  # pragma: no cover - Windows fallback
+        lock_file.seek(0)
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+@contextlib.contextmanager
+def shared_csv_lock(path: Path):
+    """Hold a shared advisory lock matching tracking.trade_log's CSV lock path."""
+    lock_path = _lock_path(path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a+b") as lock_file:
+        _lock_file(lock_file)
+        try:
+            yield
+        finally:
+            _unlock_file(lock_file)
+
 def load_config(config_path: Path) -> dict:
     if not config_path.exists():
         return {}
@@ -127,10 +170,11 @@ def load_trades(trades_path: Path) -> list:
         return []
     try:
         rows = []
-        with open(trades_path, encoding="utf-8", errors="replace", newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                rows.append(dict(row))
+        with shared_csv_lock(trades_path):
+            with open(trades_path, encoding="utf-8", errors="replace", newline="") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    rows.append(dict(row))
         return rows
     except Exception:
         return []
