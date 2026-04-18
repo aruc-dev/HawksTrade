@@ -236,6 +236,37 @@ class RunScanTests(unittest.TestCase):
 
         get_stock_universe.assert_not_called()
 
+    def test_run_skips_trade_log_reconciliation_in_dry_run(self):
+        with (
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(run_scan, "get_open_symbols", return_value=[]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "get_stock_universe") as get_stock_universe,
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+            patch.object(run_scan, "safe_reconcile") as safe_reconcile,
+        ):
+            run_scan.run(run_stocks=False, run_crypto=False, dry_run=True)
+
+        get_stock_universe.assert_not_called()
+        safe_reconcile.assert_not_called()
+
+    def test_run_reconciles_trade_log_after_non_dry_run(self):
+        with (
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(run_scan, "get_open_symbols", return_value=[]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "_pending_entry_symbols", return_value=set()),
+            patch.object(run_scan, "get_stock_universe") as get_stock_universe,
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+            patch.object(run_scan, "safe_reconcile", return_value={"positions": 0}) as safe_reconcile,
+        ):
+            run_scan.run(run_stocks=False, run_crypto=False, dry_run=False)
+
+        get_stock_universe.assert_not_called()
+        safe_reconcile.assert_called_once_with(context="run_scan.post_run", logger=run_scan.log)
+
     def test_run_dedupes_entries_planned_in_same_scan(self):
         class FakeMomentum:
             name = "momentum"

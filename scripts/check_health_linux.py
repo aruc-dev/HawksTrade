@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import logging
 import os
 import re
 import shlex
@@ -36,6 +37,7 @@ if str(BASE_DIR) not in sys.path:
 
 from tracking.performance import compute_summary, load_closed_trades
 from tracking.trade_log import get_open_trades
+from scheduler.reconcile_trade_log import safe_reconcile
 
 CONFIG_PATH = BASE_DIR / "config" / "config.yaml"
 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -51,6 +53,7 @@ DEFAULT_CRON_FILES = {
     "pacific": BASE_DIR / "scheduler" / "cron" / "hawkstrade-pacific.cron",
     "utc": BASE_DIR / "scheduler" / "cron" / "hawkstrade-utc.cron",
 }
+log = logging.getLogger("check_health_linux")
 
 # ── Dataclasses ──────────────────────────────────────────────────────────────
 
@@ -1211,6 +1214,8 @@ def fetch_alpaca_state() -> AlpacaState:
     if connected:
         try:
             positions = ac.get_all_positions()
+            safe_reconcile(positions=positions, context="health.pre_summary", logger=log)
+            trade_log_open_rows = get_open_trades()
             for pos in positions or []:
                 broker_positions.append(
                     {

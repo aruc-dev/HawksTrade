@@ -26,6 +26,7 @@ from core import risk_manager as rm
 from core import order_executor as oe
 from core.run_markers import RunScope, run_scope
 from core.logging_config import runtime_log_handlers
+from scheduler.reconcile_trade_log import safe_reconcile
 from tracking.trade_log import get_open_trades
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -90,6 +91,24 @@ def _mark_alpaca_error(marker: RunScope | None, stage: str, exc: Exception):
             status_code=info.status_code,
         )
     return info
+
+
+def _reconcile_trade_log_after_run(
+    marker: RunScope | None,
+    dry_run: bool,
+    *,
+    positions: list | None = None,
+    context: str = "run_risk_check.post_run",
+) -> None:
+    if dry_run:
+        log.info("Trade-log reconciliation skipped during dry run.")
+        return
+    summary = safe_reconcile(positions=positions, context=context, logger=log)
+    if summary is None and marker is not None:
+        marker.mark_error(
+            stage="trade_log_reconciliation",
+            error_type="TradeLogReconciliationFailed",
+        )
 
 
 def _price_failure_state_file() -> Path:
@@ -331,6 +350,11 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
             )
             _mark_unhealthy_exit_result(marker, result, "emergency_exit")
         log.warning("All positions closed. Bot will not trade again today.")
+        _reconcile_trade_log_after_run(
+            marker,
+            dry_run,
+            context="run_risk_check.emergency_close",
+        )
         if marker is not None and marker.status != "error":
             marker.mark_status("ok", outcome="emergency_close")
         return
@@ -362,6 +386,7 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
         else:
             log.info("No open positions to check.")
             _prune_price_failures_for_positions([])
+        _reconcile_trade_log_after_run(marker, dry_run, positions=[])
         return
 
     _prune_price_failures_for_positions(positions)
@@ -419,6 +444,8 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
             pnl = (current_price - entry_price) / entry_price
             log.info(f"  {symbol:<12} entry={entry_price:.4f} now={current_price:.4f} "
                      f"P&L={pnl:+.2%} — HOLD")
+
+    _reconcile_trade_log_after_run(marker, dry_run, positions=positions)
 
     log.info("Risk check complete.")
     if marker is not None and marker.status != "error":

@@ -36,6 +36,7 @@ from core.exit_policy import should_exit_for_hold
 from core.run_markers import RunScope, run_scope
 from core.logging_config import runtime_log_handlers
 from core.portfolio import get_open_symbols, print_snapshot
+from scheduler.reconcile_trade_log import safe_reconcile
 from tracking.trade_log import get_open_trades, get_trade_age_days
 from strategies.momentum import MomentumStrategy
 from strategies.rsi_reversion import RSIReversionStrategy
@@ -204,6 +205,18 @@ def _mark_alpaca_error(marker: RunScope | None, stage: str, exc: Exception):
             status_code=info.status_code,
         )
     return info
+
+
+def _reconcile_trade_log_after_run(marker: RunScope | None, dry_run: bool) -> None:
+    if dry_run:
+        log.info("Trade-log reconciliation skipped during dry run.")
+        return
+    summary = safe_reconcile(context="run_scan.post_run", logger=log)
+    if summary is None and marker is not None:
+        marker.mark_error(
+            stage="trade_log_reconciliation",
+            error_type="TradeLogReconciliationFailed",
+        )
 
 
 def _estimate_peak_price_since_entry(symbol: str, asset_class: str, current_price: float, age_days: float) -> float:
@@ -455,6 +468,8 @@ def run(
     # --- Hold-day expiry exits ---
     log.info("--- Checking hold-day expiry ---")
     _check_hold_day_exits(open_symbols, dry_run=dry_run, marker=marker)
+
+    _reconcile_trade_log_after_run(marker, dry_run)
 
     # --- Print snapshot ---
     print_snapshot()

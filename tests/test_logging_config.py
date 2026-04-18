@@ -1,5 +1,7 @@
 import logging
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -28,6 +30,22 @@ class LoggingConfigTests(unittest.TestCase):
             self.addCleanup(lambda: [handler.close() for handler in handlers])
 
         self.assertFalse(any(isinstance(handler, logging.FileHandler) for handler in handlers))
+
+    def test_run_report_import_does_not_attach_file_handler_under_unittest(self):
+        script = """
+import logging
+import unittest
+import scheduler.run_report
+print(any(isinstance(handler, logging.FileHandler) for handler in logging.getLogger().handlers))
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            check=True,
+            text=True,
+        )
+
+        self.assertEqual(result.stdout.strip(), "False")
 
 
 if __name__ == "__main__":

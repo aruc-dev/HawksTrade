@@ -70,7 +70,7 @@ file is a readable reliability roadmap.
   - Action: Carry forward the previous formatted timestamp to traceback lines, or ignore timestamp-less findings when `--hours` is active.
   - Done when: Deleting old logs is not required to get an accurate current-window health report.
 
-- [ ] Run trade-log reconciliation automatically.
+- [x] Run trade-log reconciliation automatically.
   - Problem: `scheduler/reconcile_trade_log.py` exists, but reconciliation is manual.
   - Action: Run reconciliation after scans/risk checks and before health/report generation when Alpaca is reachable.
   - Done when: `trades.csv` stays aligned with broker positions without manual intervention.

@@ -332,6 +332,53 @@ PATH=/usr/local/bin:/usr/bin:/bin
             self.assertIn("Price Fetch Health", html_text)
             self.assertIn("AAPL", html_text)
 
+    def test_fetch_alpaca_state_reconciles_before_trade_log_snapshot(self):
+        from core import alpaca_client as ac
+
+        account = type(
+            "Account",
+            (),
+            {"portfolio_value": "100000", "cash": "50000", "buying_power": "200000"},
+        )()
+        position = type(
+            "Position",
+            (),
+            {
+                "symbol": "AAPL",
+                "qty": "2",
+                "avg_entry_price": "100",
+                "current_price": "101",
+                "market_value": "202",
+                "unrealized_pl": "2",
+                "unrealized_plpc": "0.01",
+            },
+        )()
+        reconciled_rows = [
+            {
+                "symbol": "AAPL",
+                "qty": "2",
+                "entry_price": "100",
+                "side": "buy",
+                "status": "open",
+            }
+        ]
+
+        with (
+            patch.object(ac, "get_account", return_value=account),
+            patch.object(ac, "get_all_positions", return_value=[position]),
+            patch.object(health, "get_open_trades", side_effect=[[], reconciled_rows]),
+            patch.object(health, "safe_reconcile", return_value={"positions": 1}) as safe_reconcile,
+        ):
+            state = health.fetch_alpaca_state()
+
+        safe_reconcile.assert_called_once_with(
+            positions=[position],
+            context="health.pre_summary",
+            logger=health.log,
+        )
+        self.assertTrue(state.connected)
+        self.assertEqual(state.trade_log_open_rows, reconciled_rows)
+
     def test_read_log_lines_preserves_raw_tracebacks(self):
         with tempfile.TemporaryDirectory() as tmp:
             log_dir = Path(tmp) / "logs"

@@ -183,6 +183,11 @@ the terminal and HTML reports, and marks the system `[NOK]` once a symbol reache
 the alert threshold. A successful later price fetch clears that symbol's failure
 count.
 
+Scans and risk checks reconcile `data/trades.csv` with broker positions after
+non-dry-run execution. Reports and the Linux health checker reconcile before
+building summaries when Alpaca is reachable, so local open rows stay aligned with
+actual broker exposure without a separate manual reconciliation run.
+
 The scheduled entrypoints now emit structured `RUN_START` / `RUN_END` markers
 with unique `run_id` values. The health checker uses those markers first and
 falls back to the older log-text parser for historical logs. The hourly full
