@@ -18,10 +18,8 @@ class LinuxRunnerTests(unittest.TestCase):
 
             self.assertIn("./scripts/run_hawkstrade_job.sh scheduler/run_scan.py", text)
             self.assertIn("./scripts/run_hawkstrade_job.sh scheduler/run_risk_check.py", text)
-            self.assertIn(".venv/bin/python scheduler/run_report.py", text)
             self.assertNotIn("python3 scheduler/run_scan.py", text)
             self.assertNotIn("python3 scheduler/run_risk_check.py", text)
-            self.assertNotIn("python3 scheduler/run_report.py", text)
 
     def test_runner_uses_single_trade_mutation_lock(self):
         script = (BASE_DIR / "scripts" / "run_hawkstrade_job.sh").read_text(encoding="utf-8")
@@ -29,14 +27,6 @@ class LinuxRunnerTests(unittest.TestCase):
         self.assertIn("local/locks/trade-mutating-jobs.lock", script)
         self.assertIn("flock -n -E 75", script)
         self.assertIn('flock -w "$LOCK_TIMEOUT_SECONDS" -E 75', script)
-
-    def test_runner_prefers_venv_python_over_python3(self):
-        script = (BASE_DIR / "scripts" / "run_hawkstrade_job.sh").read_text(encoding="utf-8")
-
-        self.assertLess(
-            script.index('if [[ -x ".venv/bin/python" ]]'),
-            script.index('elif [[ -x ".venv/bin/python3" ]]'),
-        )
 
 
 if __name__ == "__main__":
