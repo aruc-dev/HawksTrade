@@ -6,6 +6,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from tracking import trade_log
 
@@ -98,6 +99,23 @@ class TradeLogTests(unittest.TestCase):
 
     def test_locked_trade_log_docstring_describes_generic_csv_lock(self):
         self.assertIn("CSV file path", trade_log.locked_trade_log.__doc__)
+
+    def test_read_rows_unlocked_opens_csv_with_newline_empty(self):
+        path = Path(self.tmpdir.name) / "rows.csv"
+        path.write_text("symbol,status\nAAPL,open\n")
+
+        real_open = open
+        open_calls = []
+
+        def recording_open(*args, **kwargs):
+            open_calls.append((args, kwargs))
+            return real_open(*args, **kwargs)
+
+        with mock.patch("builtins.open", recording_open):
+            rows = trade_log._read_rows_unlocked(path)
+
+        self.assertEqual(rows[0]["symbol"], "AAPL")
+        self.assertEqual(open_calls[0][1].get("newline"), "")
 
     def test_mark_trade_closed_updates_most_recent_open_buy(self):
         now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -260,6 +278,49 @@ class TradeLogTests(unittest.TestCase):
         self.assertEqual(summary["marked_unfilled_sells"], 1)
         self.assertEqual(rows[0]["status"], "open")
         self.assertEqual(rows[1]["status"], "submitted")
+
+    def test_reconcile_duplicate_open_rows_preserves_zero_broker_entry(self):
+        trade_log.log_trade({
+            "timestamp": "2026-04-14T18:04:02+00:00",
+            "mode": "paper",
+            "symbol": "ZERO",
+            "strategy": "test",
+            "asset_class": "stock",
+            "side": "buy",
+            "qty": "1",
+            "entry_price": "123",
+            "order_id": "old-entry",
+            "status": "open",
+        })
+        trade_log.log_trade({
+            "timestamp": "2026-04-14T18:04:10+00:00",
+            "mode": "paper",
+            "symbol": "ZERO",
+            "strategy": "test",
+            "asset_class": "stock",
+            "side": "buy",
+            "qty": "1",
+            "entry_price": "456",
+            "order_id": "new-entry",
+            "status": "open",
+        })
+
+        summary = trade_log.reconcile_open_trades_with_positions([
+            SimpleNamespace(
+                symbol="ZERO",
+                qty="1",
+                avg_entry_price="0",
+                asset_class="AssetClass.US_EQUITY",
+            )
+        ])
+
+        rows = self._read_rows()
+        self.assertEqual(summary["updated_open_rows"], 1)
+        self.assertEqual(summary["closed_stale_rows"], 1)
+        self.assertEqual(rows[0]["status"], "closed")
+        self.assertEqual(rows[0]["exit_price"], "0.0")
+        self.assertEqual(rows[1]["status"], "open")
+        self.assertEqual(rows[1]["entry_price"], "0")
         self.assertEqual(rows[1]["pnl_pct"], "")
 
     def test_get_trade_age_days_accepts_timezone_aware_timestamp(self):

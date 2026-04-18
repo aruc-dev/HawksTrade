@@ -155,7 +155,7 @@ def _ensure_file(path: Path | None = None):
 def _read_rows_unlocked(path: Path) -> list[dict]:
     if not path.exists():
         return []
-    with open(path, "r") as f:
+    with open(path, "r", newline="") as f:
         return list(csv.DictReader(f))
 
 
@@ -328,9 +328,14 @@ def reconcile_open_trades_with_positions(positions: Iterable) -> dict:
                 summary["updated_open_rows"] += 1
 
                 for idx, row in open_buy_rows[:-1]:
+                    duplicate_exit_price = (
+                        broker_entry
+                        if broker_entry is not None
+                        else _to_decimal(row.get("entry_price"), Decimal("0")) or Decimal("0")
+                    )
                     _close_row(
                         row,
-                        float(broker_entry or _to_decimal(row.get("entry_price"), Decimal("0")) or 0),
+                        float(duplicate_exit_price),
                         0.0,
                         "broker reconciliation: consolidated duplicate open row",
                     )
