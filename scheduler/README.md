@@ -15,16 +15,18 @@ enforcement should be owned by the OS scheduler so it runs independently of an A
 ## Task Summary
 
 All schedules below assume the original laptop runs in Pacific time during US daylight
-saving time. Convert times if the host machine runs in another timezone.
+saving time. Convert times if the host machine runs in another timezone. The
+commands shown are the Linux cron commands; macOS and Windows runners are
+documented in their own sections below.
 
 | Task | Command | Eastern Time | Pacific Time |
 |------|---------|--------------|--------------|
-| First stock scan | `python3 scheduler/run_scan.py --stocks-only` | 9:35 AM Mon-Fri | 6:35 AM Mon-Fri |
-| Full scan | `python3 scheduler/run_scan.py` | 10:00 AM-3:00 PM hourly Mon-Fri | 7:00 AM-12:00 PM hourly Mon-Fri |
-| Risk check | `python3 scheduler/run_risk_check.py` | 9:45 AM-3:45 PM every 15 min Mon-Fri | 6:45 AM-12:45 PM every 15 min Mon-Fri |
-| Crypto scan | `python3 scheduler/run_scan.py --crypto-only` | Hourly, every day | Hourly, every day |
-| Daily report | `python3 scheduler/run_report.py` | 4:30 PM Mon-Fri | 1:30 PM Mon-Fri |
-| Weekly report | `python3 scheduler/run_report.py --weekly` | 8:00 AM Monday | 5:00 AM Monday |
+| First stock scan | `./scripts/run_hawkstrade_job.sh scheduler/run_scan.py --stocks-only` | 9:35 AM Mon-Fri | 6:35 AM Mon-Fri |
+| Full scan | `./scripts/run_hawkstrade_job.sh scheduler/run_scan.py` | 10:00 AM-3:00 PM hourly Mon-Fri | 7:00 AM-12:00 PM hourly Mon-Fri |
+| Risk check | `./scripts/run_hawkstrade_job.sh scheduler/run_risk_check.py` | 9:45 AM-3:45 PM every 15 min Mon-Fri | 6:45 AM-12:45 PM every 15 min Mon-Fri |
+| Crypto scan | `./scripts/run_hawkstrade_job.sh scheduler/run_scan.py --crypto-only` | Hourly, every day | Hourly, every day |
+| Daily report | `./scripts/run_hawkstrade_job.sh scheduler/run_report.py` | 4:30 PM Mon-Fri | 1:30 PM Mon-Fri |
+| Weekly report | `./scripts/run_hawkstrade_job.sh scheduler/run_report.py --weekly` | 8:00 AM Monday | 5:00 AM Monday |
 
 Before enabling schedules:
 
@@ -124,12 +126,15 @@ Edit `HAWKSTRADE_DIR` in the chosen file, then install:
 crontab scheduler/cron/hawkstrade-eastern.cron
 ```
 
-The Linux cron templates run scan and risk-check jobs through
-`scripts/run_hawkstrade_job.sh`. That wrapper chooses `.venv` when available and
-uses a shared `flock` lock at `local/locks/trade-mutating-jobs.lock`, so scan
-and risk-check jobs cannot overlap while placing or closing orders. Full scans,
-stock scans, and risk checks wait up to 10 minutes for the lock; redundant
-`--crypto-only` runs skip when another trade-mutating job is already active.
+The Linux cron templates run scheduled jobs through
+`scripts/run_hawkstrade_job.sh`, so scan, risk-check, and report jobs use the
+same Python environment selection. The wrapper chooses `.venv` when available.
+It also uses a shared `flock` lock at `local/locks/trade-mutating-jobs.lock` for
+trade-mutating scan and risk-check jobs, so they cannot overlap while placing or
+closing orders. Full scans, stock scans, and risk checks wait up to 10 minutes
+for the lock; redundant `--crypto-only` runs skip when another trade-mutating
+job is already active. Report jobs use the same wrapper but do not take the
+trade-mutation lock.
 
 View installed jobs:
 

@@ -14,7 +14,6 @@ from typing import Optional
 
 import yaml
 from dotenv import load_dotenv
-from alpaca.common.exceptions import APIError
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import (
     MarketOrderRequest, LimitOrderRequest, GetOrdersRequest
@@ -200,11 +199,6 @@ def get_position(symbol: str):
     for candidate in _symbol_lookup_variants(symbol):
         try:
             return client.get_open_position(candidate)
-        except APIError as e:
-            if _is_position_not_found_error(e):
-                log.debug(f"No open position for {candidate}: {e}")
-                continue
-            raise
         except Exception as e:
             if _is_position_not_found_error(e):
                 log.debug(f"No open position for {candidate}: {e}")
