@@ -2535,6 +2535,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Do not write alert files or send alert webhooks",
     )
     parser.add_argument(
+        "--price-failure-state-file",
+        default=os.getenv("HAWKSTRADE_PRICE_FAILURE_STATE_FILE", str(DEFAULT_PRICE_FAILURE_STATE_FILE)),
+        help=(
+            "Path to the price-fetch failure state JSON written by run_risk_check.py "
+            "(default: data/price_fetch_failures.json); "
+            "also supports HAWKSTRADE_PRICE_FAILURE_STATE_FILE env var"
+        ),
+    )
+    parser.add_argument(
         "--no-color",
         action="store_true",
         help="Legacy compatibility flag; terminal output now uses plain status tags",
@@ -2557,6 +2566,7 @@ def main(argv: list[str] | None = None) -> int:
         log_dir=args.log_dir,
         html_output=args.html_output,
         lookback_hours=args.lookback_hours,
+        price_failure_state_file=args.price_failure_state_file,
     )
     terminal = format_terminal_report(report, use_color=False).replace("\r", "")
     terminal = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", terminal)
