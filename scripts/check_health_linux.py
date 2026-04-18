@@ -568,11 +568,13 @@ def _read_log_lines(path: Path) -> list[LogFinding]:
     if not path.exists():
         return findings
     in_traceback = False
+    last_timestamp: datetime | None = None
     with open(path, "r", encoding="utf-8", errors="replace") as f:
         for raw in f:
             finding = _parse_log_line(raw, path)
             if finding is not None:
                 findings.append(finding)
+                last_timestamp = finding.timestamp
                 in_traceback = False
                 continue
 
@@ -590,7 +592,7 @@ def _read_log_lines(path: Path) -> list[LogFinding]:
 
             findings.append(
                 LogFinding(
-                    timestamp=None,
+                    timestamp=last_timestamp,
                     level="ERROR",
                     logger="traceback",
                     message=raw_line,
@@ -615,8 +617,9 @@ def _find_matching_error_lines(
 
     for path in findings_by_file:
         for finding in findings_by_file[path]:
-            if since is not None and finding.timestamp is not None and finding.timestamp < since:
-                continue
+            if since is not None:
+                if finding.timestamp is None or finding.timestamp < since:
+                    continue
             msg = finding.message.lower()
             signature = (finding.timestamp, finding.level, finding.logger, finding.message)
             if finding.level == "ERROR" or "traceback" in msg:

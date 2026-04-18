@@ -65,7 +65,7 @@ file is a readable reliability roadmap.
 
 ## P2 - Observability And Operations
 
-- [ ] Fix health-check old traceback false positives.
+- [x] Fix health-check old traceback false positives.
   - Problem: Raw traceback lines are stored with `timestamp=None`, so old errors can bypass the lookback filter.
   - Action: Carry forward the previous formatted timestamp to traceback lines, or ignore timestamp-less findings when `--hours` is active.
   - Done when: Deleting old logs is not required to get an accurate current-window health report.

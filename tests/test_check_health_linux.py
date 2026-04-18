@@ -354,7 +354,32 @@ RuntimeError: boom
             self.assertGreaterEqual(len(errors), 1)
             self.assertTrue(any("Traceback" in finding.message for finding in errors))
             self.assertTrue(any("RuntimeError: boom" in finding.message for finding in errors))
+            self.assertTrue(all(finding.timestamp == datetime(2026, 4, 17, 18, 0, 0) for finding in errors))
             self.assertEqual(len(warnings), 0)
+
+    def test_tracebacks_older_than_lookback_are_filtered(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            self._write(
+                log_dir / "scan_20260414.log",
+                """
+2026-04-14 18:00:00,000 [ERROR] run_scan: Failed to enter AAPL
+Traceback (most recent call last):
+  File "/tmp/example.py", line 10, in <module>
+    raise RuntimeError("old boom")
+RuntimeError: old boom
+""".strip()
+                + "\n",
+            )
+
+            runtime = health.load_runtime_records(log_dir)
+            errors, warnings = health._find_matching_error_lines(
+                runtime["findings_by_file"],
+                since=datetime(2026, 4, 17, 18, 0, 0),
+            )
+
+            self.assertEqual(errors, [])
+            self.assertEqual(warnings, [])
 
     def test_build_report_renders_html_and_terminal_output(self):
         with tempfile.TemporaryDirectory() as tmp:
