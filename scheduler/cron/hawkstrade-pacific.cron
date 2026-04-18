@@ -19,7 +19,7 @@ HAWKSTRADE_DIR=/path/to/HawksTrade
 0 * * * * cd "$HAWKSTRADE_DIR" && mkdir -p logs && ./scripts/run_hawkstrade_job.sh scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
 
 # Daily report: 1:30 PM PT / 4:30 PM ET, weekdays
-30 13 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_report.py >> logs/cron.log 2>&1
+30 13 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && .venv/bin/python scheduler/run_report.py >> logs/cron.log 2>&1
 
 # Weekly report: 5:00 AM PT / 8:00 AM ET, Mondays
-0 5 * * 1 cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_report.py --weekly >> logs/cron.log 2>&1
+0 5 * * 1 cd "$HAWKSTRADE_DIR" && mkdir -p logs && .venv/bin/python scheduler/run_report.py --weekly >> logs/cron.log 2>&1

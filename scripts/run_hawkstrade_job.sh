@@ -47,10 +47,10 @@ esac
 cd "$PROJECT_DIR"
 mkdir -p logs local/locks
 
-if [[ -x ".venv/bin/python3" ]]; then
-    PYTHON_BIN=".venv/bin/python3"
-elif [[ -x ".venv/bin/python" ]]; then
+if [[ -x ".venv/bin/python" ]]; then
     PYTHON_BIN=".venv/bin/python"
+elif [[ -x ".venv/bin/python3" ]]; then
+    PYTHON_BIN=".venv/bin/python3"
 else
     PYTHON_BIN="${PYTHON:-python3}"
 fi
