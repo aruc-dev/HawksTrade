@@ -4,6 +4,7 @@
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 HAWKSTRADE_DIR=/path/to/HawksTrade
+HAWKSTRADE_REQUIRE_SHM=1
 
 # First stock-only scan after open: 13:35 UTC / 9:35 AM ET
 35 13 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && ./scripts/run_hawkstrade_job.sh scheduler/run_scan.py --stocks-only >> logs/cron.log 2>&1

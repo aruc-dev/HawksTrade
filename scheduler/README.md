@@ -136,6 +136,12 @@ for the lock; redundant `--crypto-only` runs skip when another trade-mutating
 job is already active. Report jobs use the same wrapper but do not take the
 trade-mutation lock.
 
+The Linux cron templates also set `HAWKSTRADE_REQUIRE_SHM=1`. When
+`config/config.yaml` uses `secrets_source: shm`, that environment guard makes
+cron jobs fail clearly instead of falling back to disk dotenv files if
+`/dev/shm/.hawkstrade.env` is missing, unreadable, or rejected by
+`HAWKSTRADE_SHM_MAX_AGE_SECONDS`.
+
 View installed jobs:
 
 ```bash

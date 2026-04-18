@@ -38,7 +38,7 @@ file is a readable reliability roadmap.
 
 ## P1 - Runtime Resilience
 
-- [ ] Make `/dev/shm` secrets fail closed on EC2.
+- [x] Make `/dev/shm` secrets fail closed on EC2.
   - Problem: When `secrets_source: shm` is configured, missing `/dev/shm/.hawkstrade.env` can fall back to local dotenv files.
   - Action: Add a deployment guard such as `HAWKSTRADE_REQUIRE_SHM=1` that refuses local fallback on cloud.
   - Done when: EC2 fails clearly if RAM secrets are missing, stale, or unreadable.

@@ -7,6 +7,7 @@ Reads mode (paper/live) from config and picks the correct keys from .env.
 
 import os
 import logging
+import time
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -38,11 +39,61 @@ MODE = CFG["mode"].strip().lower()  # "paper" or "live"
 if MODE not in {"paper", "live"}:
     raise ValueError("config mode must be 'paper' or 'live'")
 
+
+def _env_truthy(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _load_local_dotenv_files() -> None:
+    load_dotenv(BASE_DIR / "config" / ".env")
+    load_dotenv(BASE_DIR / ".env", override=True)
+
+
+def _shm_max_age_seconds() -> int | None:
+    raw = os.getenv("HAWKSTRADE_SHM_MAX_AGE_SECONDS", "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(
+            "HAWKSTRADE_SHM_MAX_AGE_SECONDS must be an integer number of seconds"
+        ) from exc
+    return value if value > 0 else None
+
+
+def _validate_shm_secret_file(path: Path) -> bool:
+    """Return True when the shm secret file is usable; raise when fail-closed is required."""
+    require_shm = _env_truthy("HAWKSTRADE_REQUIRE_SHM")
+    if not path.exists():
+        if require_shm:
+            raise EnvironmentError(
+                f"HAWKSTRADE_REQUIRE_SHM=1 but shm secret file is missing: {path}"
+            )
+        return False
+    if path.is_symlink():
+        raise EnvironmentError(f"shm secret path must not be a symlink: {path}")
+    if not path.is_file():
+        raise EnvironmentError(f"shm secret path is not a regular file: {path}")
+    if not os.access(path, os.R_OK):
+        raise PermissionError(f"shm secret file is not readable: {path}")
+
+    max_age_seconds = _shm_max_age_seconds()
+    if max_age_seconds is not None:
+        age_seconds = max(0.0, time.time() - path.stat().st_mtime)
+        if age_seconds > max_age_seconds:
+            raise EnvironmentError(
+                f"shm secret file is stale: {path} age={age_seconds:.0f}s "
+                f"max_age={max_age_seconds}s"
+            )
+    return True
+
+
 # Load secrets based on secrets_source setting in config.yaml:
 #   "local" — load from config/.env then .env (original behaviour)
-#   "shm"   — load from /dev/shm/.hawkstrade.env when present; if the shared
-#            memory file is missing, fall back to the local .env files so
-#            imports and test runs still work out of the box.
+#   "shm"   — load from /dev/shm/.hawkstrade.env when present. When
+#            HAWKSTRADE_REQUIRE_SHM=1, a missing/unreadable/stale shm file
+#            fails closed instead of falling back to local dotenv files.
 _raw_secrets_source = CFG.get("secrets_source", "local")
 if not isinstance(_raw_secrets_source, str):
     raise ValueError("config secrets_source must be a string: 'local' or 'shm'")
@@ -52,19 +103,17 @@ if _SECRETS_SOURCE not in {"local", "shm"}:
 
 if _SECRETS_SOURCE == "shm":
     _SHM_ENV = Path("/dev/shm/.hawkstrade.env")
-    if _SHM_ENV.exists():
+    if _validate_shm_secret_file(_SHM_ENV):
         load_dotenv(_SHM_ENV)
     else:
         # Fall back to local dotenv files if the shm secret file is missing.
         # This keeps imports safe on CI and developer machines while still
         # allowing EC2 to prefer shm when the boot-time secret loader ran.
         _SECRETS_SOURCE = "local"
-        load_dotenv(BASE_DIR / "config" / ".env")
-        load_dotenv(BASE_DIR / ".env", override=True)
+        _load_local_dotenv_files()
 else:
     # Default local behaviour: config/.env, then .env (root overrides)
-    load_dotenv(BASE_DIR / "config" / ".env")
-    load_dotenv(BASE_DIR / ".env", override=True)
+    _load_local_dotenv_files()
 
 log = logging.getLogger("alpaca_client")
 
