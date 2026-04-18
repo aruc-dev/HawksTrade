@@ -135,6 +135,79 @@ class OrderExecutorTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["status"], "open")
 
+    def test_enter_position_logs_submitted_buy_without_open_exposure(self):
+        order = SimpleNamespace(id="entry-submitted", status="new", filled_qty="0")
+
+        with (
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 2}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=2),
+            patch.object(order_executor.ac, "place_limit_order", return_value=order),
+        ):
+            result = order_executor.enter_position("MSFT", "gap_up", dry_run=False)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "submitted")
+        self.assertEqual(result["qty"], 2)
+
+        rows = [row for row in trade_log.read_trade_rows() if row["symbol"] == "MSFT"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["status"], "submitted")
+        self.assertEqual(rows[0]["qty"], "2")
+        self.assertFalse(any(row["symbol"] == "MSFT" for row in trade_log.get_open_trades()))
+
+    def test_enter_position_logs_filled_buy_as_open_with_fill_details(self):
+        order = SimpleNamespace(
+            id="entry-filled",
+            status="filled",
+            filled_qty="1.5",
+            filled_avg_price="101.25",
+        )
+
+        with (
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 2}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=2),
+            patch.object(order_executor.ac, "place_limit_order", return_value=order),
+        ):
+            result = order_executor.enter_position("MSFT", "gap_up", dry_run=False)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "open")
+        self.assertEqual(result["qty"], 1.5)
+        self.assertEqual(result["entry_price"], 101.25)
+
+        rows = [row for row in trade_log.get_open_trades() if row["symbol"] == "MSFT"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["status"], "open")
+        self.assertEqual(rows[0]["qty"], "1.5")
+        self.assertEqual(rows[0]["entry_price"], "101.25")
+
+    def test_enter_position_logs_partial_buy_with_filled_quantity_only(self):
+        order = SimpleNamespace(
+            id="entry-partial",
+            status="partially_filled",
+            filled_qty="0.75",
+            filled_avg_price="100.5",
+        )
+
+        with (
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 2}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=2),
+            patch.object(order_executor.ac, "place_limit_order", return_value=order),
+        ):
+            result = order_executor.enter_position("MSFT", "gap_up", dry_run=False)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "partially_filled")
+        self.assertEqual(result["qty"], 0.75)
+
+        rows = [row for row in trade_log.get_open_trades() if row["symbol"] == "MSFT"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["status"], "partially_filled")
+        self.assertEqual(rows[0]["qty"], "0.75")
+
 
 if __name__ == "__main__":
     unittest.main()

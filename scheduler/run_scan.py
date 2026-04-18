@@ -157,6 +157,8 @@ def _register_entry_result(result, symbol: str, open_symbols: list, planned_symb
         return
     normalized = ac.normalize_symbol(symbol)
     planned_symbols.add(normalized)
+    if result.get("status") not in {"open", "partially_filled", "dry_run"}:
+        return
     new_entry_symbols.add(normalized)
     if not _already_holding(symbol, open_symbols):
         open_symbols.append(symbol)

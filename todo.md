@@ -21,7 +21,7 @@ file is a readable reliability roadmap.
   - Action: Add `fcntl.flock` or an equivalent lock around all trade-log reads/writes.
   - Done when: Concurrent scan/risk/report processes cannot corrupt or lose trade-log updates.
 
-- [ ] Make entry order logging fill-aware.
+- [x] Make entry order logging fill-aware.
   - Problem: Buy limit orders are logged as `open` immediately after submission, even if Alpaca reports `new`, `accepted`, or partial fill.
   - Action: Track order status as `submitted`, `partially_filled`, or `open` only after confirmed fill.
   - Done when: Local open positions in `trades.csv` reflect broker fills rather than order submission.

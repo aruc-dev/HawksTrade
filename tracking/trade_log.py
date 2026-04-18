@@ -28,6 +28,7 @@ with open(BASE_DIR / "config" / "config.yaml") as f:
 TRADE_LOG = BASE_DIR / CFG["reporting"]["trade_log_file"]
 log = logging.getLogger("trade_log")
 QTY_EPSILON = Decimal("0.00000001")
+ACTIVE_ENTRY_STATUSES = {"open", "partially_filled"}
 
 
 def _utc_now():
@@ -169,8 +170,11 @@ def log_trade(trade: Dict):
 
 
 def get_open_trades() -> list:
-    """Return all trades with status='open'."""
-    return [row for row in read_trade_rows() if row.get("status") == "open"]
+    """Return buy rows that represent broker-confirmed open exposure."""
+    return [
+        row for row in read_trade_rows()
+        if row.get("side") == "buy" and row.get("status") in ACTIVE_ENTRY_STATUSES
+    ]
 
 
 def get_closed_trades() -> list:
@@ -206,7 +210,7 @@ def mark_trade_closed(
         for row in reversed(rows):
             if not (
                 _symbols_match(row.get("symbol", ""), symbol)
-                and row.get("status") == "open"
+                and row.get("status") in ACTIVE_ENTRY_STATUSES
                 and row.get("side") == "buy"
             ):
                 continue
@@ -300,7 +304,7 @@ def reconcile_open_trades_with_positions(positions: Iterable) -> dict:
             ]
             open_buy_rows = [
                 (idx, row) for idx, row in matching_rows
-                if row.get("status") == "open" and row.get("side") == "buy"
+                if row.get("status") in ACTIVE_ENTRY_STATUSES and row.get("side") == "buy"
             ]
             buy_rows = [
                 (idx, row) for idx, row in matching_rows
@@ -378,7 +382,7 @@ def reconcile_open_trades_with_positions(positions: Iterable) -> dict:
             summary["created_rows"] += 1
 
         for row in rows:
-            if row.get("status") != "open" or row.get("side") != "buy":
+            if row.get("status") not in ACTIVE_ENTRY_STATUSES or row.get("side") != "buy":
                 continue
             normalized = str(row.get("symbol", "")).replace("/", "").upper()
             if normalized and normalized not in broker_symbols:

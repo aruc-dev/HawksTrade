@@ -225,6 +225,30 @@ class TradeLogTests(unittest.TestCase):
         self.assertGreater(age, 1.9)
         self.assertLess(age, 2.1)
 
+    def test_get_open_trades_includes_only_broker_confirmed_buy_exposure(self):
+        for side, status, symbol in (
+            ("buy", "submitted", "SUBMITTED"),
+            ("buy", "partially_filled", "PARTIAL"),
+            ("buy", "open", "OPEN"),
+            ("sell", "partially_filled", "PARTIAL_SELL"),
+        ):
+            trade_log.log_trade({
+                "timestamp": "2026-04-17T12:00:00+00:00",
+                "mode": "paper",
+                "symbol": symbol,
+                "strategy": "test",
+                "asset_class": "stock",
+                "side": side,
+                "qty": 1,
+                "entry_price": 100,
+                "order_id": symbol,
+                "status": status,
+            })
+
+        symbols = {row["symbol"] for row in trade_log.get_open_trades()}
+
+        self.assertEqual(symbols, {"PARTIAL", "OPEN"})
+
     def test_log_trade_preserves_rows_with_concurrent_process_writers(self):
         worker_count = 4
         rows_per_worker = 25

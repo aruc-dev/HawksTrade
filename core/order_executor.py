@@ -83,6 +83,41 @@ def _order_filled_qty(order) -> float:
         return 0.0
 
 
+def _order_filled_avg_price(order, fallback: float) -> float:
+    raw_price = _order_value(order, "filled_avg_price", None)
+    if raw_price in (None, ""):
+        return fallback
+    try:
+        filled_avg_price = float(str(raw_price))
+    except (TypeError, ValueError):
+        return fallback
+    return filled_avg_price if filled_avg_price > 0 else fallback
+
+
+def _entry_fill_qty(order, requested_qty: float) -> float:
+    """Return the broker-confirmed entry quantity that should count as exposure."""
+    status = _order_status(order)
+    filled_qty = _order_filled_qty(order)
+    if status is None:
+        return requested_qty
+    if status == "filled":
+        return filled_qty or requested_qty
+    if filled_qty >= requested_qty:
+        return filled_qty
+    if status == "partially_filled" or filled_qty > 0:
+        return filled_qty
+    return 0.0
+
+
+def _entry_log_status(order, requested_qty: float, filled_qty: float) -> str:
+    status = _order_status(order)
+    if status is None or status == "filled" or filled_qty >= requested_qty:
+        return "open"
+    if status == "partially_filled" or filled_qty > 0:
+        return "partially_filled"
+    return "submitted"
+
+
 def _exit_fill_qty(order, requested_qty: float) -> float:
     """
     Return the quantity that is safe to remove from trades.csv.
@@ -151,9 +186,6 @@ def enter_position(symbol: str, strategy: str, asset_class: str = "stock", dry_r
             log.info(f"Entry size capped for {symbol}: requested={qty} capped={capped_qty}")
         qty = capped_qty
 
-        sl = rm.stop_loss_price(price)
-        tp = rm.take_profit_price(price)
-
         if dry_run:
             log.info(f"DRY RUN: would buy {qty} {symbol} @ {price}")
             return {"symbol": symbol, "status": "dry_run"}
@@ -174,6 +206,12 @@ def enter_position(symbol: str, strategy: str, asset_class: str = "stock", dry_r
 
         # Capture details for logging
         order_id = str(order.id) if hasattr(order, "id") else str(order.get("order_id"))
+        filled_qty = _entry_fill_qty(order, qty)
+        action_status = _entry_log_status(order, qty, filled_qty)
+        logged_qty = filled_qty if filled_qty > 0 else qty
+        entry_price = _order_filled_avg_price(order, price) if filled_qty > 0 else price
+        sl = rm.stop_loss_price(entry_price)
+        tp = rm.take_profit_price(entry_price)
         trade = {
             "timestamp":   _utc_now().isoformat(),
             "mode":        MODE,
@@ -181,15 +219,26 @@ def enter_position(symbol: str, strategy: str, asset_class: str = "stock", dry_r
             "strategy":    strategy,
             "asset_class": asset_class,
             "side":        "buy",
-            "qty":         qty,
-            "entry_price": price,
+            "qty":         logged_qty,
+            "entry_price": entry_price,
             "stop_loss":   sl,
             "take_profit": tp,
             "order_id":    order_id,
-            "status":      "open",
+            "status":      action_status,
         }
         log_trade(trade)
-        log.info(f"ENTERED {symbol} | strategy={strategy} | qty={qty} | price={price}")
+        if action_status == "open":
+            log.info(f"ENTERED {symbol} | strategy={strategy} | qty={logged_qty} | price={entry_price}")
+        elif action_status == "partially_filled":
+            log.warning(
+                f"Entry order partially filled for {symbol}; logged filled exposure only | "
+                f"strategy={strategy} | filled_qty={filled_qty} requested_qty={qty}"
+            )
+        else:
+            log.warning(
+                f"Entry order submitted for {symbol} but not filled yet; "
+                f"trade log status=submitted | strategy={strategy} | requested_qty={qty}"
+            )
         return trade
 
     except Exception as e:

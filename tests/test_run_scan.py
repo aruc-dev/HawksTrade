@@ -15,6 +15,23 @@ class RunScanTests(unittest.TestCase):
         self.assertTrue(run_scan._already_holding("BTC/USD", ["BTCUSD"]))
         self.assertTrue(run_scan._already_holding("ETHUSD", ["ETH/USD"]))
 
+    def test_register_entry_result_keeps_submitted_orders_planned_but_not_open(self):
+        open_symbols = []
+        planned_symbols = set()
+        new_entry_symbols = set()
+
+        run_scan._register_entry_result(
+            {"symbol": "AAPL", "status": "submitted"},
+            "AAPL",
+            open_symbols,
+            planned_symbols,
+            new_entry_symbols,
+        )
+
+        self.assertEqual(planned_symbols, {run_scan.ac.normalize_symbol("AAPL")})
+        self.assertEqual(open_symbols, [])
+        self.assertEqual(new_entry_symbols, set())
+
     def test_strategy_exit_runs_for_stock_strategy_alias(self):
         class StockStrategy:
             name = "momentum"
