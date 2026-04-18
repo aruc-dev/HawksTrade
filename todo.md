@@ -48,7 +48,7 @@ file is a readable reliability roadmap.
   - Action: Add `scripts/run_hawkstrade_job.sh` that activates `.venv`, checks secrets, checks connectivity, takes the lock, runs the job, and logs exit code.
   - Done when: All Linux cron entries use the wrapper and report clear preflight failures.
 
-- [ ] Use an explicit trading-session date for the daily loss baseline.
+- [x] Use an explicit trading-session date for the daily loss baseline.
   - Problem: `date.today()` uses host timezone, which is UTC on EC2 and can reset the loss baseline outside the intended ET session.
   - Action: Calculate the baseline date using a configured timezone or `America/New_York` market-session boundary.
   - Done when: Daily loss limits reset at the intended trading session boundary, not at arbitrary host midnight.

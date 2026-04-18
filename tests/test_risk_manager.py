@@ -1,6 +1,6 @@
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,10 +20,14 @@ class RiskManagerTests(unittest.TestCase):
         risk_manager.DAILY_BASELINE_FILE = Path(self.tmpdir.name) / "daily_loss_baseline.json"
 
     def test_daily_loss_check_handles_zero_start_value(self):
+        today = date(2026, 4, 17)
         risk_manager._session_start_value = 0
-        risk_manager._session_date = date.today()
+        risk_manager._session_date = today
 
-        with patch.object(risk_manager.ac, "get_portfolio_value", return_value=0):
+        with (
+            patch.object(risk_manager, "_current_trading_session_date", return_value=today),
+            patch.object(risk_manager.ac, "get_portfolio_value", return_value=0),
+        ):
             self.assertFalse(risk_manager.daily_loss_exceeded())
 
     def test_position_size_rejects_non_positive_price(self):
@@ -41,6 +45,33 @@ class RiskManagerTests(unittest.TestCase):
         risk_manager._session_date = None
 
         with patch.object(risk_manager.ac, "get_portfolio_value", return_value=94000):
+            self.assertTrue(risk_manager.daily_loss_exceeded())
+
+    def test_trading_session_date_uses_new_york_not_host_utc(self):
+        utc_evening = datetime(2026, 4, 18, 1, 30, tzinfo=timezone.utc)
+
+        session_date = risk_manager._current_trading_session_date(utc_evening)
+
+        self.assertEqual(session_date, date(2026, 4, 17))
+
+    def test_daily_loss_baseline_does_not_reset_at_utc_midnight(self):
+        session_date = date(2026, 4, 17)
+        risk_manager._session_start_value = None
+        risk_manager._session_date = None
+
+        with (
+            patch.object(risk_manager, "_current_trading_session_date", return_value=session_date),
+            patch.object(risk_manager.ac, "get_portfolio_value", side_effect=[100000, 99000]),
+        ):
+            self.assertFalse(risk_manager.daily_loss_exceeded())
+
+        risk_manager._session_start_value = None
+        risk_manager._session_date = None
+
+        with (
+            patch.object(risk_manager, "_current_trading_session_date", return_value=session_date),
+            patch.object(risk_manager.ac, "get_portfolio_value", return_value=94000),
+        ):
             self.assertTrue(risk_manager.daily_loss_exceeded())
 
     def test_kelly_position_size_respects_configured_position_cap(self):

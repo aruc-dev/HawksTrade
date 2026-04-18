@@ -87,7 +87,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
 - **Asymmetric Reward**: 3.5% stop-loss / 12% take-profit.
 - **Capital Protection**: SMA-based trend filters on all strategies.
 - **Position Limits**: Max 5% of portfolio per trade, cap of 10 concurrent positions.
-- **Daily Guardrail**: 5% daily loss limit (hard stop for the day).
+- **Daily Guardrail**: 5% daily loss limit (hard stop for the day), keyed to the `America/New_York` trading-session date so UTC cloud hosts do not reset the baseline at UTC midnight.
 
 ---
 
