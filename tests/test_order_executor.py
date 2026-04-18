@@ -135,6 +135,27 @@ class OrderExecutorTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["status"], "open")
 
+    def test_exit_position_blocks_when_pending_exit_lookup_fails(self):
+        position = SimpleNamespace(qty="2", avg_entry_price="100")
+
+        with (
+            patch.object(order_executor.ac, "get_position", return_value=position),
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=110),
+            patch.object(order_executor.ac, "get_open_orders", side_effect=RuntimeError("timeout")),
+            patch.object(order_executor.ac, "place_limit_order") as place_limit_order,
+        ):
+            result = order_executor.exit_position("AAPL", "take profit", dry_run=False)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "pending_exit_check_failed")
+        place_limit_order.assert_not_called()
+
+        with open(trade_log.TRADE_LOG, "r") as f:
+            rows = list(csv.DictReader(f))
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["status"], "open")
+
     def test_enter_position_logs_submitted_buy_without_open_exposure(self):
         order = SimpleNamespace(id="entry-submitted", status="new", filled_qty="0")
 

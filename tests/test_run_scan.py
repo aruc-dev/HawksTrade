@@ -4,6 +4,20 @@ from unittest.mock import patch
 from scheduler import run_scan
 
 
+class FakeMarker:
+    def __init__(self):
+        self.status = "ok"
+        self.fields = {}
+
+    def mark_error(self, **fields):
+        self.status = "error"
+        self.fields.update(fields)
+
+    def mark_status(self, status, **fields):
+        self.status = status
+        self.fields.update(fields)
+
+
 class RunScanTests(unittest.TestCase):
     def test_asset_class_matching_normalizes_stock_aliases(self):
         self.assertTrue(run_scan._asset_class_matches("stocks", "stock"))
@@ -136,6 +150,38 @@ class RunScanTests(unittest.TestCase):
             )
 
         exit_position.assert_not_called()
+
+    def test_strategy_exit_marks_error_when_exit_is_blocked_by_pending_order_check_failure(self):
+        class MomentumStrategy:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def should_exit(self, symbol, entry_price):
+                return True, "exit"
+
+        marker = FakeMarker()
+        open_trade = {
+            "symbol": "AAPL",
+            "side": "buy",
+            "strategy": "momentum",
+            "entry_price": "100",
+            "asset_class": "stock",
+        }
+
+        with (
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(
+                run_scan.oe,
+                "exit_position",
+                return_value={"symbol": "AAPL", "status": "pending_exit_check_failed"},
+            ),
+        ):
+            run_scan._check_strategy_exits([MomentumStrategy()], ["AAPL"], dry_run=True, marker=marker)
+
+        self.assertEqual(marker.status, "error")
+        self.assertEqual(marker.fields["stage"], "strategy_exit")
+        self.assertEqual(marker.fields["error_type"], "PendingExitOrderCheckFailed")
+        self.assertEqual(marker.fields["blocked_exit_symbol"], "AAPL")
 
     def test_run_skips_when_market_connection_fails(self):
         with (

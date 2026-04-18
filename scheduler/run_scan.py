@@ -182,6 +182,17 @@ def _latest_price_for_trade(symbol: str, asset_class: str) -> float:
     return ac.get_stock_latest_price(symbol)
 
 
+def _mark_unhealthy_exit_result(marker: RunScope | None, result: dict | None, stage: str):
+    if marker is None or not result:
+        return
+    if result.get("status") == "pending_exit_check_failed":
+        marker.mark_error(
+            stage=stage,
+            error_type="PendingExitOrderCheckFailed",
+            blocked_exit_symbol=result.get("symbol", ""),
+        )
+
+
 def _estimate_peak_price_since_entry(symbol: str, asset_class: str, current_price: float, age_days: float) -> float:
     """Estimate high-water price for trailing exits from recent daily bars."""
     limit = max(int(age_days) + 5, 15)
@@ -200,7 +211,7 @@ def _estimate_peak_price_since_entry(symbol: str, asset_class: str, current_pric
         return current_price
 
 
-def _check_hold_day_exits(open_symbols: list, dry_run: bool = False):
+def _check_hold_day_exits(open_symbols: list, dry_run: bool = False, marker: RunScope | None = None):
     """Exit any swing trade that has been held beyond its target hold_days."""
     open_trades = get_open_trades()
     for trade in open_trades:
@@ -237,7 +248,8 @@ def _check_hold_day_exits(open_symbols: list, dry_run: bool = False):
                     )
                     continue
                 log.info(f"Momentum hold exit for {symbol}: {reason}")
-                oe.exit_position(symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
+                result = oe.exit_position(symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
+                _mark_unhealthy_exit_result(marker, result, "hold_day_exit")
                 continue
 
             log.info(
@@ -245,10 +257,17 @@ def _check_hold_day_exits(open_symbols: list, dry_run: bool = False):
                 f"{age_days:.1f}d >= {target_days}d — exiting."
             )
             asset_class = trade.get("asset_class", "stock")
-            oe.exit_position(symbol, reason="Hold period expired", asset_class=asset_class, dry_run=dry_run)
+            result = oe.exit_position(symbol, reason="Hold period expired", asset_class=asset_class, dry_run=dry_run)
+            _mark_unhealthy_exit_result(marker, result, "hold_day_exit")
 
 
-def _check_strategy_exits(strategies, open_symbols, dry_run: bool = False, skip_symbols=None):
+def _check_strategy_exits(
+    strategies,
+    open_symbols,
+    dry_run: bool = False,
+    skip_symbols=None,
+    marker: RunScope | None = None,
+):
     """Ask each strategy if any open position should be exited."""
     skip_symbols = skip_symbols or set()
     open_trades = get_open_trades()
@@ -279,7 +298,8 @@ def _check_strategy_exits(strategies, open_symbols, dry_run: bool = False, skip_
             should_exit, reason = strategy.should_exit(strategy_symbol, entry_price)
             if should_exit:
                 log.info(f"Strategy exit signal for {strategy_symbol}: {reason}")
-                oe.exit_position(strategy_symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
+                result = oe.exit_position(strategy_symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
+                _mark_unhealthy_exit_result(marker, result, "strategy_exit")
                 break  # position closed, no need to check further
 
 
@@ -390,16 +410,22 @@ def run(
         log.error(f"Could not refresh open positions; skipping exit checks: {e}", exc_info=True)
         return
     skip_symbols = set() if INTRADAY_ON else new_entry_symbols
-    _check_strategy_exits(all_strategies, open_symbols, dry_run=dry_run, skip_symbols=skip_symbols)
+    _check_strategy_exits(
+        all_strategies,
+        open_symbols,
+        dry_run=dry_run,
+        skip_symbols=skip_symbols,
+        marker=marker,
+    )
 
     # --- Hold-day expiry exits ---
     log.info("--- Checking hold-day expiry ---")
-    _check_hold_day_exits(open_symbols, dry_run=dry_run)
+    _check_hold_day_exits(open_symbols, dry_run=dry_run, marker=marker)
 
     # --- Print snapshot ---
     print_snapshot()
     log.info("Scan complete.")
-    if marker is not None:
+    if marker is not None and marker.status != "error":
         marker.mark_status("ok", outcome="completed")
 
 

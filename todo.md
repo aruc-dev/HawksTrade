@@ -26,7 +26,7 @@ file is a readable reliability roadmap.
   - Action: Track order status as `submitted`, `partially_filled`, or `open` only after confirmed fill.
   - Done when: Local open positions in `trades.csv` reflect broker fills rather than order submission.
 
-- [ ] Fail closed when pending exit orders cannot be checked.
+- [x] Fail closed when pending exit orders cannot be checked.
   - Problem: If open-order lookup fails, exit logic continues and can submit duplicate sell orders.
   - Action: Change pending-exit lookup failure to block a new exit order and mark the run unhealthy.
   - Done when: A transient Alpaca failure cannot trigger duplicate exits for the same symbol.

@@ -29,6 +29,10 @@ SLIPPAGE    = CFG["trading"]["limit_slippage_pct"]
 log         = logging.getLogger("core.order_executor")
 
 
+class PendingExitOrderCheckFailed(RuntimeError):
+    """Raised when open sell orders cannot be inspected safely."""
+
+
 def _utc_now():
     return datetime.now(timezone.utc)
 
@@ -61,8 +65,8 @@ def _has_pending_exit_order(symbol: str) -> bool:
     try:
         orders = ac.get_open_orders()
     except Exception as e:
-        log.warning(f"Could not check pending exit orders for {symbol}; continuing with exit: {e}")
-        return False
+        log.error(f"Could not check pending exit orders for {symbol}; blocking exit fail-closed: {e}")
+        raise PendingExitOrderCheckFailed(f"Could not check pending exit orders for {symbol}") from e
 
     for order in orders or []:
         order_symbol = _order_value(order, "symbol", "")
@@ -308,7 +312,27 @@ def exit_position(symbol: str, reason: str, asset_class: str = "stock", dry_run:
             )
             return trade
 
-        if _has_pending_exit_order(order_symbol):
+        try:
+            has_pending_exit = _has_pending_exit_order(order_symbol)
+        except PendingExitOrderCheckFailed as e:
+            return {
+                "timestamp": _utc_now().isoformat(),
+                "mode": MODE,
+                "symbol": trade_symbol,
+                "strategy": strategy,
+                "asset_class": asset_class,
+                "side": "sell",
+                "qty": qty,
+                "entry_price": entry_price,
+                "exit_price": current_price,
+                "pnl_pct": round(pnl_pct, 6),
+                "exit_reason": reason,
+                "order_id": "",
+                "status": "pending_exit_check_failed",
+                "error": str(e),
+            }
+
+        if has_pending_exit:
             return {
                 "timestamp": _utc_now().isoformat(),
                 "mode": MODE,

@@ -59,6 +59,17 @@ def _find_matching_trade(symbol: str, open_trades: list) -> dict | None:
     return None
 
 
+def _mark_unhealthy_exit_result(marker: RunScope | None, result: dict | None, stage: str):
+    if marker is None or not result:
+        return
+    if result.get("status") == "pending_exit_check_failed":
+        marker.mark_error(
+            stage=stage,
+            error_type="PendingExitOrderCheckFailed",
+            blocked_exit_symbol=result.get("symbol", ""),
+        )
+
+
 def run(dry_run: bool = False, marker: RunScope | None = None):
     log.info(f"--- Risk Check | dry_run={'ON' if dry_run else 'OFF'} ---")
 
@@ -88,10 +99,15 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
             )
             trade = _find_matching_trade(symbol, open_trades)
             exit_symbol = trade.get("symbol", symbol) if trade and asset_class == "crypto" else symbol
-            oe.exit_position(exit_symbol, reason="Daily loss limit — emergency close",
-                             asset_class=asset_class, dry_run=dry_run)
+            result = oe.exit_position(
+                exit_symbol,
+                reason="Daily loss limit — emergency close",
+                asset_class=asset_class,
+                dry_run=dry_run,
+            )
+            _mark_unhealthy_exit_result(marker, result, "emergency_exit")
         log.warning("All positions closed. Bot will not trade again today.")
-        if marker is not None:
+        if marker is not None and marker.status != "error":
             marker.mark_status("ok", outcome="emergency_close")
         return
 
@@ -144,14 +160,15 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
         if should_exit:
             log.info(f"EXIT triggered for {symbol}: {reason}")
             exit_symbol = price_symbol if asset_class == "crypto" else symbol
-            oe.exit_position(exit_symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
+            result = oe.exit_position(exit_symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
+            _mark_unhealthy_exit_result(marker, result, "risk_exit")
         else:
             pnl = (current_price - entry_price) / entry_price
             log.info(f"  {symbol:<12} entry={entry_price:.4f} now={current_price:.4f} "
                      f"P&L={pnl:+.2%} — HOLD")
 
     log.info("Risk check complete.")
-    if marker is not None:
+    if marker is not None and marker.status != "error":
         marker.mark_status("ok", outcome="completed")
 
 
