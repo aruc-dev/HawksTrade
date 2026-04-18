@@ -1,5 +1,7 @@
 import logging
+import os
 import unittest
+from unittest.mock import patch
 
 from core.run_markers import run_scope
 
@@ -41,6 +43,15 @@ class RunMarkerTests(unittest.TestCase):
         self.assertIn("RUN_END script=run_risk_check", output)
         self.assertIn("status=error", output)
         self.assertIn("error_type=RuntimeError", output)
+
+    def test_run_scope_sets_run_id_environment_and_restores_previous_value(self):
+        logger = logging.getLogger("hawks.trade.marker.env")
+
+        with patch.dict(os.environ, {"HAWKSTRADE_RUN_ID": "outer-run"}):
+            with run_scope(logger, "run_scan") as marker:
+                self.assertEqual(os.environ["HAWKSTRADE_RUN_ID"], marker.run_id)
+
+            self.assertEqual(os.environ["HAWKSTRADE_RUN_ID"], "outer-run")
 
 
 if __name__ == "__main__":

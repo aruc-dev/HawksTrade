@@ -30,6 +30,7 @@ class AlpacaClientTests(unittest.TestCase):
         price_increment=None,
         qty=1,
         time_in_force="gtc",
+        client_order_id=None,
     ):
         class FakeClient:
             def get_asset(self, symbol):
@@ -50,6 +51,7 @@ class AlpacaClientTests(unittest.TestCase):
                 limit_price,
                 time_in_force=time_in_force,
                 asset_class=asset_class,
+                client_order_id=client_order_id,
             )
         return fake_client.req
 
@@ -91,6 +93,11 @@ class AlpacaClientTests(unittest.TestCase):
         )
 
         self.assertEqual(req.limit_price, 0.09)
+
+    def test_limit_order_passes_client_order_id(self):
+        req = self._capture_limit_order("AAPL", 100, client_order_id="client-1")
+
+        self.assertEqual(req.client_order_id, "client-1")
 
     def test_fractional_stock_limit_order_uses_day_time_in_force(self):
         req = self._capture_limit_order("TQQQ", 51.9369, asset_class="stock", qty=94.396685)

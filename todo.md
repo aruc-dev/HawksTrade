@@ -31,7 +31,7 @@ file is a readable reliability roadmap.
   - Action: Change pending-exit lookup failure to block a new exit order and mark the run unhealthy.
   - Done when: A transient Alpaca failure cannot trigger duplicate exits for the same symbol.
 
-- [ ] Add broker order idempotency.
+- [x] Add broker order idempotency.
   - Problem: Orders are submitted without stable `client_order_id`, so crash/retry paths cannot identify prior submissions.
   - Action: Generate deterministic client order IDs from run id, symbol, side, strategy, and intent timestamp; persist intent before submit.
   - Done when: Retrying a run cannot create duplicate broker orders for the same trading intent.

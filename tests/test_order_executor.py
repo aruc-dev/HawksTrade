@@ -1,4 +1,5 @@
 import csv
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from core import order_executor
-from tracking import trade_log
+from tracking import order_intents, trade_log
 
 
 class OrderExecutorTests(unittest.TestCase):
@@ -16,6 +17,9 @@ class OrderExecutorTests(unittest.TestCase):
         self.original_trade_log = trade_log.TRADE_LOG
         trade_log.TRADE_LOG = Path(self.tmpdir.name) / "trades.csv"
         self.addCleanup(setattr, trade_log, "TRADE_LOG", self.original_trade_log)
+        self.original_order_intents = order_intents.ORDER_INTENTS
+        order_intents.ORDER_INTENTS = Path(self.tmpdir.name) / "order_intents.csv"
+        self.addCleanup(setattr, order_intents, "ORDER_INTENTS", self.original_order_intents)
 
         trade_log.log_trade({
             "timestamp": "2026-04-10T12:00:00",
@@ -228,6 +232,36 @@ class OrderExecutorTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["status"], "partially_filled")
         self.assertEqual(rows[0]["qty"], "0.75")
+
+    def test_enter_position_reuses_client_order_id_after_submit_failure(self):
+        seen_client_ids = []
+        order = SimpleNamespace(id="entry-retry", status="filled", filled_qty="2")
+
+        def _place_limit_order(*args, **kwargs):
+            seen_client_ids.append(kwargs["client_order_id"])
+            if len(seen_client_ids) == 1:
+                raise RuntimeError("lost response")
+            return order
+
+        with (
+            patch.dict(os.environ, {"HAWKSTRADE_RUN_ID": "run-retry"}),
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 2}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=2),
+            patch.object(order_executor.ac, "place_limit_order", side_effect=_place_limit_order),
+        ):
+            first = order_executor.enter_position("MSFT", "gap_up", dry_run=False)
+            second = order_executor.enter_position("MSFT", "gap_up", dry_run=False)
+
+        rows = order_intents.read_order_intents()
+
+        self.assertIsNone(first)
+        self.assertIsNotNone(second)
+        self.assertEqual(len(seen_client_ids), 2)
+        self.assertEqual(seen_client_ids[0], seen_client_ids[1])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["client_order_id"], seen_client_ids[0])
+        self.assertEqual(rows[0]["status"], "filled")
 
 
 if __name__ == "__main__":

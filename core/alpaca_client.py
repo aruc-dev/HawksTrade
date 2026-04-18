@@ -209,7 +209,14 @@ def get_position(symbol: str):
 
 # ── Orders ───────────────────────────────────────────────────────────────────
 
-def place_market_order(symbol: str, qty: float, side: str, time_in_force: str = "day", strategy: str = "unknown"):
+def place_market_order(
+    symbol: str,
+    qty: float,
+    side: str,
+    time_in_force: str = "day",
+    strategy: str = "unknown",
+    client_order_id: Optional[str] = None,
+):
     """Place a market order. side = 'buy' or 'sell'."""
     side = side.lower()
     if side not in {"buy", "sell"}:
@@ -220,6 +227,7 @@ def place_market_order(symbol: str, qty: float, side: str, time_in_force: str = 
         qty=qty,
         side=OrderSide.BUY if side == "buy" else OrderSide.SELL,
         time_in_force=TimeInForce.DAY if time_in_force == "day" else TimeInForce.GTC,
+        client_order_id=client_order_id,
     )
     # Attach strategy for backtest mock visibility (bypass Pydantic strictness)
     try:
@@ -233,13 +241,17 @@ def place_market_order(symbol: str, qty: float, side: str, time_in_force: str = 
     elif hasattr(order, "strategy"): order.strategy = strategy
     
     order_id = order.id if hasattr(order, "id") else order.get("order_id")
-    log.info(f"Market order submitted: {side} {qty} {symbol} | strategy={strategy} | id={order_id}")
+    log.info(
+        f"Market order submitted: {side} {qty} {symbol} | strategy={strategy} "
+        f"| id={order_id} | client_order_id={client_order_id or ''}"
+    )
     return order
 
 
 def place_limit_order(symbol: str, qty: float, side: str, limit_price: float,
                       time_in_force: str = "gtc", strategy: str = "unknown",
-                      asset_class: Optional[str] = None):
+                      asset_class: Optional[str] = None,
+                      client_order_id: Optional[str] = None):
     """Place a limit order."""
     side = side.lower()
     if side not in {"buy", "sell"}:
@@ -258,6 +270,7 @@ def place_limit_order(symbol: str, qty: float, side: str, limit_price: float,
         side=OrderSide.BUY if side == "buy" else OrderSide.SELL,
         limit_price=normalized_limit_price,
         time_in_force=normalized_time_in_force,
+        client_order_id=client_order_id,
     )
     # Attach strategy for backtest mock visibility (bypass Pydantic strictness)
     try:
@@ -273,7 +286,7 @@ def place_limit_order(symbol: str, qty: float, side: str, limit_price: float,
     order_id = order.id if hasattr(order, "id") else order.get("order_id")
     log.info(
         f"Limit order submitted: {side} {qty} {symbol} @ {normalized_limit_price} "
-        f"| strategy={strategy} | id={order_id}"
+        f"| strategy={strategy} | id={order_id} | client_order_id={client_order_id or ''}"
     )
     return order
 

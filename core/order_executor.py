@@ -7,6 +7,7 @@ Writes every trade to the trade log.
 """
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional, List, Dict
 from pathlib import Path
@@ -15,6 +16,7 @@ import yaml
 
 from core import alpaca_client as ac
 from core import risk_manager as rm
+from tracking import order_intents
 from tracking.trade_log import log_trade, mark_trade_closed, get_trade_age_days
 
 # ── Setup ───────────────────────────────────────────────────────────────────
@@ -59,6 +61,52 @@ def _order_side(order) -> str | None:
     if side is None:
         return None
     return str(getattr(side, "value", side)).lower()
+
+
+def _broker_order_id(order) -> str:
+    return str(_order_value(order, "id", _order_value(order, "order_id", "")) or "")
+
+
+def _current_run_id() -> str:
+    return os.getenv("HAWKSTRADE_RUN_ID") or "manual"
+
+
+def _create_order_intent(symbol: str, side: str, strategy: str, asset_class: str, qty, limit_price=None) -> dict | None:
+    if MODE == "backtest":
+        return None
+    intent, created = order_intents.get_or_create_order_intent(
+        run_id=_current_run_id(),
+        symbol=symbol,
+        side=side,
+        strategy=strategy,
+        asset_class=asset_class,
+        qty=qty,
+        limit_price=limit_price,
+    )
+    action = "created" if created else "reused"
+    log.info(f"Order intent {action}: {intent['client_order_id']} | {side} {symbol} | strategy={strategy}")
+    return intent
+
+
+def _mark_order_intent_submitted(intent: dict | None, order) -> None:
+    if not intent:
+        return
+    status = _order_status(order) or "submitted"
+    order_intents.update_order_intent(
+        intent["client_order_id"],
+        status=status,
+        broker_order_id=_broker_order_id(order),
+    )
+
+
+def _mark_order_intent_failed(intent: dict | None, exc: Exception) -> None:
+    if not intent:
+        return
+    order_intents.update_order_intent(
+        intent["client_order_id"],
+        status="submit_failed",
+        error=f"{type(exc).__name__}: {exc}",
+    )
 
 
 def _has_pending_exit_order(symbol: str) -> bool:
@@ -196,17 +244,35 @@ def enter_position(symbol: str, strategy: str, asset_class: str = "stock", dry_r
 
         # Place Order
         if ORDER_TYPE == "market":
-            order = ac.place_market_order(symbol, qty, "buy", strategy=strategy)
+            intent = _create_order_intent(symbol, "buy", strategy, asset_class, qty)
+            try:
+                order = ac.place_market_order(
+                    symbol,
+                    qty,
+                    "buy",
+                    strategy=strategy,
+                    client_order_id=intent["client_order_id"] if intent else None,
+                )
+            except Exception as e:
+                _mark_order_intent_failed(intent, e)
+                raise
         else:
             limit_px = price * (1 + SLIPPAGE)
-            order = ac.place_limit_order(
-                symbol,
-                qty,
-                "buy",
-                limit_px,
-                strategy=strategy,
-                asset_class=asset_class,
-            )
+            intent = _create_order_intent(symbol, "buy", strategy, asset_class, qty, limit_price=limit_px)
+            try:
+                order = ac.place_limit_order(
+                    symbol,
+                    qty,
+                    "buy",
+                    limit_px,
+                    strategy=strategy,
+                    asset_class=asset_class,
+                    client_order_id=intent["client_order_id"] if intent else None,
+                )
+            except Exception as e:
+                _mark_order_intent_failed(intent, e)
+                raise
+        _mark_order_intent_submitted(intent, order)
 
         # Capture details for logging
         order_id = str(order.id) if hasattr(order, "id") else str(order.get("order_id"))
@@ -350,17 +416,35 @@ def exit_position(symbol: str, reason: str, asset_class: str = "stock", dry_run:
             }
 
         if ORDER_TYPE == "market":
-            order = ac.place_market_order(order_symbol, qty, "sell", strategy=strategy)
+            intent = _create_order_intent(order_symbol, "sell", strategy, asset_class, qty)
+            try:
+                order = ac.place_market_order(
+                    order_symbol,
+                    qty,
+                    "sell",
+                    strategy=strategy,
+                    client_order_id=intent["client_order_id"] if intent else None,
+                )
+            except Exception as e:
+                _mark_order_intent_failed(intent, e)
+                raise
         else:
             limit_px = current_price * (1 - SLIPPAGE)
-            order = ac.place_limit_order(
-                order_symbol,
-                qty,
-                "sell",
-                limit_px,
-                strategy=strategy,
-                asset_class=asset_class,
-            )
+            intent = _create_order_intent(order_symbol, "sell", strategy, asset_class, qty, limit_price=limit_px)
+            try:
+                order = ac.place_limit_order(
+                    order_symbol,
+                    qty,
+                    "sell",
+                    limit_px,
+                    strategy=strategy,
+                    asset_class=asset_class,
+                    client_order_id=intent["client_order_id"] if intent else None,
+                )
+            except Exception as e:
+                _mark_order_intent_failed(intent, e)
+                raise
+        _mark_order_intent_submitted(intent, order)
 
         order_id = str(order.id) if hasattr(order, "id") else str(order.get("order_id"))
         filled_qty = _exit_fill_qty(order, qty)
