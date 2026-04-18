@@ -244,15 +244,17 @@ class SecretsSourceShmTests(unittest.TestCase):
             return _real_is_file(self)
 
         try:
-            with patch("yaml.safe_load", return_value=fake_cfg), \
-                 patch("dotenv.load_dotenv", mock_load_dotenv), \
-                 patch.dict(os.environ, {
-                     "HAWKSTRADE_REQUIRE_SHM": "",
-                     "HAWKSTRADE_SHM_MAX_AGE_SECONDS": "",
-                 }), \
-                 patch.object(Path, "exists", _exists_shm_true), \
-                 patch.object(Path, "is_file", _is_file_shm_true), \
-                 patch("os.access", return_value=True):
+            with (
+                patch("yaml.safe_load", return_value=fake_cfg),
+                patch("dotenv.load_dotenv", mock_load_dotenv),
+                patch.dict(os.environ, {
+                    "HAWKSTRADE_REQUIRE_SHM": "",
+                    "HAWKSTRADE_SHM_MAX_AGE_SECONDS": "",
+                }),
+                patch.object(Path, "exists", _exists_shm_true),
+                patch.object(Path, "is_file", _is_file_shm_true),
+                patch("os.access", return_value=True),
+            ):
                 importlib.reload(alpaca_client)
 
             mock_load_dotenv.assert_called_once_with(Path("/dev/shm/.hawkstrade.env"))
@@ -278,13 +280,15 @@ class SecretsSourceShmTests(unittest.TestCase):
             return _real_exists(self)
 
         try:
-            with patch("yaml.safe_load", return_value=fake_cfg), \
-                 patch("dotenv.load_dotenv", mock_load_dotenv), \
-                 patch.dict(os.environ, {
-                     "HAWKSTRADE_REQUIRE_SHM": "",
-                     "HAWKSTRADE_SHM_MAX_AGE_SECONDS": "",
-                 }), \
-                 patch.object(Path, "exists", _exists_missing_file):
+            with (
+                patch("yaml.safe_load", return_value=fake_cfg),
+                patch("dotenv.load_dotenv", mock_load_dotenv),
+                patch.dict(os.environ, {
+                    "HAWKSTRADE_REQUIRE_SHM": "",
+                    "HAWKSTRADE_SHM_MAX_AGE_SECONDS": "",
+                }),
+                patch.object(Path, "exists", _exists_missing_file),
+            ):
                 importlib.reload(alpaca_client)
 
             mock_load_dotenv.assert_any_call(alpaca_client.BASE_DIR / "config" / ".env")
@@ -310,13 +314,15 @@ class SecretsSourceShmTests(unittest.TestCase):
             return _real_exists(self)
 
         try:
-            with patch("yaml.safe_load", return_value=fake_cfg), \
-                 patch("dotenv.load_dotenv", mock_load_dotenv), \
-                 patch.dict(os.environ, {
-                     "HAWKSTRADE_REQUIRE_SHM": "",
-                     "HAWKSTRADE_SHM_MAX_AGE_SECONDS": "",
-                 }), \
-                 patch.object(Path, "exists", _exists_without_shm):
+            with (
+                patch("yaml.safe_load", return_value=fake_cfg),
+                patch("dotenv.load_dotenv", mock_load_dotenv),
+                patch.dict(os.environ, {
+                    "HAWKSTRADE_REQUIRE_SHM": "",
+                    "HAWKSTRADE_SHM_MAX_AGE_SECONDS": "",
+                }),
+                patch.object(Path, "exists", _exists_without_shm),
+            ):
                 importlib.reload(alpaca_client)
 
             mock_load_dotenv.assert_any_call(alpaca_client.BASE_DIR / "config" / ".env")
@@ -342,13 +348,15 @@ class SecretsSourceShmTests(unittest.TestCase):
             return _real_exists(self)
 
         try:
-            with patch("yaml.safe_load", return_value=fake_cfg), \
-                 patch("dotenv.load_dotenv", mock_load_dotenv), \
-                 patch.dict(os.environ, {
-                     "HAWKSTRADE_REQUIRE_SHM": "1",
-                     "HAWKSTRADE_SHM_MAX_AGE_SECONDS": "",
-                 }), \
-                 patch.object(Path, "exists", _exists_missing_file):
+            with (
+                patch("yaml.safe_load", return_value=fake_cfg),
+                patch("dotenv.load_dotenv", mock_load_dotenv),
+                patch.dict(os.environ, {
+                    "HAWKSTRADE_REQUIRE_SHM": "1",
+                    "HAWKSTRADE_SHM_MAX_AGE_SECONDS": "",
+                }),
+                patch.object(Path, "exists", _exists_missing_file),
+            ):
                 with self.assertRaises(EnvironmentError):
                     importlib.reload(alpaca_client)
 
@@ -379,15 +387,17 @@ class SecretsSourceShmTests(unittest.TestCase):
             return _real_is_file(self)
 
         try:
-            with patch("yaml.safe_load", return_value=fake_cfg), \
-                 patch("dotenv.load_dotenv", mock_load_dotenv), \
-                 patch.dict(os.environ, {
-                     "HAWKSTRADE_REQUIRE_SHM": "1",
-                     "HAWKSTRADE_SHM_MAX_AGE_SECONDS": "",
-                 }), \
-                 patch.object(Path, "exists", _exists_shm_true), \
-                 patch.object(Path, "is_file", _is_file_shm_true), \
-                 patch("os.access", return_value=False):
+            with (
+                patch("yaml.safe_load", return_value=fake_cfg),
+                patch("dotenv.load_dotenv", mock_load_dotenv),
+                patch.dict(os.environ, {
+                    "HAWKSTRADE_REQUIRE_SHM": "1",
+                    "HAWKSTRADE_SHM_MAX_AGE_SECONDS": "",
+                }),
+                patch.object(Path, "exists", _exists_shm_true),
+                patch.object(Path, "is_file", _is_file_shm_true),
+                patch("os.access", return_value=False),
+            ):
                 with self.assertRaises(PermissionError):
                     importlib.reload(alpaca_client)
 
@@ -418,14 +428,16 @@ class SecretsSourceShmTests(unittest.TestCase):
             return _real_is_symlink(self)
 
         try:
-            with patch("yaml.safe_load", return_value=fake_cfg), \
-                 patch("dotenv.load_dotenv", mock_load_dotenv), \
-                 patch.dict(os.environ, {
-                     "HAWKSTRADE_REQUIRE_SHM": "1",
-                     "HAWKSTRADE_SHM_MAX_AGE_SECONDS": "",
-                 }), \
-                 patch.object(Path, "exists", _exists_shm_true), \
-                 patch.object(Path, "is_symlink", _is_symlink_shm_true):
+            with (
+                patch("yaml.safe_load", return_value=fake_cfg),
+                patch("dotenv.load_dotenv", mock_load_dotenv),
+                patch.dict(os.environ, {
+                    "HAWKSTRADE_REQUIRE_SHM": "1",
+                    "HAWKSTRADE_SHM_MAX_AGE_SECONDS": "",
+                }),
+                patch.object(Path, "exists", _exists_shm_true),
+                patch.object(Path, "is_symlink", _is_symlink_shm_true),
+            ):
                 with self.assertRaises(EnvironmentError):
                     importlib.reload(alpaca_client)
 
@@ -462,17 +474,20 @@ class SecretsSourceShmTests(unittest.TestCase):
             return _real_stat(self, *args, **kwargs)
 
         try:
-            with patch("yaml.safe_load", return_value=fake_cfg), \
-                 patch("dotenv.load_dotenv", mock_load_dotenv), \
-                 patch.dict(os.environ, {
-                     "HAWKSTRADE_REQUIRE_SHM": "1",
-                     "HAWKSTRADE_SHM_MAX_AGE_SECONDS": "60",
-                 }), \
-                 patch.object(Path, "exists", _exists_shm_true), \
-                 patch.object(Path, "is_file", _is_file_shm_true), \
-                 patch.object(Path, "stat", _stat_old_shm), \
-                 patch("time.time", return_value=1000), \
-                 patch("os.access", return_value=True):
+            with (
+                patch("yaml.safe_load", return_value=fake_cfg),
+                patch("dotenv.load_dotenv", mock_load_dotenv),
+                patch.dict(os.environ, {
+                    "HAWKSTRADE_REQUIRE_SHM": "1",
+                    "HAWKSTRADE_SHM_MAX_AGE_SECONDS": "60",
+                }),
+                patch.object(Path, "exists", _exists_shm_true),
+                patch.object(Path, "is_symlink", return_value=False),
+                patch.object(Path, "is_file", _is_file_shm_true),
+                patch.object(Path, "stat", _stat_old_shm),
+                patch("time.time", return_value=1000),
+                patch("os.access", return_value=True),
+            ):
                 with self.assertRaises(EnvironmentError):
                     importlib.reload(alpaca_client)
 
