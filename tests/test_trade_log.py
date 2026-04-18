@@ -1,5 +1,6 @@
 import csv
 import multiprocessing
+import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -40,6 +41,63 @@ class TradeLogTests(unittest.TestCase):
     def _read_rows(self):
         with open(trade_log.TRADE_LOG, "r") as f:
             return list(csv.DictReader(f))
+
+    def test_windows_locking_uses_stable_region_and_requested_mode(self):
+        class FakeMsvcrt:
+            LK_LOCK = 1
+            LK_RLCK = 2
+            LK_UNLCK = 3
+
+            def __init__(self):
+                self.calls = []
+
+            def locking(self, fd, mode, nbytes):
+                self.calls.append({
+                    "mode": mode,
+                    "nbytes": nbytes,
+                    "offset": os.lseek(fd, 0, os.SEEK_CUR),
+                    "size": os.fstat(fd).st_size,
+                })
+
+        fake_msvcrt = FakeMsvcrt()
+        original_fcntl = trade_log.fcntl
+        had_msvcrt = hasattr(trade_log, "msvcrt")
+        original_msvcrt = getattr(trade_log, "msvcrt", None)
+
+        def restore_lock_modules():
+            trade_log.fcntl = original_fcntl
+            if had_msvcrt:
+                trade_log.msvcrt = original_msvcrt
+            else:
+                delattr(trade_log, "msvcrt")
+
+        trade_log.fcntl = None
+        trade_log.msvcrt = fake_msvcrt
+        self.addCleanup(restore_lock_modules)
+
+        lock_path = Path(self.tmpdir.name) / "windows.lock"
+        with open(lock_path, "a+b") as lock_file:
+            trade_log._lock_file(lock_file, exclusive=False)
+            trade_log._unlock_file(lock_file)
+            trade_log._lock_file(lock_file, exclusive=True)
+            trade_log._unlock_file(lock_file)
+
+        self.assertEqual(lock_path.stat().st_size, 1)
+        self.assertEqual(
+            [call["mode"] for call in fake_msvcrt.calls],
+            [
+                fake_msvcrt.LK_RLCK,
+                fake_msvcrt.LK_UNLCK,
+                fake_msvcrt.LK_LOCK,
+                fake_msvcrt.LK_UNLCK,
+            ],
+        )
+        self.assertTrue(all(call["offset"] == 0 for call in fake_msvcrt.calls))
+        self.assertTrue(all(call["nbytes"] == 1 for call in fake_msvcrt.calls))
+        self.assertTrue(all(call["size"] == 1 for call in fake_msvcrt.calls))
+
+    def test_locked_trade_log_docstring_describes_generic_csv_lock(self):
+        self.assertIn("CSV file path", trade_log.locked_trade_log.__doc__)
 
     def test_mark_trade_closed_updates_most_recent_open_buy(self):
         now = datetime.now(timezone.utc).replace(tzinfo=None)

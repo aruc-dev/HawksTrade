@@ -106,23 +106,30 @@ def _lock_file(lock_file, exclusive: bool):
         operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
         fcntl.flock(lock_file.fileno(), operation)
     else:  # pragma: no cover - Windows fallback
-        msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+        lock_file.seek(0, 2)
+        if lock_file.tell() == 0:
+            lock_file.write(b"\0")
+            lock_file.flush()
+        lock_file.seek(0)
+        operation = msvcrt.LK_LOCK if exclusive else msvcrt.LK_RLCK
+        msvcrt.locking(lock_file.fileno(), operation, 1)
 
 
 def _unlock_file(lock_file):
     if fcntl is not None:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
     else:  # pragma: no cover - Windows fallback
+        lock_file.seek(0)
         msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 @contextlib.contextmanager
 def locked_trade_log(path: Path | None = None, *, exclusive: bool = True) -> Iterator[Path]:
     """
-    Hold the advisory cross-process lock used for trades.csv access.
+    Hold an advisory cross-process lock for a CSV file path.
 
-    Every runtime reader/writer of trades.csv should use this context so append
-    and rewrite operations cannot interleave with report/health reads.
+    Every runtime reader/writer of the target CSV should use this context so
+    append and rewrite operations cannot interleave with report/health reads.
     """
     trade_log_path = Path(path or TRADE_LOG)
     trade_log_path.parent.mkdir(parents=True, exist_ok=True)
