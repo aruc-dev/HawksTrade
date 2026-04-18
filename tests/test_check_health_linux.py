@@ -22,8 +22,8 @@ class CheckHealthLinuxTests(unittest.TestCase):
                 """
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
-35 6 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_scan.py --stocks-only >> logs/cron.log 2>&1
-0 * * * * cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
+35 6 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && ./scripts/run_hawkstrade_job.sh scheduler/run_scan.py --stocks-only >> logs/cron.log 2>&1
+0 * * * * cd "$HAWKSTRADE_DIR" && mkdir -p logs && ./scripts/run_hawkstrade_job.sh scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
 """.strip()
                 + "\n",
             )

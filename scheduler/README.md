@@ -124,6 +124,13 @@ Edit `HAWKSTRADE_DIR` in the chosen file, then install:
 crontab scheduler/cron/hawkstrade-eastern.cron
 ```
 
+The Linux cron templates run scan and risk-check jobs through
+`scripts/run_hawkstrade_job.sh`. That wrapper chooses `.venv` when available and
+uses a shared `flock` lock at `local/locks/trade-mutating-jobs.lock`, so scan
+and risk-check jobs cannot overlap while placing or closing orders. Full scans,
+stock scans, and risk checks wait up to 10 minutes for the lock; redundant
+`--crypto-only` runs skip when another trade-mutating job is already active.
+
 View installed jobs:
 
 ```bash

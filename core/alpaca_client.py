@@ -14,6 +14,7 @@ from typing import Optional
 
 import yaml
 from dotenv import load_dotenv
+from alpaca.common.exceptions import APIError
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import (
     MarketOrderRequest, LimitOrderRequest, GetOrdersRequest
@@ -150,13 +151,65 @@ def get_all_positions():
     return get_trading_client().get_all_positions()
 
 
+def _exception_status_code(exc: Exception) -> int | None:
+    """Best-effort HTTP status extraction across Alpaca and requests errors."""
+    for candidate in (
+        getattr(exc, "status_code", None),
+        getattr(getattr(exc, "response", None), "status_code", None),
+        getattr(getattr(getattr(exc, "_http_error", None), "response", None), "status_code", None),
+        getattr(getattr(getattr(exc, "http_error", None), "response", None), "status_code", None),
+    ):
+        if candidate is None:
+            continue
+        try:
+            return int(candidate)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _exception_text(exc: Exception) -> str:
+    pieces = [str(exc)]
+    for attr in ("message", "_error"):
+        try:
+            value = getattr(exc, attr, None)
+        except Exception:
+            continue
+        if value:
+            pieces.append(str(value))
+    return " ".join(pieces).lower()
+
+
+def _is_position_not_found_error(exc: Exception) -> bool:
+    status_code = _exception_status_code(exc)
+    if status_code == 404:
+        return True
+    if status_code is not None:
+        return False
+
+    text = _exception_text(exc)
+    return (
+        "position does not exist" in text
+        or "position not found" in text
+        or ("not found" in text and "position" in text)
+    )
+
+
 def get_position(symbol: str):
     client = get_trading_client()
     for candidate in _symbol_lookup_variants(symbol):
         try:
             return client.get_open_position(candidate)
-        except Exception:
-            continue
+        except APIError as e:
+            if _is_position_not_found_error(e):
+                log.debug(f"No open position for {candidate}: {e}")
+                continue
+            raise
+        except Exception as e:
+            if _is_position_not_found_error(e):
+                log.debug(f"No open position for {candidate}: {e}")
+                continue
+            raise
     return None
 
 
@@ -329,9 +382,9 @@ def _round_price_to_increment(value: float, increment: Decimal) -> float:
 
 def _symbol_lookup_variants(symbol: str) -> list:
     normalized = normalize_symbol(symbol)
-    variants = [symbol]
+    variants = [normalized]
     if normalized != symbol:
-        variants.append(normalized)
+        variants.append(symbol)
     paired = to_crypto_pair_symbol(normalized)
     if paired not in variants:
         variants.append(paired)

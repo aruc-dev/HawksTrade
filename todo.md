@@ -6,12 +6,12 @@ file is a readable reliability roadmap.
 
 ## P0 - Trading Safety
 
-- [ ] Fix `get_position()` error handling.
+- [x] Fix `get_position()` error handling.
   - Problem: `core/alpaca_client.py` currently swallows all exceptions while trying symbol variants and returns `None`. Auth failures, rate limits, timeouts, or server errors can look like "no position".
   - Action: Only suppress true "position not found" responses. Propagate unauthorized, retryable network failures, rate limits, and server errors.
   - Done when: Exit logic cannot silently skip a real broker position because Alpaca returned a non-not-found error.
 
-- [ ] Add a single-process execution lock for trade-mutating jobs.
+- [x] Add a single-process execution lock for trade-mutating jobs.
   - Problem: Full scans, crypto scans, and risk checks can overlap under cron.
   - Action: Add a Linux runner wrapper using `flock`, and update cron templates to run scans/risk checks through it.
   - Done when: At most one scan/risk process can place or close orders at a time.

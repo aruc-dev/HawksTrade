@@ -1,8 +1,10 @@
+import json
 import unittest
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from alpaca.common.exceptions import APIError
 from alpaca.trading.enums import TimeInForce
 
 from core import alpaca_client
@@ -11,6 +13,14 @@ from core import alpaca_client
 class AlpacaClientTests(unittest.TestCase):
     def setUp(self):
         alpaca_client._crypto_price_increment_cache.clear()
+
+    def _api_error(self, status_code, message):
+        error = json.dumps({"code": status_code, "message": message})
+        http_error = SimpleNamespace(
+            response=SimpleNamespace(status_code=status_code),
+            request=SimpleNamespace(),
+        )
+        return APIError(error, http_error)
 
     def _capture_limit_order(
         self,
@@ -114,6 +124,54 @@ class AlpacaClientTests(unittest.TestCase):
 
     def test_to_crypto_pair_symbol_adds_slash_to_broker_symbol(self):
         self.assertEqual(alpaca_client.to_crypto_pair_symbol("DOGEUSD"), "DOGE/USD")
+
+    def test_get_position_tries_symbol_variants_after_not_found(self):
+        class FakeClient:
+            def __init__(self, not_found_error):
+                self.not_found_error = not_found_error
+                self.calls = []
+
+            def get_open_position(self, symbol):
+                self.calls.append(symbol)
+                if symbol == "BTCUSD":
+                    raise self.not_found_error
+                return SimpleNamespace(symbol=symbol, qty="1")
+
+        fake_client = FakeClient(self._api_error(404, "position does not exist"))
+
+        with patch.object(alpaca_client, "get_trading_client", return_value=fake_client):
+            position = alpaca_client.get_position("BTCUSD")
+
+        self.assertEqual(position.symbol, "BTC/USD")
+        self.assertEqual(fake_client.calls, ["BTCUSD", "BTC/USD"])
+
+    def test_get_position_propagates_auth_errors(self):
+        class FakeClient:
+            def __init__(self, error):
+                self.error = error
+                self.calls = []
+
+            def get_open_position(self, symbol):
+                self.calls.append(symbol)
+                raise self.error
+
+        error = self._api_error(401, "unauthorized.")
+        fake_client = FakeClient(error)
+
+        with patch.object(alpaca_client, "get_trading_client", return_value=fake_client):
+            with self.assertRaises(APIError):
+                alpaca_client.get_position("AAPL")
+
+        self.assertEqual(fake_client.calls, ["AAPL"])
+
+    def test_get_position_propagates_network_errors(self):
+        class FakeClient:
+            def get_open_position(self, symbol):
+                raise TimeoutError("network timeout")
+
+        with patch.object(alpaca_client, "get_trading_client", return_value=FakeClient()):
+            with self.assertRaises(TimeoutError):
+                alpaca_client.get_position("AAPL")
 
     def test_stock_latest_price_uses_latest_trade_when_quote_side_missing(self):
         class FakeDataClient:

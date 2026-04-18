@@ -259,17 +259,17 @@ def _cron_pattern(minute_spec: str, hour_spec: str, dow_spec: str) -> CronPatter
 
 def _job_from_command(command: str) -> tuple[str, str] | None:
     normalized = command.lower()
-    if "python3 scheduler/run_scan.py --stocks-only" in normalized:
+    if "scheduler/run_scan.py" in normalized and "--stocks-only" in normalized:
         return "stock_scan", "Stock scan"
-    if "python3 scheduler/run_scan.py --crypto-only" in normalized:
+    if "scheduler/run_scan.py" in normalized and "--crypto-only" in normalized:
         return "crypto_scan", "Crypto scan"
-    if "python3 scheduler/run_scan.py" in normalized and "--stocks-only" not in normalized and "--crypto-only" not in normalized:
+    if "scheduler/run_scan.py" in normalized and "--stocks-only" not in normalized and "--crypto-only" not in normalized:
         return "full_scan", "Full scan"
-    if "python3 scheduler/run_risk_check.py" in normalized:
+    if "scheduler/run_risk_check.py" in normalized:
         return "risk_check", "Risk check"
-    if "python3 scheduler/run_report.py --weekly" in normalized:
+    if "scheduler/run_report.py" in normalized and "--weekly" in normalized:
         return "weekly_report", "Weekly report"
-    if "python3 scheduler/run_report.py" in normalized and "--weekly" not in normalized:
+    if "scheduler/run_report.py" in normalized and "--weekly" not in normalized:
         return "daily_report", "Daily report"
     return None
 
