@@ -85,7 +85,7 @@ file is a readable reliability roadmap.
   - Action: Provide systemd service/timer templates for scans, risk checks, reports, health checks, and secret loading.
   - Done when: EC2 deployment can run through systemd with `After=network-online.target`, secret dependency checks, and journal logs.
 
-- [ ] Persist health snapshots.
+- [x] Persist health snapshots.
   - Problem: Health reports are overwritten, making trend/debug history harder.
   - Action: Save timestamped health JSON/HTML snapshots and keep a short retention window.
   - Done when: Recent health history can be inspected without preserving all runtime logs.

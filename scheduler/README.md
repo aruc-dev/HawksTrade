@@ -188,6 +188,11 @@ and `[NOK]` so it stays readable in cron logs and copied output. The HTML report
 includes the generation time, the active lookback window, and troubleshooting
 sections for the latest warnings and errors.
 
+Each run also writes timestamped HTML and JSON snapshots to
+`reports/health_snapshots/` by default. Use `--snapshot-dir` to change the
+location, `--snapshot-retention-days` to change the default 14-day pruning
+window, or `--no-snapshot` for ad-hoc runs that should not persist history.
+
 The health checker also writes an alert state file to
 `reports/alerts/health_alert_latest.txt`. When overall health is `[NOK]`, it
 writes a timestamped alert file in the same directory. Set

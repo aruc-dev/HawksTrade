@@ -14,7 +14,15 @@ class CheckHealthLinuxTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
 
-    def _sample_report(self, *, overall_status="green", job_health=None, log_errors=None, price_failures=None):
+    def _sample_report(
+        self,
+        *,
+        overall_status="green",
+        job_health=None,
+        log_errors=None,
+        log_warnings=None,
+        price_failures=None,
+    ):
         generated_at = datetime(2026, 4, 17, 18, 5, 0)
         return health.HealthReport(
             generated_at=generated_at,
@@ -42,7 +50,7 @@ class CheckHealthLinuxTests(unittest.TestCase):
                 "total_pnl_dollars": 0.0,
             },
             log_errors=log_errors or [],
-            log_warnings=[],
+            log_warnings=log_warnings or [],
             price_failures=price_failures or [],
             html_output=Path("/tmp/health.html"),
         )
@@ -488,6 +496,72 @@ PATH=/usr/local/bin:/usr/bin:/bin
             self.assertIsNone(result.event_path)
             self.assertTrue(result.latest_path.exists())
             self.assertIn("No active health alert.", result.latest_path.read_text(encoding="utf-8"))
+
+    def test_write_health_snapshots_creates_html_json_and_prunes_old_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            snapshot_dir = Path(tmp)
+            self._write(snapshot_dir / "health_20260401T000000.html", "old html")
+            self._write(snapshot_dir / "health_20260401T000000.json", "{}")
+            self._write(snapshot_dir / "health_20260416T000000.json", "{}")
+            report = self._sample_report(overall_status="yellow")
+
+            result = health.write_health_snapshots(report, snapshot_dir=tmp, retention_days=7)
+
+            self.assertTrue(result.html_path.exists())
+            self.assertTrue(result.json_path.exists())
+            self.assertFalse((snapshot_dir / "health_20260401T000000.html").exists())
+            self.assertFalse((snapshot_dir / "health_20260401T000000.json").exists())
+            self.assertTrue((snapshot_dir / "health_20260416T000000.json").exists())
+            self.assertEqual(len(result.deleted_paths), 2)
+            self.assertIn("Linux Health Check", result.html_path.read_text(encoding="utf-8"))
+            payload = health.json.loads(result.json_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["overall_status"], "yellow")
+            self.assertEqual(payload["alpaca"]["open_position_count"], 0)
+            self.assertEqual(payload["lookback_hours"], 4.0)
+
+    def test_prune_health_snapshots_zero_retention_disables_deletion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            snapshot_dir = Path(tmp)
+            old_path = snapshot_dir / "health_20260401T000000.json"
+            self._write(old_path, "{}")
+
+            deleted = health.prune_health_snapshots(
+                snapshot_dir,
+                now=datetime(2026, 4, 17, 18, 5, 0),
+                retention_days=0,
+            )
+
+            self.assertEqual(deleted, [])
+            self.assertTrue(old_path.exists())
+
+    def test_health_report_to_dict_serializes_findings_and_jobs(self):
+        job = health.JobHealth(
+            key="risk_check",
+            label="Risk check",
+            schedule_lines=["0,15,30,45 * * * *"],
+            last_run_at=datetime(2026, 4, 17, 18, 0, 0),
+            last_success_at=datetime(2026, 4, 17, 18, 0, 0),
+            last_duration=timedelta(seconds=5),
+            missed_runs=0,
+            expected_runs=1,
+            status="green",
+        )
+        finding = health.LogFinding(
+            timestamp=datetime(2026, 4, 17, 18, 1, 0),
+            level="ERROR",
+            logger="run_scan",
+            message="boom",
+            source_file=Path("scan.log"),
+            raw="raw",
+        )
+        report = self._sample_report(job_health=[job], log_errors=[finding])
+
+        payload = health.health_report_to_dict(report)
+
+        self.assertEqual(payload["job_health"][0]["last_duration_s"], 5.0)
+        self.assertEqual(payload["job_health"][0]["last_run_at"], "2026-04-17T18:00:00")
+        self.assertEqual(payload["log_errors"][0]["message"], "boom")
+        self.assertEqual(payload["html_output"], "/tmp/health.html")
 
     def test_fetch_alpaca_state_reconciles_before_trade_log_snapshot(self):
         from core import alpaca_client as ac

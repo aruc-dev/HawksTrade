@@ -49,6 +49,8 @@ LOG_DIR = BASE_DIR / CFG["reporting"]["logs_dir"]
 REPORTS_DIR = BASE_DIR / CFG["reporting"]["reports_dir"]
 DEFAULT_HTML_OUTPUT = REPORTS_DIR / "health_check_linux.html"
 DEFAULT_ALERT_DIR = REPORTS_DIR / "alerts"
+DEFAULT_SNAPSHOT_DIR = REPORTS_DIR / "health_snapshots"
+DEFAULT_SNAPSHOT_RETENTION_DAYS = 14.0
 DEFAULT_PRICE_FAILURE_STATE_FILE = BASE_DIR / "data" / "price_fetch_failures.json"
 DEFAULT_PRICE_FAILURE_ALERT_THRESHOLD = 3
 DEFAULT_CRON_FILES = {
@@ -224,6 +226,13 @@ class AlertResult:
     webhook_error: str | None = None
 
 
+@dataclass(frozen=True)
+class SnapshotResult:
+    html_path: Path
+    json_path: Path
+    deleted_paths: list[Path]
+
+
 # ── Cron parsing ─────────────────────────────────────────────────────────────
 
 
@@ -237,6 +246,7 @@ LOG_LINE_RE = re.compile(
 )
 
 RUN_MARKER_RE = re.compile(r"^(?P<event>RUN_START|RUN_END)\s+(?P<fields>.*)$")
+HEALTH_SNAPSHOT_RE = re.compile(r"^health_(?P<stamp>\d{8}T\d{6})\.(?:html|json)$")
 TRUTHY_VALUES = {"1", "true", "yes", "on", "y"}
 
 
@@ -2152,6 +2162,161 @@ def write_html_report(report: HealthReport) -> Path:
     return report.html_output
 
 
+# ── Health snapshots ────────────────────────────────────────────────────────
+
+
+def _dt_iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat()
+
+
+def _timedelta_seconds(value: timedelta | None) -> float | None:
+    if value is None:
+        return None
+    return round(value.total_seconds(), 3)
+
+
+def _finding_to_dict(finding: LogFinding) -> dict:
+    return {
+        "timestamp": _dt_iso(finding.timestamp),
+        "level": finding.level,
+        "logger": finding.logger,
+        "message": finding.message,
+        "source_file": str(finding.source_file),
+        "raw": finding.raw,
+    }
+
+
+def _job_health_to_dict(job: JobHealth) -> dict:
+    return {
+        "key": job.key,
+        "label": job.label,
+        "schedule_lines": job.schedule_lines,
+        "last_run_at": _dt_iso(job.last_run_at),
+        "last_success_at": _dt_iso(job.last_success_at),
+        "last_duration_s": _timedelta_seconds(job.last_duration),
+        "missed_runs": job.missed_runs,
+        "expected_runs": job.expected_runs,
+        "status": job.status,
+        "latest_note": job.latest_note,
+    }
+
+
+def _price_failure_to_dict(failure: PriceFailureState) -> dict:
+    return {
+        "symbol": failure.symbol,
+        "price_symbol": failure.price_symbol,
+        "asset_class": failure.asset_class,
+        "count": failure.count,
+        "threshold": failure.threshold,
+        "last_failed_at": failure.last_failed_at,
+        "reason": failure.reason,
+        "error_category": failure.error_category,
+        "retryable": failure.retryable,
+        "status_code": failure.status_code,
+        "last_error": failure.last_error,
+        "status": failure.status,
+    }
+
+
+def health_report_to_dict(report: HealthReport) -> dict:
+    return {
+        "generated_at": _dt_iso(report.generated_at),
+        "lookback_hours": report.lookback_hours,
+        "cron_template": report.cron_template,
+        "cron_file": str(report.cron_file),
+        "local_timezone": report.local_timezone,
+        "overall_status": report.overall_status,
+        "html_output": str(report.html_output),
+        "alpaca": {
+            "connected": report.alpaca.connected,
+            "account_error": report.alpaca.account_error,
+            "positions_error": report.alpaca.positions_error,
+            "portfolio_value": report.alpaca.portfolio_value,
+            "cash": report.alpaca.cash,
+            "buying_power": report.alpaca.buying_power,
+            "open_position_count": report.alpaca.open_position_count,
+            "broker_positions": report.alpaca.broker_positions,
+            "trade_log_open_rows": report.alpaca.trade_log_open_rows,
+        },
+        "job_health": [_job_health_to_dict(job) for job in report.job_health],
+        "trade_summary": report.trade_summary,
+        "price_failures": [_price_failure_to_dict(failure) for failure in report.price_failures],
+        "log_errors": [_finding_to_dict(finding) for finding in report.log_errors],
+        "log_warnings": [_finding_to_dict(finding) for finding in report.log_warnings],
+    }
+
+
+def _health_snapshot_stamp(report: HealthReport) -> str:
+    return report.generated_at.strftime("%Y%m%dT%H%M%S")
+
+
+def _snapshot_timestamp(path: Path) -> datetime | None:
+    match = HEALTH_SNAPSHOT_RE.match(path.name)
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group("stamp"), "%Y%m%dT%H%M%S")
+    except ValueError:
+        return None
+
+
+def prune_health_snapshots(
+    snapshot_dir: str | Path,
+    *,
+    now: datetime,
+    retention_days: float = DEFAULT_SNAPSHOT_RETENTION_DAYS,
+) -> list[Path]:
+    if retention_days <= 0:
+        return []
+
+    snapshot_path = Path(snapshot_dir).expanduser().resolve()
+    if not snapshot_path.exists():
+        return []
+
+    cutoff = now - timedelta(days=retention_days)
+    deleted: list[Path] = []
+    for path in sorted(snapshot_path.glob("health_*.*")):
+        if not path.is_file():
+            continue
+        snapshot_time = _snapshot_timestamp(path)
+        if snapshot_time is None or snapshot_time >= cutoff:
+            continue
+        try:
+            path.unlink()
+            deleted.append(path)
+        except OSError:
+            continue
+    return deleted
+
+
+def write_health_snapshots(
+    report: HealthReport,
+    *,
+    snapshot_dir: str | Path = DEFAULT_SNAPSHOT_DIR,
+    retention_days: float = DEFAULT_SNAPSHOT_RETENTION_DAYS,
+) -> SnapshotResult:
+    snapshot_path = Path(snapshot_dir).expanduser().resolve()
+    snapshot_path.mkdir(parents=True, exist_ok=True)
+
+    stamp = _health_snapshot_stamp(report)
+    html_path = snapshot_path / f"health_{stamp}.html"
+    json_path = snapshot_path / f"health_{stamp}.json"
+
+    html_path.write_text(render_html_report(report), encoding="utf-8")
+    json_path.write_text(
+        json.dumps(health_report_to_dict(report), indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    deleted = prune_health_snapshots(
+        snapshot_path,
+        now=report.generated_at,
+        retention_days=retention_days,
+    )
+    return SnapshotResult(html_path=html_path, json_path=json_path, deleted_paths=deleted)
+
+
 # ── Alerting ────────────────────────────────────────────────────────────────
 
 
@@ -2283,6 +2448,16 @@ def send_alert_webhook(webhook_url: str, report: HealthReport, items: list[str])
         response.read()
 
 
+def _float_env(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
 # ── Command line interface ───────────────────────────────────────────────────
 
 
@@ -2321,6 +2496,22 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--html-output",
         default=str(DEFAULT_HTML_OUTPUT),
         help="Where to write the HTML dashboard",
+    )
+    parser.add_argument(
+        "--snapshot-dir",
+        default=str(DEFAULT_SNAPSHOT_DIR),
+        help="Directory for timestamped health HTML/JSON snapshots (default: reports/health_snapshots)",
+    )
+    parser.add_argument(
+        "--snapshot-retention-days",
+        type=float,
+        default=_float_env("HAWKSTRADE_HEALTH_SNAPSHOT_RETENTION_DAYS", DEFAULT_SNAPSHOT_RETENTION_DAYS),
+        help="Delete health snapshots older than this many days; use 0 to disable pruning (default: 14)",
+    )
+    parser.add_argument(
+        "--no-snapshot",
+        action="store_true",
+        help="Do not write timestamped health snapshots",
     )
     parser.add_argument(
         "--alert-dir",
@@ -2372,6 +2563,16 @@ def main(argv: list[str] | None = None) -> int:
     print(terminal)
     output_path = write_html_report(report)
     print(f"\nHTML report written to: {output_path}")
+
+    if not args.no_snapshot:
+        snapshot = write_health_snapshots(
+            report,
+            snapshot_dir=args.snapshot_dir,
+            retention_days=args.snapshot_retention_days,
+        )
+        print(f"Health snapshots written to: {snapshot.html_path} and {snapshot.json_path}")
+        if snapshot.deleted_paths:
+            print(f"Health snapshot retention deleted {len(snapshot.deleted_paths)} old file(s).")
 
     if not args.no_alert:
         alert_items = collect_alert_items(report, alert_on=args.alert_on)

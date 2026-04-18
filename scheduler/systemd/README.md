@@ -111,5 +111,8 @@ sudo systemctl disable --now 'hawkstrade-*.timer'
   preflight checks, and the shared trade-mutation lock.
 - The health-check service uses `.venv/bin/python`, then `.venv/bin/python3`,
   then `python3` as a fallback.
+- Health checks write timestamped HTML/JSON snapshots to
+  `reports/health_snapshots/`. Set `HAWKSTRADE_HEALTH_SNAPSHOT_RETENTION_DAYS`
+  in `/etc/hawkstrade/hawkstrade.env` to adjust retention.
 - Keep `HAWKSTRADE_REQUIRE_SHM=1` enabled on EC2 so missing RAM secrets fail
   closed instead of falling back to disk dotenv files.
