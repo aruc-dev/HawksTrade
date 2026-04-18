@@ -6,12 +6,18 @@ Thread-safe via file locking.
 """
 
 import csv
+import contextlib
 import logging
-import os
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable
+from typing import Dict, Iterable, Iterator
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback
+    fcntl = None
+    import msvcrt
 
 import yaml
 
@@ -90,47 +96,86 @@ COLUMNS = [
 ]
 
 
-def _ensure_file():
-    TRADE_LOG.parent.mkdir(parents=True, exist_ok=True)
-    if not TRADE_LOG.exists():
-        with open(TRADE_LOG, "w", newline="") as f:
+def _lock_path(path: Path) -> Path:
+    return path.with_name(f"{path.name}.lock")
+
+
+def _lock_file(lock_file, exclusive: bool):
+    if fcntl is not None:
+        operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+        fcntl.flock(lock_file.fileno(), operation)
+    else:  # pragma: no cover - Windows fallback
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+
+
+def _unlock_file(lock_file):
+    if fcntl is not None:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    else:  # pragma: no cover - Windows fallback
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+@contextlib.contextmanager
+def locked_trade_log(path: Path | None = None, *, exclusive: bool = True) -> Iterator[Path]:
+    """
+    Hold the advisory cross-process lock used for trades.csv access.
+
+    Every runtime reader/writer of trades.csv should use this context so append
+    and rewrite operations cannot interleave with report/health reads.
+    """
+    trade_log_path = Path(path or TRADE_LOG)
+    trade_log_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = _lock_path(trade_log_path)
+    with open(lock_path, "a+b") as lock_file:
+        _lock_file(lock_file, exclusive=exclusive)
+        try:
+            yield trade_log_path
+        finally:
+            _unlock_file(lock_file)
+
+
+def _ensure_file(path: Path | None = None):
+    trade_log_path = Path(path or TRADE_LOG)
+    trade_log_path.parent.mkdir(parents=True, exist_ok=True)
+    if not trade_log_path.exists():
+        with open(trade_log_path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=COLUMNS)
             writer.writeheader()
-        log.info(f"Trade log created: {TRADE_LOG}")
+        log.info(f"Trade log created: {trade_log_path}")
+
+
+def _read_rows_unlocked(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    with open(path, "r") as f:
+        return list(csv.DictReader(f))
+
+
+def read_trade_rows(path: Path | None = None) -> list[dict]:
+    """Return all trade-log rows under a shared file lock."""
+    with locked_trade_log(path, exclusive=False) as trade_log_path:
+        return _read_rows_unlocked(trade_log_path)
 
 
 def log_trade(trade: Dict):
     """Append a single trade row to trades.csv."""
-    _ensure_file()
     row = {col: trade.get(col, "") for col in COLUMNS}
-    with open(TRADE_LOG, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=COLUMNS)
-        writer.writerow(row)
+    with locked_trade_log(exclusive=True) as trade_log_path:
+        _ensure_file(trade_log_path)
+        with open(trade_log_path, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=COLUMNS)
+            writer.writerow(row)
     log.info(f"Trade logged: {row['side'].upper()} {row['symbol']} | {row['strategy']}")
 
 
 def get_open_trades() -> list:
     """Return all trades with status='open'."""
-    _ensure_file()
-    open_trades = []
-    with open(TRADE_LOG, "r") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if row.get("status") == "open":
-                open_trades.append(row)
-    return open_trades
+    return [row for row in read_trade_rows() if row.get("status") == "open"]
 
 
 def get_closed_trades() -> list:
     """Return all closed trades from the trade log CSV."""
-    _ensure_file()
-    trades = []
-    with open(TRADE_LOG, "r") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if row.get("status") == "closed":
-                trades.append(row)
-    return trades
+    return [row for row in read_trade_rows() if row.get("status") == "closed"]
 
 
 def mark_trade_closed(
@@ -148,62 +193,59 @@ def mark_trade_closed(
     data/trades.csv stays aligned with the broker position.
     Rewrites the CSV (safe for small files).
     """
-    _ensure_file()
+    with locked_trade_log(exclusive=True) as trade_log_path:
+        rows = _read_rows_unlocked(trade_log_path)
 
-    with open(TRADE_LOG, "r") as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
+        remaining = _to_decimal(closed_qty) if closed_qty is not None else None
+        if remaining is not None and remaining <= QTY_EPSILON:
+            log.warning(f"Trade close ignored for {symbol}: closed_qty={closed_qty}")
+            return False
 
-    remaining = _to_decimal(closed_qty) if closed_qty is not None else None
-    if remaining is not None and remaining <= QTY_EPSILON:
-        log.warning(f"Trade close ignored for {symbol}: closed_qty={closed_qty}")
-        return False
+        updated = False
+        partial_close_logged = False  # set True when a partial exit log is emitted
+        for row in reversed(rows):
+            if not (
+                _symbols_match(row.get("symbol", ""), symbol)
+                and row.get("status") == "open"
+                and row.get("side") == "buy"
+            ):
+                continue
 
-    updated = False
-    partial_close_logged = False  # set True when a partial exit log is emitted
-    for row in reversed(rows):
-        if not (
-            _symbols_match(row.get("symbol", ""), symbol)
-            and row.get("status") == "open"
-            and row.get("side") == "buy"
-        ):
-            continue
-
-        if remaining is None:
-            _close_row(row, exit_price, pnl_pct, reason)
-            updated = True
-            break
-
-        open_qty = _to_decimal(row.get("qty"), Decimal("0")) or Decimal("0")
-        if open_qty <= QTY_EPSILON:
-            _close_row(row, exit_price, pnl_pct, reason)
-            updated = True
-            continue
-
-        if remaining + QTY_EPSILON >= open_qty:
-            _close_row(row, exit_price, pnl_pct, reason)
-            remaining -= open_qty
-            updated = True
-            if remaining <= QTY_EPSILON:
+            if remaining is None:
+                _close_row(row, exit_price, pnl_pct, reason)
+                updated = True
                 break
-        else:
-            residual_qty = open_qty - remaining
-            row["qty"] = _fmt_decimal(residual_qty)
-            _clear_exit_fields(row)
-            updated = True
-            log.info(
-                f"Trade partially closed: {symbol} | closed_qty={_fmt_decimal(remaining)} "
-                f"| remaining_qty={row['qty']} | reason={reason}"
-            )
-            partial_close_logged = True
-            remaining = Decimal("0")
-            break
 
-    if updated:
-        with open(TRADE_LOG, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=COLUMNS)
-            writer.writeheader()
-            writer.writerows(rows)
+            open_qty = _to_decimal(row.get("qty"), Decimal("0")) or Decimal("0")
+            if open_qty <= QTY_EPSILON:
+                _close_row(row, exit_price, pnl_pct, reason)
+                updated = True
+                continue
+
+            if remaining + QTY_EPSILON >= open_qty:
+                _close_row(row, exit_price, pnl_pct, reason)
+                remaining -= open_qty
+                updated = True
+                if remaining <= QTY_EPSILON:
+                    break
+            else:
+                residual_qty = open_qty - remaining
+                row["qty"] = _fmt_decimal(residual_qty)
+                _clear_exit_fields(row)
+                updated = True
+                log.info(
+                    f"Trade partially closed: {symbol} | closed_qty={_fmt_decimal(remaining)} "
+                    f"| remaining_qty={row['qty']} | reason={reason}"
+                )
+                partial_close_logged = True
+                remaining = Decimal("0")
+                break
+
+        if updated:
+            with open(trade_log_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=COLUMNS)
+                writer.writeheader()
+                writer.writerows(rows)
 
     if not updated:
         log.warning(f"No open trade found to close for {symbol}")
@@ -227,132 +269,131 @@ def reconcile_open_trades_with_positions(positions: Iterable) -> dict:
     This repairs drift caused by submitted-but-unfilled exit orders or
     fractional fills. It does not place orders; it only rewrites trades.csv.
     """
-    _ensure_file()
-    with open(TRADE_LOG, "r") as f:
-        rows = list(csv.DictReader(f))
+    with locked_trade_log(exclusive=True) as trade_log_path:
+        rows = _read_rows_unlocked(trade_log_path)
 
-    summary = {
-        "positions": 0,
-        "updated_open_rows": 0,
-        "reopened_rows": 0,
-        "created_rows": 0,
-        "marked_unfilled_sells": 0,
-        "closed_stale_rows": 0,
-    }
+        summary = {
+            "positions": 0,
+            "updated_open_rows": 0,
+            "reopened_rows": 0,
+            "created_rows": 0,
+            "marked_unfilled_sells": 0,
+            "closed_stale_rows": 0,
+        }
 
-    broker_positions = [
-        p for p in positions
-        if _position_symbol(p) and _position_qty(p).copy_abs() > QTY_EPSILON
-    ]
-    summary["positions"] = len(broker_positions)
-    broker_symbols = {_position_symbol(p).replace("/", "").upper() for p in broker_positions}
-
-    for pos in broker_positions:
-        broker_symbol = _position_symbol(pos)
-        broker_qty = _position_qty(pos).copy_abs()
-        broker_entry = _position_entry_price(pos)
-        asset_class = _position_asset_class(pos)
-
-        matching_rows = [
-            (idx, row) for idx, row in enumerate(rows)
-            if _symbols_match(row.get("symbol", ""), broker_symbol)
+        broker_positions = [
+            p for p in positions
+            if _position_symbol(p) and _position_qty(p).copy_abs() > QTY_EPSILON
         ]
-        open_buy_rows = [
-            (idx, row) for idx, row in matching_rows
-            if row.get("status") == "open" and row.get("side") == "buy"
-        ]
-        buy_rows = [
-            (idx, row) for idx, row in matching_rows
-            if row.get("side") == "buy"
-        ]
+        summary["positions"] = len(broker_positions)
+        broker_symbols = {_position_symbol(p).replace("/", "").upper() for p in broker_positions}
 
-        if open_buy_rows:
-            keep_idx, keep_row = open_buy_rows[-1]
-            keep_row["qty"] = _fmt_decimal(broker_qty)
-            if broker_entry is not None:
-                keep_row["entry_price"] = _fmt_decimal(broker_entry)
-            keep_row["asset_class"] = asset_class or keep_row.get("asset_class", "")
-            _clear_exit_fields(keep_row)
-            summary["updated_open_rows"] += 1
+        for pos in broker_positions:
+            broker_symbol = _position_symbol(pos)
+            broker_qty = _position_qty(pos).copy_abs()
+            broker_entry = _position_entry_price(pos)
+            asset_class = _position_asset_class(pos)
 
-            for idx, row in open_buy_rows[:-1]:
+            matching_rows = [
+                (idx, row) for idx, row in enumerate(rows)
+                if _symbols_match(row.get("symbol", ""), broker_symbol)
+            ]
+            open_buy_rows = [
+                (idx, row) for idx, row in matching_rows
+                if row.get("status") == "open" and row.get("side") == "buy"
+            ]
+            buy_rows = [
+                (idx, row) for idx, row in matching_rows
+                if row.get("side") == "buy"
+            ]
+
+            if open_buy_rows:
+                keep_idx, keep_row = open_buy_rows[-1]
+                keep_row["qty"] = _fmt_decimal(broker_qty)
+                if broker_entry is not None:
+                    keep_row["entry_price"] = _fmt_decimal(broker_entry)
+                keep_row["asset_class"] = asset_class or keep_row.get("asset_class", "")
+                _clear_exit_fields(keep_row)
+                summary["updated_open_rows"] += 1
+
+                for idx, row in open_buy_rows[:-1]:
+                    _close_row(
+                        row,
+                        float(broker_entry or _to_decimal(row.get("entry_price"), Decimal("0")) or 0),
+                        0.0,
+                        "broker reconciliation: consolidated duplicate open row",
+                    )
+                    summary["closed_stale_rows"] += 1
+                continue
+
+            if buy_rows:
+                buy_idx, buy_row = buy_rows[-1]
+                original_qty = _to_decimal(buy_row.get("qty"), broker_qty) or broker_qty
+                buy_row["qty"] = _fmt_decimal(broker_qty)
+                if broker_entry is not None:
+                    buy_row["entry_price"] = _fmt_decimal(broker_entry)
+                buy_row["asset_class"] = asset_class or buy_row.get("asset_class", "")
+                _clear_exit_fields(buy_row)
+                summary["reopened_rows"] += 1
+
+                implied_sold_qty = original_qty - broker_qty
+                if implied_sold_qty < Decimal("0"):
+                    implied_sold_qty = Decimal("0")
+                remaining_sold_qty = implied_sold_qty
+                for _, sell_row in [
+                    (idx, row) for idx, row in matching_rows
+                    if idx > buy_idx and row.get("side") == "sell" and row.get("status") == "closed"
+                ]:
+                    sell_qty = _to_decimal(sell_row.get("qty"), Decimal("0")) or Decimal("0")
+                    if remaining_sold_qty + QTY_EPSILON >= sell_qty:
+                        remaining_sold_qty -= sell_qty
+                        continue
+                    sell_row["status"] = "submitted"
+                    sell_row["pnl_pct"] = ""
+                    sell_row["exit_reason"] = "broker reconciliation: exit order not fully filled"
+                    summary["marked_unfilled_sells"] += 1
+                continue
+
+            now = _utc_now().isoformat()
+            display_symbol = broker_symbol
+            if asset_class == "crypto" and "/" not in display_symbol and display_symbol.endswith("USD"):
+                display_symbol = f"{display_symbol[:-3]}/USD"
+            rows.append({
+                "timestamp": now,
+                "mode": CFG.get("mode", ""),
+                "symbol": display_symbol,
+                "strategy": "broker_reconciliation",
+                "asset_class": asset_class,
+                "side": "buy",
+                "qty": _fmt_decimal(broker_qty),
+                "entry_price": _fmt_decimal(broker_entry or Decimal("0")),
+                "exit_price": "",
+                "stop_loss": "",
+                "take_profit": "",
+                "pnl_pct": "",
+                "exit_reason": "",
+                "order_id": "BROKER-RECONCILE",
+                "status": "open",
+            })
+            summary["created_rows"] += 1
+
+        for row in rows:
+            if row.get("status") != "open" or row.get("side") != "buy":
+                continue
+            normalized = str(row.get("symbol", "")).replace("/", "").upper()
+            if normalized and normalized not in broker_symbols:
                 _close_row(
                     row,
-                    float(broker_entry or _to_decimal(row.get("entry_price"), Decimal("0")) or 0),
+                    float(_to_decimal(row.get("entry_price"), Decimal("0")) or 0),
                     0.0,
-                    "broker reconciliation: consolidated duplicate open row",
+                    "broker reconciliation: no broker position",
                 )
                 summary["closed_stale_rows"] += 1
-            continue
 
-        if buy_rows:
-            buy_idx, buy_row = buy_rows[-1]
-            original_qty = _to_decimal(buy_row.get("qty"), broker_qty) or broker_qty
-            buy_row["qty"] = _fmt_decimal(broker_qty)
-            if broker_entry is not None:
-                buy_row["entry_price"] = _fmt_decimal(broker_entry)
-            buy_row["asset_class"] = asset_class or buy_row.get("asset_class", "")
-            _clear_exit_fields(buy_row)
-            summary["reopened_rows"] += 1
-
-            implied_sold_qty = original_qty - broker_qty
-            if implied_sold_qty < Decimal("0"):
-                implied_sold_qty = Decimal("0")
-            remaining_sold_qty = implied_sold_qty
-            for _, sell_row in [
-                (idx, row) for idx, row in matching_rows
-                if idx > buy_idx and row.get("side") == "sell" and row.get("status") == "closed"
-            ]:
-                sell_qty = _to_decimal(sell_row.get("qty"), Decimal("0")) or Decimal("0")
-                if remaining_sold_qty + QTY_EPSILON >= sell_qty:
-                    remaining_sold_qty -= sell_qty
-                    continue
-                sell_row["status"] = "submitted"
-                sell_row["pnl_pct"] = ""
-                sell_row["exit_reason"] = "broker reconciliation: exit order not fully filled"
-                summary["marked_unfilled_sells"] += 1
-            continue
-
-        now = _utc_now().isoformat()
-        display_symbol = broker_symbol
-        if asset_class == "crypto" and "/" not in display_symbol and display_symbol.endswith("USD"):
-            display_symbol = f"{display_symbol[:-3]}/USD"
-        rows.append({
-            "timestamp": now,
-            "mode": CFG.get("mode", ""),
-            "symbol": display_symbol,
-            "strategy": "broker_reconciliation",
-            "asset_class": asset_class,
-            "side": "buy",
-            "qty": _fmt_decimal(broker_qty),
-            "entry_price": _fmt_decimal(broker_entry or Decimal("0")),
-            "exit_price": "",
-            "stop_loss": "",
-            "take_profit": "",
-            "pnl_pct": "",
-            "exit_reason": "",
-            "order_id": "BROKER-RECONCILE",
-            "status": "open",
-        })
-        summary["created_rows"] += 1
-
-    for row in rows:
-        if row.get("status") != "open" or row.get("side") != "buy":
-            continue
-        normalized = str(row.get("symbol", "")).replace("/", "").upper()
-        if normalized and normalized not in broker_symbols:
-            _close_row(
-                row,
-                float(_to_decimal(row.get("entry_price"), Decimal("0")) or 0),
-                0.0,
-                "broker reconciliation: no broker position",
-            )
-            summary["closed_stale_rows"] += 1
-
-    with open(TRADE_LOG, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=COLUMNS)
-        writer.writeheader()
-        writer.writerows(rows)
+        with open(trade_log_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=COLUMNS)
+            writer.writeheader()
+            writer.writerows(rows)
 
     log.info(f"Trade log reconciliation complete: {summary}")
     return summary
@@ -360,7 +401,6 @@ def reconcile_open_trades_with_positions(positions: Iterable) -> dict:
 
 def get_trade_age_days(symbol: str) -> float:
     """Return how many calendar days ago the most recent open trade was entered."""
-    _ensure_file()
     entries = [
         row for row in get_open_trades()
         if row["symbol"] == symbol and row["side"] == "buy"

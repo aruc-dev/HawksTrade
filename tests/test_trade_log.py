@@ -1,4 +1,5 @@
 import csv
+import multiprocessing
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -6,6 +7,26 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from tracking import trade_log
+
+
+def _concurrent_log_worker(args):
+    path, worker_id, count = args
+    from tracking import trade_log as worker_trade_log
+
+    worker_trade_log.TRADE_LOG = Path(path)
+    for idx in range(count):
+        worker_trade_log.log_trade({
+            "timestamp": f"2026-04-17T12:{worker_id:02d}:{idx:02d}+00:00",
+            "mode": "paper",
+            "symbol": f"T{worker_id}",
+            "strategy": "concurrency_test",
+            "asset_class": "stock",
+            "side": "buy",
+            "qty": 1,
+            "entry_price": 100 + idx,
+            "order_id": f"{worker_id}-{idx}",
+            "status": "open",
+        })
 
 
 class TradeLogTests(unittest.TestCase):
@@ -203,6 +224,33 @@ class TradeLogTests(unittest.TestCase):
 
         self.assertGreater(age, 1.9)
         self.assertLess(age, 2.1)
+
+    def test_log_trade_preserves_rows_with_concurrent_process_writers(self):
+        worker_count = 4
+        rows_per_worker = 25
+        ctx = multiprocessing.get_context("spawn")
+        processes = [
+            ctx.Process(
+                target=_concurrent_log_worker,
+                args=((str(trade_log.TRADE_LOG), worker_id, rows_per_worker),),
+            )
+            for worker_id in range(worker_count)
+        ]
+
+        for process in processes:
+            process.start()
+        for process in processes:
+            process.join(timeout=15)
+
+        for process in processes:
+            self.assertEqual(process.exitcode, 0)
+
+        rows = trade_log.read_trade_rows()
+        order_ids = {row["order_id"] for row in rows}
+
+        self.assertEqual(len(rows), worker_count * rows_per_worker)
+        self.assertEqual(len(order_ids), worker_count * rows_per_worker)
+        self.assertTrue(trade_log.TRADE_LOG.with_name("trades.csv.lock").exists())
 
 
 if __name__ == "__main__":

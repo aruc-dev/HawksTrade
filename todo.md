@@ -16,7 +16,7 @@ file is a readable reliability roadmap.
   - Action: Add a Linux runner wrapper using `flock`, and update cron templates to run scans/risk checks through it.
   - Done when: At most one scan/risk process can place or close orders at a time.
 
-- [ ] Protect `data/trades.csv` with file locking.
+- [x] Protect `data/trades.csv` with file locking.
   - Problem: Trade-log appends and rewrites are not guarded against concurrent writes.
   - Action: Add `fcntl.flock` or an equivalent lock around all trade-log reads/writes.
   - Done when: Concurrent scan/risk/report processes cannot corrupt or lose trade-log updates.
