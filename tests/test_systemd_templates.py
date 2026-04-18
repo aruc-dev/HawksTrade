@@ -107,7 +107,7 @@ class SystemdTemplateTests(unittest.TestCase):
             "hawkstrade-risk-check.timer": "OnCalendar=Mon..Fri *-*-* 13:45:00",
             "hawkstrade-daily-report.timer": "OnCalendar=Mon..Fri *-*-* 20:30:00",
             "hawkstrade-weekly-report.timer": "OnCalendar=Mon *-*-* 12:00:00",
-            "hawkstrade-health-check.timer": "OnCalendar=*:0/15",
+            "hawkstrade-health-check.timer": "OnCalendar=*-*-* *:00/15:00",
         }
 
         for timer_name, calendar_line in expected_calendar.items():
