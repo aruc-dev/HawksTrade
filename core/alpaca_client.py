@@ -39,9 +39,10 @@ if MODE not in {"paper", "live"}:
     raise ValueError("config mode must be 'paper' or 'live'")
 
 # Load secrets based on secrets_source setting in config.yaml:
-#   "local" (default) — load from config/.env then .env (original behaviour)
-#   "shm"             — load from /dev/shm/.hawkstrade.env (EC2; written at
-#                       boot by scripts/fetch_secrets.sh, never touches disk)
+#   "local" — load from config/.env then .env (original behaviour)
+#   "shm"   — load from /dev/shm/.hawkstrade.env when present; if the shared
+#            memory file is missing, fall back to the local .env files so
+#            imports and test runs still work out of the box.
 _raw_secrets_source = CFG.get("secrets_source", "local")
 if not isinstance(_raw_secrets_source, str):
     raise ValueError("config secrets_source must be a string: 'local' or 'shm'")
@@ -51,12 +52,15 @@ if _SECRETS_SOURCE not in {"local", "shm"}:
 
 if _SECRETS_SOURCE == "shm":
     _SHM_ENV = Path("/dev/shm/.hawkstrade.env")
-    if not _SHM_ENV.exists():
-        raise EnvironmentError(
-            "secrets_source is 'shm' but /dev/shm/.hawkstrade.env does not exist. "
-            "Run scripts/fetch_secrets.sh first (or ensure the systemd boot unit ran)."
-        )
-    load_dotenv(_SHM_ENV)
+    if _SHM_ENV.exists():
+        load_dotenv(_SHM_ENV)
+    else:
+        # Fall back to local dotenv files if the shm secret file is missing.
+        # This keeps imports safe on CI and developer machines while still
+        # allowing EC2 to prefer shm when the boot-time secret loader ran.
+        _SECRETS_SOURCE = "local"
+        load_dotenv(BASE_DIR / "config" / ".env")
+        load_dotenv(BASE_DIR / ".env", override=True)
 else:
     # Default local behaviour: config/.env, then .env (root overrides)
     load_dotenv(BASE_DIR / "config" / ".env")

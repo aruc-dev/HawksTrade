@@ -21,6 +21,7 @@ import yaml
 from core import alpaca_client as ac
 from core import risk_manager as rm
 from core import order_executor as oe
+from core.run_markers import RunScope, run_scope
 from core.logging_config import runtime_log_handlers
 from tracking.trade_log import get_open_trades
 
@@ -58,13 +59,15 @@ def _find_matching_trade(symbol: str, open_trades: list) -> dict | None:
     return None
 
 
-def run(dry_run: bool = False):
+def run(dry_run: bool = False, marker: RunScope | None = None):
     log.info(f"--- Risk Check | dry_run={'ON' if dry_run else 'OFF'} ---")
 
     # --- Daily loss limit check ---
     try:
         loss_exceeded = rm.daily_loss_exceeded()
     except Exception as e:
+        if marker is not None:
+            marker.mark_error(stage="daily_loss_check", error_type=type(e).__name__)
         log.error(f"Daily loss check failed; skipping risk check: {e}", exc_info=True)
         return
 
@@ -88,6 +91,8 @@ def run(dry_run: bool = False):
             oe.exit_position(exit_symbol, reason="Daily loss limit — emergency close",
                              asset_class=asset_class, dry_run=dry_run)
         log.warning("All positions closed. Bot will not trade again today.")
+        if marker is not None:
+            marker.mark_status("ok", outcome="emergency_close")
         return
 
     # --- Per-position stop-loss / take-profit check ---
@@ -95,6 +100,8 @@ def run(dry_run: bool = False):
     try:
         positions = ac.get_all_positions()
     except Exception as e:
+        if marker is not None:
+            marker.mark_error(stage="fetch_positions", error_type=type(e).__name__)
         log.error(f"Could not fetch positions for risk check: {e}", exc_info=True)
         return
 
@@ -144,6 +151,8 @@ def run(dry_run: bool = False):
                      f"P&L={pnl:+.2%} — HOLD")
 
     log.info("Risk check complete.")
+    if marker is not None:
+        marker.mark_status("ok", outcome="completed")
 
 
 if __name__ == "__main__":
@@ -151,4 +160,9 @@ if __name__ == "__main__":
     parser.add_argument("--dry-run", action="store_true",
                         help="Log intended exits without submitting orders")
     args = parser.parse_args()
-    run(dry_run=args.dry_run)
+    with run_scope(
+        log,
+        "run_risk_check",
+        dry_run="ON" if args.dry_run else "OFF",
+    ) as marker:
+        run(dry_run=args.dry_run, marker=marker)

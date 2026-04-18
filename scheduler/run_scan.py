@@ -33,6 +33,7 @@ from core import alpaca_client as ac
 from core import order_executor as oe
 from core import risk_manager as rm
 from core.exit_policy import should_exit_for_hold
+from core.run_markers import RunScope, run_scope
 from core.logging_config import runtime_log_handlers
 from core.portfolio import get_open_symbols, print_snapshot
 from tracking.trade_log import get_open_trades, get_trade_age_days
@@ -282,7 +283,12 @@ def _check_strategy_exits(strategies, open_symbols, dry_run: bool = False, skip_
 
 # ── Main Scan ─────────────────────────────────────────────────────────────────
 
-def run(run_stocks: bool = True, run_crypto: bool = True, dry_run: bool = False):
+def run(
+    run_stocks: bool = True,
+    run_crypto: bool = True,
+    dry_run: bool = False,
+    marker: RunScope | None = None,
+):
     log.info("=" * 55)
     log.info(f"HawksTrade scan started | mode={CFG['mode'].upper()} | "
              f"intraday={'ON' if INTRADAY_ON else 'OFF'} | "
@@ -293,6 +299,8 @@ def run(run_stocks: bool = True, run_crypto: bool = True, dry_run: bool = False)
         market_open  = ac.is_market_open()
         open_symbols = get_open_symbols()
     except Exception as e:
+        if marker is not None:
+            marker.mark_error(stage="initial_connection", error_type=type(e).__name__)
         log.error(f"Alpaca connection failed before scan; skipping run: {e}", exc_info=True)
         return
 
@@ -302,12 +310,16 @@ def run(run_stocks: bool = True, run_crypto: bool = True, dry_run: bool = False)
     try:
         loss_exceeded = rm.daily_loss_exceeded()
     except Exception as e:
+        if marker is not None:
+            marker.mark_error(stage="daily_loss_check", error_type=type(e).__name__)
         log.error(f"Daily loss check failed; skipping scan to avoid unsafe trading: {e}", exc_info=True)
         return
 
     if loss_exceeded:
         log.warning("Daily loss limit exceeded. No new trades will be placed today.")
         print_snapshot()
+        if marker is not None:
+            marker.mark_status("ok", outcome="halted_by_daily_loss_limit")
         return
 
     pending_entry_symbols = set() if dry_run else _pending_entry_symbols()
@@ -371,6 +383,8 @@ def run(run_stocks: bool = True, run_crypto: bool = True, dry_run: bool = False)
     try:
         open_symbols = get_open_symbols()  # refresh after entries
     except Exception as e:
+        if marker is not None:
+            marker.mark_error(stage="refresh_open_positions", error_type=type(e).__name__)
         log.error(f"Could not refresh open positions; skipping exit checks: {e}", exc_info=True)
         return
     skip_symbols = set() if INTRADAY_ON else new_entry_symbols
@@ -383,6 +397,8 @@ def run(run_stocks: bool = True, run_crypto: bool = True, dry_run: bool = False)
     # --- Print snapshot ---
     print_snapshot()
     log.info("Scan complete.")
+    if marker is not None:
+        marker.mark_status("ok", outcome="completed")
 
 
 # ── CLI Entry ─────────────────────────────────────────────────────────────────
@@ -399,4 +415,22 @@ if __name__ == "__main__":
 
     run_stocks = not args.crypto_only
     run_crypto = not args.stocks_only
-    run(run_stocks=run_stocks, run_crypto=run_crypto, dry_run=args.dry_run)
+    if run_stocks and run_crypto:
+        scan_kind = "full"
+    elif run_crypto:
+        scan_kind = "crypto"
+    elif run_stocks:
+        scan_kind = "stock"
+    else:
+        scan_kind = "unknown"
+    with run_scope(
+        log,
+        "run_scan",
+        mode=CFG["mode"].upper(),
+        intraday="ON" if INTRADAY_ON else "OFF",
+        dry_run="ON" if args.dry_run else "OFF",
+        run_stocks=run_stocks,
+        run_crypto=run_crypto,
+        scan_kind=scan_kind,
+    ) as marker:
+        run(run_stocks=run_stocks, run_crypto=run_crypto, dry_run=args.dry_run, marker=marker)

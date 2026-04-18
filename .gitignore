@@ -17,9 +17,8 @@ env/
 # Runtime artifacts
 logs/
 reports/
-data/*.csv
-data/*.json
-data/archive/
+data/
+local/
 
 # Local system files
 .DS_Store
