@@ -43,7 +43,7 @@ file is a readable reliability roadmap.
   - Action: Add a deployment guard such as `HAWKSTRADE_REQUIRE_SHM=1` that refuses local fallback on cloud.
   - Done when: EC2 fails clearly if RAM secrets are missing, stale, or unreadable.
 
-- [ ] Replace direct cron commands with a runtime wrapper.
+- [x] Replace direct cron commands with a runtime wrapper.
   - Problem: Cron uses `python3` directly and does not verify `.venv`, secrets, locks, or Alpaca connectivity first.
   - Action: Add `scripts/run_hawkstrade_job.sh` that activates `.venv`, checks secrets, checks connectivity, takes the lock, runs the job, and logs exit code.
   - Done when: All Linux cron entries use the wrapper and report clear preflight failures.

@@ -129,12 +129,14 @@ crontab scheduler/cron/hawkstrade-eastern.cron
 The Linux cron templates run scheduled jobs through
 `scripts/run_hawkstrade_job.sh`, so scan, risk-check, and report jobs use the
 same Python environment selection. The wrapper chooses `.venv` when available.
-It also uses a shared `flock` lock at `local/locks/trade-mutating-jobs.lock` for
-trade-mutating scan and risk-check jobs, so they cannot overlap while placing or
-closing orders. Full scans, stock scans, and risk checks wait up to 10 minutes
-for the lock; redundant `--crypto-only` runs skip when another trade-mutating
-job is already active. Report jobs use the same wrapper but do not take the
-trade-mutation lock.
+Before running the job, it verifies Alpaca credentials and connectivity with a
+broker clock call; failures are logged as `status=preflight_failed` and the job
+is not executed. It also uses a shared `flock` lock at
+`local/locks/trade-mutating-jobs.lock` for trade-mutating scan and risk-check
+jobs, so they cannot overlap while placing or closing orders. Full scans, stock
+scans, and risk checks wait up to 10 minutes for the lock; redundant
+`--crypto-only` runs skip when another trade-mutating job is already active.
+Report jobs use the same wrapper but do not take the trade-mutation lock.
 
 The Linux cron templates also set `HAWKSTRADE_REQUIRE_SHM=1`. When
 `config/config.yaml` uses `secrets_source: shm`, that environment guard makes
