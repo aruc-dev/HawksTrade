@@ -1,5 +1,8 @@
 import json
+import os
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -131,6 +134,73 @@ class RunRiskCheckTests(unittest.TestCase):
         self.assertEqual(marker.fields["stage"], "risk_exit")
         self.assertEqual(marker.fields["error_type"], "PendingExitOrderCheckFailed")
         self.assertEqual(marker.fields["blocked_exit_symbol"], "AAPL")
+
+    def test_repeated_price_fetch_failures_mark_run_unhealthy(self):
+        marker = FakeMarker()
+        position = SimpleNamespace(symbol="AAPL", avg_entry_price="100", asset_class="us_equity")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state_file = Path(tmp) / "price_failures.json"
+            env = {
+                **os.environ,
+                "HAWKSTRADE_PRICE_FAILURE_STATE_FILE": str(state_file),
+                "HAWKSTRADE_PRICE_FAILURE_ALERT_THRESHOLD": "2",
+            }
+            with (
+                patch.dict(os.environ, env, clear=True),
+                patch.object(run_risk_check.rm, "daily_loss_exceeded", return_value=False),
+                patch.object(run_risk_check, "get_open_trades", return_value=[]),
+                patch.object(run_risk_check.ac, "get_all_positions", return_value=[position]),
+                patch.object(
+                    run_risk_check.ac,
+                    "get_stock_latest_price",
+                    side_effect=[RuntimeError("quote timeout"), RuntimeError("quote timeout")],
+                ),
+                patch.object(run_risk_check.oe, "exit_position") as exit_position,
+            ):
+                run_risk_check.run(dry_run=True, marker=marker)
+                self.assertEqual(marker.status, "ok")
+                run_risk_check.run(dry_run=True, marker=marker)
+
+            exit_position.assert_not_called()
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+
+        self.assertEqual(marker.status, "error")
+        self.assertEqual(marker.fields["stage"], "price_fetch")
+        self.assertEqual(marker.fields["error_type"], "RepeatedPriceFetchFailure")
+        self.assertEqual(marker.fields["price_failure_symbol"], "AAPL")
+        self.assertEqual(marker.fields["price_failure_count"], 2)
+        self.assertEqual(state["symbols"]["AAPL"]["count"], 2)
+        self.assertEqual(state["symbols"]["AAPL"]["status"], "nok")
+
+    def test_successful_price_fetch_clears_previous_failure_count(self):
+        position = SimpleNamespace(symbol="AAPL", avg_entry_price="100", asset_class="us_equity")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state_file = Path(tmp) / "price_failures.json"
+            env = {
+                **os.environ,
+                "HAWKSTRADE_PRICE_FAILURE_STATE_FILE": str(state_file),
+                "HAWKSTRADE_PRICE_FAILURE_ALERT_THRESHOLD": "2",
+            }
+            with (
+                patch.dict(os.environ, env, clear=True),
+                patch.object(run_risk_check.rm, "daily_loss_exceeded", return_value=False),
+                patch.object(run_risk_check, "get_open_trades", return_value=[]),
+                patch.object(run_risk_check.ac, "get_all_positions", return_value=[position]),
+                patch.object(
+                    run_risk_check.ac,
+                    "get_stock_latest_price",
+                    side_effect=[RuntimeError("quote timeout"), 101.0],
+                ),
+                patch.object(run_risk_check.rm, "should_exit_position", return_value=(False, "Hold")),
+            ):
+                run_risk_check.run(dry_run=True)
+                run_risk_check.run(dry_run=True)
+
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+
+        self.assertEqual(state["symbols"], {})
 
 
 if __name__ == "__main__":

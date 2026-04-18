@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import argparse
 import html
+import json
+import os
 import re
 import shlex
 import sys
@@ -42,6 +44,8 @@ with open(CONFIG_PATH, "r", encoding="utf-8") as f:
 LOG_DIR = BASE_DIR / CFG["reporting"]["logs_dir"]
 REPORTS_DIR = BASE_DIR / CFG["reporting"]["reports_dir"]
 DEFAULT_HTML_OUTPUT = REPORTS_DIR / "health_check_linux.html"
+DEFAULT_PRICE_FAILURE_STATE_FILE = BASE_DIR / "data" / "price_fetch_failures.json"
+DEFAULT_PRICE_FAILURE_ALERT_THRESHOLD = 3
 DEFAULT_CRON_FILES = {
     "eastern": BASE_DIR / "scheduler" / "cron" / "hawkstrade-eastern.cron",
     "pacific": BASE_DIR / "scheduler" / "cron" / "hawkstrade-pacific.cron",
@@ -169,6 +173,25 @@ class AlpacaState:
         return len(self.trade_log_open_rows)
 
 
+@dataclass(frozen=True)
+class PriceFailureState:
+    symbol: str
+    price_symbol: str
+    asset_class: str
+    count: int
+    threshold: int
+    last_failed_at: str | None
+    reason: str
+    error_category: str
+    retryable: bool
+    status_code: int | None
+    last_error: str
+
+    @property
+    def status(self) -> str:
+        return "red" if self.count >= self.threshold else "yellow"
+
+
 @dataclass
 class HealthReport:
     generated_at: datetime
@@ -182,6 +205,7 @@ class HealthReport:
     trade_summary: dict
     log_errors: list[LogFinding]
     log_warnings: list[LogFinding]
+    price_failures: list[PriceFailureState]
     html_output: Path
 
 
@@ -821,7 +845,9 @@ def load_runtime_records(log_dir: Path) -> dict[str, object]:
     structured_risk_records = [r for r in structured_records if r.job_key == "risk_check"]
     structured_daily_report_records = [r for r in structured_records if r.job_key == "daily_report"]
     structured_weekly_report_records = [r for r in structured_records if r.job_key == "weekly_report"]
-    sort_key = lambda record: (record.start_time, record.run_id or "", record.source_file.name)
+    def sort_key(record: RunRecord) -> tuple[datetime, str, str]:
+        return record.start_time, record.run_id or "", record.source_file.name
+
     return {
         "scan": sorted(structured_scan_records + legacy_scan_records, key=sort_key),
         "risk_check": sorted(structured_risk_records + legacy_risk_records, key=sort_key),
@@ -1210,6 +1236,83 @@ def fetch_alpaca_state() -> AlpacaState:
     )
 
 
+def _price_failure_default_threshold() -> int:
+    raw = os.getenv("HAWKSTRADE_PRICE_FAILURE_ALERT_THRESHOLD")
+    if raw is None:
+        return DEFAULT_PRICE_FAILURE_ALERT_THRESHOLD
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_PRICE_FAILURE_ALERT_THRESHOLD
+
+
+def _int_or_none(value: object) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def load_price_failure_state(path: str | Path = DEFAULT_PRICE_FAILURE_STATE_FILE) -> list[PriceFailureState]:
+    state_path = Path(path)
+    if not state_path.exists():
+        return []
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return [
+            PriceFailureState(
+                symbol=str(state_path),
+                price_symbol="",
+                asset_class="state_file",
+                count=1,
+                threshold=1,
+                last_failed_at=None,
+                reason="state_file_unreadable",
+                error_category="configuration",
+                retryable=False,
+                status_code=None,
+                last_error=f"Could not read price failure state file: {state_path}",
+            )
+        ]
+
+    if not isinstance(state, dict):
+        return []
+
+    default_threshold = _int_or_none(state.get("threshold")) or _price_failure_default_threshold()
+    symbols = state.get("symbols")
+    if not isinstance(symbols, dict):
+        return []
+
+    failures: list[PriceFailureState] = []
+    for key, raw_entry in sorted(symbols.items()):
+        if not isinstance(raw_entry, dict):
+            continue
+        count = _int_or_none(raw_entry.get("count")) or 0
+        if count <= 0:
+            continue
+        threshold = _int_or_none(raw_entry.get("threshold")) or default_threshold
+        failures.append(
+            PriceFailureState(
+                symbol=str(raw_entry.get("symbol") or key),
+                price_symbol=str(raw_entry.get("price_symbol") or ""),
+                asset_class=str(raw_entry.get("asset_class") or ""),
+                count=count,
+                threshold=max(1, threshold),
+                last_failed_at=raw_entry.get("last_failed_at"),
+                reason=str(raw_entry.get("reason") or ""),
+                error_category=str(raw_entry.get("error_category") or ""),
+                retryable=bool(raw_entry.get("retryable")),
+                status_code=_int_or_none(raw_entry.get("status_code")),
+                last_error=str(raw_entry.get("last_error") or ""),
+            )
+        )
+    return failures
+
+
 def build_health_report(
     *,
     cron_template: str = "auto",
@@ -1220,6 +1323,7 @@ def build_health_report(
     lookback_hours: float = 4.0,
     alpaca_state: AlpacaState | None = None,
     trade_summary: dict | None = None,
+    price_failure_state_file: str | Path = DEFAULT_PRICE_FAILURE_STATE_FILE,
 ) -> HealthReport:
     now = now or datetime.now().astimezone().replace(tzinfo=None)
     template_name, cron_path = resolve_cron_file(cron_template=cron_template, cron_file=cron_file)
@@ -1243,8 +1347,9 @@ def build_health_report(
     findings_by_file = runtime["findings_by_file"]
     window_start = now - timedelta(hours=lookback_hours)
     errors, warnings = _find_matching_error_lines(findings_by_file, since=window_start)
+    price_failures = load_price_failure_state(price_failure_state_file)
 
-    overall = _overall_status(alpaca_state, job_health, errors)
+    overall = _overall_status(alpaca_state, job_health, errors, price_failures)
 
     return HealthReport(
         generated_at=now,
@@ -1258,17 +1363,27 @@ def build_health_report(
         trade_summary=trade_summary,
         log_errors=errors,
         log_warnings=warnings,
+        price_failures=price_failures,
         html_output=Path(html_output).expanduser().resolve(),
     )
 
 
-def _overall_status(alpaca_state: AlpacaState, job_health: list[JobHealth], errors: list[LogFinding]) -> str:
+def _overall_status(
+    alpaca_state: AlpacaState,
+    job_health: list[JobHealth],
+    errors: list[LogFinding],
+    price_failures: list[PriceFailureState],
+) -> str:
     if not alpaca_state.connected:
         return "red"
     if errors:
         return "red"
+    if any(failure.status == "red" for failure in price_failures):
+        return "red"
     if any(job.status == "red" for job in job_health):
         return "red"
+    if any(failure.status == "yellow" for failure in price_failures):
+        return "yellow"
     if any(job.status == "yellow" for job in job_health):
         return "yellow"
     return "green"
@@ -1413,7 +1528,8 @@ def format_terminal_report(report: HealthReport, *, use_color: bool = False) -> 
     lines.append("")
 
     issues = [job for job in report.job_health if job.status != "green"]
-    if issues:
+    price_failure_issues = [failure for failure in report.price_failures if failure.status != "green"]
+    if issues or price_failure_issues:
         lines.append("ISSUE SUMMARY")
         for job in issues:
             reason_bits = []
@@ -1423,13 +1539,19 @@ def format_terminal_report(report: HealthReport, *, use_color: bool = False) -> 
                 reason_bits.append(job.latest_note)
             reason = "; ".join(reason_bits) if reason_bits else "status requires attention"
             lines.append(f"  - [NOK] {job.label}: {reason}")
+        for failure in price_failure_issues:
+            label = _severity_label(failure.status)
+            lines.append(
+                f"  - {label} Price fetch {failure.symbol}: "
+                f"{failure.count}/{failure.threshold} consecutive failure(s)"
+            )
         lines.append("")
 
     lines.append("PORTFOLIO")
     if report.alpaca.connected:
-        lines.append(f"Alpaca connectivity : OK [OK]")
+        lines.append("Alpaca connectivity : OK [OK]")
     else:
-        lines.append(f"Alpaca connectivity : FAILED [NOK]")
+        lines.append("Alpaca connectivity : FAILED [NOK]")
         if report.alpaca.account_error:
             lines.append(f"  Account error    : {report.alpaca.account_error}")
         if report.alpaca.positions_error:
@@ -1478,6 +1600,39 @@ def format_terminal_report(report: HealthReport, *, use_color: bool = False) -> 
             lines.append("No open positions detected.")
     lines.append("")
 
+    lines.append("PRICE FETCH HEALTH")
+    red_price_failures = [failure for failure in report.price_failures if failure.status == "red"]
+    yellow_price_failures = [failure for failure in report.price_failures if failure.status == "yellow"]
+    if red_price_failures:
+        price_failure_status = "YES [NOK]"
+    elif yellow_price_failures:
+        price_failure_status = "YES [WARN]"
+    else:
+        price_failure_status = "NO [OK]"
+    count_status = "red" if red_price_failures else "yellow" if yellow_price_failures else "green"
+    lines.append(
+        f"Repeated price failures : {price_failure_status} "
+        f"({len(report.price_failures)} {_severity_label(count_status)})"
+    )
+    if report.price_failures:
+        lines.append(
+            f"{'Symbol':<12} {'Price Source':<14} {'Asset':<8} {'Count':>7} "
+            f"{'Last Failure':<22} {'Category':<16} {'State':>8}"
+        )
+        lines.append("-" * 96)
+        for failure in report.price_failures:
+            source = failure.price_symbol or failure.symbol
+            category = failure.error_category or failure.reason or "unknown"
+            lines.append(
+                f"{failure.symbol:<12} {source:<14} {failure.asset_class:<8} "
+                f"{failure.count:>3}/{failure.threshold:<3} "
+                f"{(failure.last_failed_at or 'N/A')[:22]:<22} {category[:16]:<16} "
+                f"{_severity_label(failure.status):>8}"
+            )
+    else:
+        lines.append("No consecutive price-fetch failures tracked.")
+    lines.append("")
+
     lines.append("LOG HEALTH")
     errors_yesno = "YES [NOK]" if report.log_errors else "NO [OK]"
     warnings_yesno = "YES [WARN]" if report.log_warnings else "NO [OK]"
@@ -1523,6 +1678,12 @@ def render_html_report(report: HealthReport) -> str:
         ("Unrealized P/L", "green" if float(report.trade_summary.get("unrealized_pnl_dollars", 0) or 0) >= 0 else "red", _fmt_money(report.trade_summary.get("unrealized_pnl_dollars"))),
         ("Log Errors", "red" if report.log_errors else "green", f"{len(report.log_errors)}"),
         ("Log Warnings", "yellow" if report.log_warnings else "green", f"{len(report.log_warnings)}"),
+        (
+            "Price Failures",
+            "red" if any(item.status == "red" for item in report.price_failures)
+            else "yellow" if report.price_failures else "green",
+            str(len(report.price_failures)),
+        ),
         ("Missed Runs", "red" if any(job.missed_runs > 0 for job in report.job_health) else "green", str(_display_missed_runs(report.job_health))),
     ]
 
@@ -1574,6 +1735,24 @@ def render_html_report(report: HealthReport) -> str:
                 """
             )
 
+    price_failure_rows = []
+    for failure in report.price_failures:
+        source = failure.price_symbol or failure.symbol
+        category = failure.error_category or failure.reason or "unknown"
+        price_failure_rows.append(
+            f"""
+            <tr class="{failure.status}">
+              <td><code>{esc(failure.symbol)}</code></td>
+              <td><code>{esc(source)}</code></td>
+              <td>{esc(failure.asset_class)}</td>
+              <td>{failure.count}/{failure.threshold}</td>
+              <td><code>{esc(failure.last_failed_at or 'N/A')}</code></td>
+              <td>{esc(category)}</td>
+              <td>{badge(failure.status)}</td>
+            </tr>
+            """
+        )
+
     def finding_rows(findings: list[LogFinding], *, row_class: str, empty_message: str) -> str:
         recent = _recent_findings(findings, limit=10)
         if not recent:
@@ -1594,6 +1773,11 @@ def render_html_report(report: HealthReport) -> str:
 
     error_rows = finding_rows(report.log_errors, row_class="red", empty_message="No error lines found in runtime logs.")
     warning_rows = finding_rows(report.log_warnings, row_class="yellow", empty_message="No warning lines found in runtime logs.")
+    price_failure_status = (
+        "NOK"
+        if any(failure.status == "red" for failure in report.price_failures)
+        else "WARN" if report.price_failures else "OK"
+    )
 
     warning_count = len(report.log_warnings)
     generated_local = esc(report.generated_at.strftime("%Y-%m-%d %H:%M:%S"))
@@ -1859,6 +2043,27 @@ def render_html_report(report: HealthReport) -> str:
         </thead>
         <tbody>
           {''.join(position_rows) if position_rows else '<tr><td colspan="6" class="muted">No open positions detected.</td></tr>'}
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Price Fetch Health</h2>
+      <p class="muted">Consecutive latest-price failures: <strong>{esc(price_failure_status)}</strong></p>
+      <table>
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Price Source</th>
+            <th>Asset</th>
+            <th>Count</th>
+            <th>Last Failure</th>
+            <th>Category</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {''.join(price_failure_rows) if price_failure_rows else '<tr><td colspan="7" class="muted">No consecutive price-fetch failures tracked.</td></tr>'}
         </tbody>
       </table>
     </section>

@@ -177,6 +177,12 @@ and `[NOK]` so it stays readable in cron logs and copied output. The HTML report
 includes the generation time, the active lookback window, and troubleshooting
 sections for the latest warnings and errors.
 
+Risk checks persist consecutive latest-price failures in
+`data/price_fetch_failures.json`. The health checker displays those failures in
+the terminal and HTML reports, and marks the system `[NOK]` once a symbol reaches
+the alert threshold. A successful later price fetch clears that symbol's failure
+count.
+
 The scheduled entrypoints now emit structured `RUN_START` / `RUN_END` markers
 with unique `run_id` values. The health checker uses those markers first and
 falls back to the older log-text parser for historical logs. The hourly full

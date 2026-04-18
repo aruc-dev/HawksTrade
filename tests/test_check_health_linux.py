@@ -208,6 +208,7 @@ PATH=/usr/local/bin:/usr/bin:/bin
                     now=datetime(2026, 4, 17, 18, 5, 0),
                     lookback_hours=1.0,
                     alpaca_state=alpaca_state,
+                    price_failure_state_file=tmp_path / "missing_price_failures.json",
                 )
 
             terminal = health.format_terminal_report(report, use_color=False)
@@ -226,6 +227,110 @@ PATH=/usr/local/bin:/usr/bin:/bin
             self.assertIn("Log Warnings", html_text)
             self.assertIn("Quote fetch timeout for AMD", html_text)
             self.assertIn("Order rejected for AAPL", html_text)
+
+    def test_build_report_marks_repeated_price_failures_unhealthy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            cron_file = tmp_path / "health.cron"
+            log_dir = tmp_path / "logs"
+            html_output = tmp_path / "health.html"
+            price_state = tmp_path / "price_fetch_failures.json"
+            self._write(
+                cron_file,
+                """
+0 18 * * * cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_risk_check.py >> logs/cron.log 2>&1
+""".strip()
+                + "\n",
+            )
+            self._write(
+                log_dir / "risk_20260417.log",
+                """
+2026-04-17 18:00:00,000 [INFO] run_risk_check: RUN_START script=run_risk_check run_id=risk-1 dry_run=0
+2026-04-17 18:00:01,000 [INFO] run_risk_check: RUN_END script=run_risk_check run_id=risk-1 status=error duration_s=1.000 stage=price_fetch error_type=RepeatedPriceFetchFailure
+""".strip()
+                + "\n",
+            )
+            self._write(
+                price_state,
+                """
+{
+  "version": 1,
+  "threshold": 3,
+  "updated_at": "2026-04-17T18:00:01Z",
+  "symbols": {
+    "AAPL": {
+      "symbol": "AAPL",
+      "price_symbol": "AAPL",
+      "asset_class": "stock",
+      "count": 3,
+      "threshold": 3,
+      "status": "nok",
+      "reason": "exception",
+      "last_failed_at": "2026-04-17T18:00:01Z",
+      "last_error": "quote timeout",
+      "error_category": "timeout",
+      "retryable": true,
+      "status_code": 408
+    }
+  }
+}
+""".strip()
+                + "\n",
+            )
+
+            alpaca_state = health.AlpacaState(
+                connected=True,
+                account_error=None,
+                positions_error=None,
+                portfolio_value=101213.36,
+                cash=51104.76,
+                buying_power=289061.23,
+                broker_positions=[],
+                trade_log_open_rows=[],
+            )
+            summary = {
+                "generated_at": "2026-04-17T18:05:00",
+                "total_trades": 0,
+                "wins": 0,
+                "losses": 0,
+                "win_rate": 0.0,
+                "avg_win_pct": 0.0,
+                "avg_loss_pct": 0.0,
+                "total_pnl_pct": 0.0,
+                "realized_pnl_pct": 0.0,
+                "realized_pnl_dollars": 0.0,
+                "open_positions": 0,
+                "unrealized_pnl_dollars": 0.0,
+                "total_pnl_dollars": 0.0,
+                "monthly_pnl": {},
+                "by_strategy": {},
+            }
+
+            with (
+                patch.object(health, "load_closed_trades", return_value=pd.DataFrame()),
+                patch.object(health, "compute_summary", return_value=summary),
+            ):
+                report = health.build_health_report(
+                    cron_template="custom",
+                    cron_file=cron_file,
+                    log_dir=log_dir,
+                    html_output=html_output,
+                    now=datetime(2026, 4, 17, 18, 5, 0),
+                    lookback_hours=1.0,
+                    alpaca_state=alpaca_state,
+                    price_failure_state_file=price_state,
+                )
+
+            terminal = health.format_terminal_report(report, use_color=False)
+            html_text = health.write_html_report(report).read_text(encoding="utf-8")
+
+            self.assertEqual(report.overall_status, "red")
+            self.assertEqual(len(report.price_failures), 1)
+            self.assertIn("PRICE FETCH HEALTH", terminal)
+            self.assertIn("Repeated price failures : YES [NOK]", terminal)
+            self.assertIn("[NOK] Price fetch AAPL: 3/3 consecutive failure(s)", terminal)
+            self.assertIn("Price Fetch Health", html_text)
+            self.assertIn("AAPL", html_text)
 
     def test_read_log_lines_preserves_raw_tracebacks(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -323,6 +428,7 @@ RuntimeError: boom
                     html_output=html_output,
                     now=datetime(2026, 4, 16, 16, 35, 0),
                     alpaca_state=alpaca_state,
+                    price_failure_state_file=tmp_path / "missing_price_failures.json",
                 )
 
             terminal = health.format_terminal_report(report, use_color=False)

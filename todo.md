@@ -58,7 +58,7 @@ file is a readable reliability roadmap.
   - Action: Add a helper that retries timeouts, 429, and 5xx with bounded backoff; never retries 401/403; returns structured error categories.
   - Done when: Entry points can distinguish retryable outage, auth failure, broker rejection, and not-found.
 
-- [ ] Escalate repeated price-fetch failures.
+- [x] Escalate repeated price-fetch failures.
   - Problem: Risk checks skip a position when latest price fetch fails, which can leave stop-loss enforcement blind.
   - Action: Track consecutive price failures per symbol and surface `[NOK]` in health after a threshold.
   - Done when: Repeated inability to price an open position becomes an operational alert.
