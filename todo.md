@@ -75,7 +75,7 @@ file is a readable reliability roadmap.
   - Action: Run reconciliation after scans/risk checks and before health/report generation when Alpaca is reachable.
   - Done when: `trades.csv` stays aligned with broker positions without manual intervention.
 
-- [ ] Add alerting for unhealthy operational states.
+- [x] Add alerting for unhealthy operational states.
   - Problem: Health output is available only when manually checked.
   - Action: Send alerts for Alpaca auth failures, missed cron runs, repeated price failures, pending unfilled exits, and `[NOK]` health status.
   - Done when: A critical failure creates a visible notification without waiting for manual log review.

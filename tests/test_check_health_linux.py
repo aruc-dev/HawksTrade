@@ -14,6 +14,39 @@ class CheckHealthLinuxTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
 
+    def _sample_report(self, *, overall_status="green", job_health=None, log_errors=None, price_failures=None):
+        generated_at = datetime(2026, 4, 17, 18, 5, 0)
+        return health.HealthReport(
+            generated_at=generated_at,
+            lookback_hours=4.0,
+            cron_template="custom",
+            cron_file=Path("/tmp/health.cron"),
+            local_timezone="UTC",
+            overall_status=overall_status,
+            alpaca=health.AlpacaState(
+                connected=True,
+                account_error=None,
+                positions_error=None,
+                portfolio_value=100000,
+                cash=50000,
+                buying_power=200000,
+                broker_positions=[],
+                trade_log_open_rows=[],
+            ),
+            job_health=job_health or [],
+            trade_summary={
+                "total_trades": 0,
+                "realized_pnl_dollars": 0.0,
+                "realized_pnl_pct": 0.0,
+                "unrealized_pnl_dollars": 0.0,
+                "total_pnl_dollars": 0.0,
+            },
+            log_errors=log_errors or [],
+            log_warnings=[],
+            price_failures=price_failures or [],
+            html_output=Path("/tmp/health.html"),
+        )
+
     def test_load_cron_jobs_parses_supported_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
             cron_file = Path(tmp) / "hawkstrade-pacific.cron"
@@ -331,6 +364,130 @@ PATH=/usr/local/bin:/usr/bin:/bin
             self.assertIn("[NOK] Price fetch AAPL: 3/3 consecutive failure(s)", terminal)
             self.assertIn("Price Fetch Health", html_text)
             self.assertIn("AAPL", html_text)
+
+    def test_build_report_alerts_on_pending_exit_warning(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            cron_file = tmp_path / "health.cron"
+            log_dir = tmp_path / "logs"
+            self._write(
+                cron_file,
+                """
+0 18 * * * cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_risk_check.py >> logs/cron.log 2>&1
+""".strip()
+                + "\n",
+            )
+            self._write(
+                log_dir / "risk_20260417.log",
+                """
+2026-04-17 18:00:00,000 [INFO] run_risk_check: RUN_START script=run_risk_check run_id=risk-2 dry_run=0
+2026-04-17 18:00:00,500 [WARNING] core.order_executor: Exit order submitted for AAPL but not filled yet; leaving trade log open
+2026-04-17 18:00:01,000 [INFO] run_risk_check: RUN_END script=run_risk_check run_id=risk-2 status=ok duration_s=1.000 outcome=completed
+""".strip()
+                + "\n",
+            )
+            alpaca_state = health.AlpacaState(
+                connected=True,
+                account_error=None,
+                positions_error=None,
+                portfolio_value=100000,
+                cash=50000,
+                buying_power=200000,
+                broker_positions=[],
+                trade_log_open_rows=[],
+            )
+
+            report = health.build_health_report(
+                cron_template="custom",
+                cron_file=cron_file,
+                log_dir=log_dir,
+                html_output=tmp_path / "health.html",
+                now=datetime(2026, 4, 17, 18, 5, 0),
+                lookback_hours=1.0,
+                alpaca_state=alpaca_state,
+                trade_summary={"total_trades": 0},
+                price_failure_state_file=tmp_path / "missing_price_failures.json",
+            )
+
+            items = health.collect_alert_items(report)
+
+            self.assertEqual(report.overall_status, "red")
+            self.assertTrue(any("Pending exit warnings: 1 in window" in item for item in items))
+
+    def test_alert_items_include_red_operational_failures(self):
+        job = health.JobHealth(
+            key="risk_check",
+            label="Risk check",
+            schedule_lines=["0,15,30,45 * * * *"],
+            last_run_at=datetime(2026, 4, 17, 17, 0, 0),
+            last_success_at=datetime(2026, 4, 17, 17, 0, 0),
+            last_duration=timedelta(seconds=10),
+            missed_runs=2,
+            expected_runs=4,
+            status="red",
+            latest_note="No run in last 4 hours",
+        )
+        finding = health.LogFinding(
+            timestamp=datetime(2026, 4, 17, 18, 0, 0),
+            level="ERROR",
+            logger="run_scan",
+            message="Alpaca auth failed",
+            source_file=Path("scan_20260417.log"),
+            raw="raw",
+        )
+        price_failure = health.PriceFailureState(
+            symbol="AAPL",
+            price_symbol="AAPL",
+            asset_class="stock",
+            count=3,
+            threshold=3,
+            last_failed_at="2026-04-17T18:00:00Z",
+            reason="exception",
+            error_category="timeout",
+            retryable=True,
+            status_code=408,
+            last_error="quote timeout",
+        )
+        report = self._sample_report(
+            overall_status="red",
+            job_health=[job],
+            log_errors=[finding],
+            price_failures=[price_failure],
+        )
+
+        items = health.collect_alert_items(report)
+
+        self.assertTrue(any("Overall health is [NOK]" in item for item in items))
+        self.assertTrue(any("Cron Risk check [NOK]: 2 missed run(s)" in item for item in items))
+        self.assertTrue(any("Price fetch AAPL [NOK]" in item for item in items))
+        self.assertTrue(any("Log errors: 1 in window" in item for item in items))
+
+    def test_write_alert_files_updates_latest_and_timestamped_alert(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._sample_report(overall_status="red")
+            items = ["Overall health is [NOK]"]
+
+            result = health.write_alert_files(report, items, alert_dir=tmp)
+
+            self.assertTrue(result.active)
+            self.assertIsNotNone(result.latest_path)
+            self.assertIsNotNone(result.event_path)
+            self.assertTrue(result.latest_path.exists())
+            self.assertTrue(result.event_path.exists())
+            self.assertIn("HAWKSTRADE HEALTH ALERT", result.latest_path.read_text(encoding="utf-8"))
+            self.assertIn("Overall health is [NOK]", result.event_path.read_text(encoding="utf-8"))
+
+    def test_write_alert_files_clears_latest_when_healthy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._sample_report(overall_status="green")
+
+            result = health.write_alert_files(report, [], alert_dir=tmp)
+
+            self.assertFalse(result.active)
+            self.assertIsNotNone(result.latest_path)
+            self.assertIsNone(result.event_path)
+            self.assertTrue(result.latest_path.exists())
+            self.assertIn("No active health alert.", result.latest_path.read_text(encoding="utf-8"))
 
     def test_fetch_alpaca_state_reconciles_before_trade_log_snapshot(self):
         from core import alpaca_client as ac

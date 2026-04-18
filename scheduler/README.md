@@ -177,6 +177,13 @@ and `[NOK]` so it stays readable in cron logs and copied output. The HTML report
 includes the generation time, the active lookback window, and troubleshooting
 sections for the latest warnings and errors.
 
+The health checker also writes an alert state file to
+`reports/alerts/health_alert_latest.txt`. When overall health is `[NOK]`, it
+writes a timestamped alert file in the same directory. Set
+`HAWKSTRADE_HEALTH_ALERT_WEBHOOK_URL` or pass `--alert-webhook-url` to POST the
+alert payload to an external notifier. Use `--no-alert` to disable alert file and
+webhook handling for ad-hoc runs.
+
 Risk checks persist consecutive latest-price failures in
 `data/price_fetch_failures.json`. The health checker displays those failures in
 the terminal and HTML reports, and marks the system `[NOK]` once a symbol reaches

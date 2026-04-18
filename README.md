@@ -91,6 +91,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
 - **Broker Resilience**: Alpaca timeouts, rate limits, and 5xx outages use bounded retry; auth failures, not-found responses, and broker rejections are classified for fail-closed logging.
 - **Price-Fetch Visibility**: Risk checks track consecutive latest-price failures per open position and surface repeated failures as `[NOK]` in the Linux health dashboard.
 - **Trade-Log Reconciliation**: Scheduled scans, risk checks, reports, and health checks reconcile `data/trades.csv` with broker positions when Alpaca is reachable.
+- **Health Alerts**: Linux health checks write `reports/alerts/health_alert_latest.txt`, timestamped alert files for `[NOK]` states, and can POST alerts to `HAWKSTRADE_HEALTH_ALERT_WEBHOOK_URL`.
 
 ---
 

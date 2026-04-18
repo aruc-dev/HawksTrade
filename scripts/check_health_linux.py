@@ -23,6 +23,8 @@ import os
 import re
 import shlex
 import sys
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -46,6 +48,7 @@ with open(CONFIG_PATH, "r", encoding="utf-8") as f:
 LOG_DIR = BASE_DIR / CFG["reporting"]["logs_dir"]
 REPORTS_DIR = BASE_DIR / CFG["reporting"]["reports_dir"]
 DEFAULT_HTML_OUTPUT = REPORTS_DIR / "health_check_linux.html"
+DEFAULT_ALERT_DIR = REPORTS_DIR / "alerts"
 DEFAULT_PRICE_FAILURE_STATE_FILE = BASE_DIR / "data" / "price_fetch_failures.json"
 DEFAULT_PRICE_FAILURE_ALERT_THRESHOLD = 3
 DEFAULT_CRON_FILES = {
@@ -210,6 +213,15 @@ class HealthReport:
     log_warnings: list[LogFinding]
     price_failures: list[PriceFailureState]
     html_output: Path
+
+
+@dataclass(frozen=True)
+class AlertResult:
+    active: bool
+    latest_path: Path | None
+    event_path: Path | None
+    webhook_sent: bool = False
+    webhook_error: str | None = None
 
 
 # ── Cron parsing ─────────────────────────────────────────────────────────────
@@ -1357,7 +1369,7 @@ def build_health_report(
     errors, warnings = _find_matching_error_lines(findings_by_file, since=window_start)
     price_failures = load_price_failure_state(price_failure_state_file)
 
-    overall = _overall_status(alpaca_state, job_health, errors, price_failures)
+    overall = _overall_status(alpaca_state, job_health, errors, warnings, price_failures)
 
     return HealthReport(
         generated_at=now,
@@ -1380,11 +1392,14 @@ def _overall_status(
     alpaca_state: AlpacaState,
     job_health: list[JobHealth],
     errors: list[LogFinding],
+    warnings: list[LogFinding],
     price_failures: list[PriceFailureState],
 ) -> str:
     if not alpaca_state.connected:
         return "red"
     if errors:
+        return "red"
+    if any(_is_pending_exit_finding(finding) for finding in warnings):
         return "red"
     if any(failure.status == "red" for failure in price_failures):
         return "red"
@@ -1480,6 +1495,16 @@ def _recent_findings(findings: list[LogFinding], limit: int = 10) -> list[LogFin
 def _format_finding_entry(finding: LogFinding) -> str:
     timestamp = _fmt_timestamp(finding.timestamp)
     return f"{timestamp} | {finding.source_file.name} | {finding.level} | {finding.logger} | {finding.message}"
+
+
+def _is_pending_exit_finding(finding: LogFinding) -> bool:
+    message = finding.message.lower()
+    return (
+        ("exit order" in message and ("not filled" in message or "submitted" in message))
+        or "pending sell order already exists" in message
+        or "pendingexitordercheckfailed" in message
+        or "pending_exit_check_failed" in message
+    )
 
 
 def _row_status(job: JobHealth, enabled: bool = False) -> str:
@@ -2127,6 +2152,137 @@ def write_html_report(report: HealthReport) -> Path:
     return report.html_output
 
 
+# ── Alerting ────────────────────────────────────────────────────────────────
+
+
+STATUS_RANK = {"green": 0, "yellow": 1, "red": 2}
+
+
+def _status_meets_threshold(status: str, threshold: str) -> bool:
+    return STATUS_RANK.get(status, 0) >= STATUS_RANK.get(threshold, 2)
+
+
+def _alert_status_label(status: str) -> str:
+    return {"green": "OK", "yellow": "WARN", "red": "NOK"}.get(status, status.upper())
+
+
+def collect_alert_items(report: HealthReport, *, alert_on: str = "red") -> list[str]:
+    """Return human-readable alert reasons for the requested severity threshold."""
+    if not _status_meets_threshold(report.overall_status, alert_on):
+        return []
+
+    items = [f"Overall health is [{_alert_status_label(report.overall_status)}]"]
+    include_yellow = STATUS_RANK.get(alert_on, 2) <= STATUS_RANK["yellow"]
+
+    if not report.alpaca.connected:
+        detail = report.alpaca.account_error or report.alpaca.positions_error or "Alpaca unavailable"
+        items.append(f"Alpaca connectivity failed: {detail}")
+
+    for job in report.job_health:
+        if not _status_meets_threshold(job.status, alert_on):
+            continue
+        details = []
+        if job.missed_runs:
+            details.append(f"{job.missed_runs} missed run(s)")
+        if job.latest_note:
+            details.append(job.latest_note)
+        if job.last_run_at is None:
+            details.append("no observed run")
+        suffix = f": {'; '.join(details)}" if details else ""
+        items.append(f"Cron {job.label} [{_alert_status_label(job.status)}]{suffix}")
+
+    for failure in report.price_failures:
+        if not _status_meets_threshold(failure.status, alert_on):
+            continue
+        items.append(
+            f"Price fetch {failure.symbol} [{_alert_status_label(failure.status)}]: "
+            f"{failure.count}/{failure.threshold} consecutive failure(s); "
+            f"{failure.error_category or failure.reason or 'unknown'}"
+        )
+
+    if report.log_errors:
+        latest = _format_finding_entry(_recent_findings(report.log_errors, limit=1)[0])
+        items.append(f"Log errors: {len(report.log_errors)} in window; latest: {latest}")
+
+    pending_exit_findings = [
+        finding for finding in report.log_warnings if _is_pending_exit_finding(finding)
+    ]
+    if pending_exit_findings:
+        latest = _format_finding_entry(_recent_findings(pending_exit_findings, limit=1)[0])
+        items.append(f"Pending exit warnings: {len(pending_exit_findings)} in window; latest: {latest}")
+
+    if include_yellow and report.log_warnings:
+        latest = _format_finding_entry(_recent_findings(report.log_warnings, limit=1)[0])
+        items.append(f"Log warnings: {len(report.log_warnings)} in window; latest: {latest}")
+
+    return items
+
+
+def render_alert_text(report: HealthReport, items: list[str]) -> str:
+    generated_tz = report.generated_at.astimezone().tzname() or report.local_timezone
+    lines = [
+        "HAWKSTRADE HEALTH ALERT",
+        f"Generated : {report.generated_at.strftime('%Y-%m-%d %H:%M:%S')} {generated_tz}",
+        f"Window    : last {report.lookback_hours:g}h",
+        f"Overall   : [{_alert_status_label(report.overall_status)}]",
+        f"HTML      : {report.html_output}",
+        "",
+    ]
+    if items:
+        lines.append("Reasons:")
+        lines.extend(f"- {item}" for item in items)
+    else:
+        lines.append("No active health alert.")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def write_alert_files(
+    report: HealthReport,
+    items: list[str],
+    *,
+    alert_dir: str | Path = DEFAULT_ALERT_DIR,
+) -> AlertResult:
+    alert_path = Path(alert_dir).expanduser().resolve()
+    alert_path.mkdir(parents=True, exist_ok=True)
+
+    latest_path = alert_path / "health_alert_latest.txt"
+    text = render_alert_text(report, items)
+    latest_path.write_text(text, encoding="utf-8")
+
+    if not items:
+        return AlertResult(active=False, latest_path=latest_path, event_path=None)
+
+    stamp = report.generated_at.strftime("%Y%m%dT%H%M%S")
+    event_path = alert_path / f"health_alert_{stamp}.txt"
+    event_path.write_text(text, encoding="utf-8")
+    return AlertResult(active=True, latest_path=latest_path, event_path=event_path)
+
+
+def _alert_payload(report: HealthReport, items: list[str]) -> dict:
+    return {
+        "source": "hawkstrade",
+        "kind": "health_alert",
+        "generated_at": report.generated_at.isoformat(),
+        "overall_status": report.overall_status,
+        "lookback_hours": report.lookback_hours,
+        "html_output": str(report.html_output),
+        "items": items,
+    }
+
+
+def send_alert_webhook(webhook_url: str, report: HealthReport, items: list[str]) -> None:
+    payload = json.dumps(_alert_payload(report, items)).encode("utf-8")
+    request = urllib.request.Request(
+        webhook_url,
+        data=payload,
+        headers={"Content-Type": "application/json", "User-Agent": "hawkstrade-health-check"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        response.read()
+
+
 # ── Command line interface ───────────────────────────────────────────────────
 
 
@@ -2167,6 +2323,27 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Where to write the HTML dashboard",
     )
     parser.add_argument(
+        "--alert-dir",
+        default=str(DEFAULT_ALERT_DIR),
+        help="Directory for health alert files (default: reports/alerts)",
+    )
+    parser.add_argument(
+        "--alert-on",
+        choices=["red", "yellow"],
+        default=os.getenv("HAWKSTRADE_HEALTH_ALERT_ON", "red").lower(),
+        help="Minimum health severity that writes an active alert (default: red)",
+    )
+    parser.add_argument(
+        "--alert-webhook-url",
+        default=os.getenv("HAWKSTRADE_HEALTH_ALERT_WEBHOOK_URL", ""),
+        help="Optional webhook URL for active health alerts; also supports HAWKSTRADE_HEALTH_ALERT_WEBHOOK_URL",
+    )
+    parser.add_argument(
+        "--no-alert",
+        action="store_true",
+        help="Do not write alert files or send alert webhooks",
+    )
+    parser.add_argument(
         "--no-color",
         action="store_true",
         help="Legacy compatibility flag; terminal output now uses plain status tags",
@@ -2195,6 +2372,31 @@ def main(argv: list[str] | None = None) -> int:
     print(terminal)
     output_path = write_html_report(report)
     print(f"\nHTML report written to: {output_path}")
+
+    if not args.no_alert:
+        alert_items = collect_alert_items(report, alert_on=args.alert_on)
+        alert_result = write_alert_files(report, alert_items, alert_dir=args.alert_dir)
+        print(f"Health alert state written to: {alert_result.latest_path}")
+        if alert_result.event_path:
+            print(f"Active alert written to: {alert_result.event_path}")
+        if alert_items and args.alert_webhook_url:
+            try:
+                send_alert_webhook(args.alert_webhook_url, report, alert_items)
+                alert_result = AlertResult(
+                    active=alert_result.active,
+                    latest_path=alert_result.latest_path,
+                    event_path=alert_result.event_path,
+                    webhook_sent=True,
+                )
+                print("Health alert webhook sent.")
+            except (OSError, urllib.error.URLError, TimeoutError) as exc:
+                alert_result = AlertResult(
+                    active=alert_result.active,
+                    latest_path=alert_result.latest_path,
+                    event_path=alert_result.event_path,
+                    webhook_error=str(exc),
+                )
+                print(f"Health alert webhook failed: {exc}", file=sys.stderr)
 
     if report.overall_status == "red":
         return 1
