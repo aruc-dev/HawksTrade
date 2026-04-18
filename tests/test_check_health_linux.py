@@ -1,6 +1,6 @@
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -215,6 +215,7 @@ PATH=/usr/local/bin:/usr/bin:/bin
 
             self.assertEqual(len(report.log_errors), 1)
             self.assertEqual(len(report.log_warnings), 1)
+            self.assertIn("Warnings in logs   : YES [WARN] (1 [WARN])", terminal)
             self.assertIn("TROUBLESHOOTING", terminal)
             self.assertIn("Latest errors:", terminal)
             self.assertIn("Latest warnings:", terminal)
@@ -225,6 +226,30 @@ PATH=/usr/local/bin:/usr/bin:/bin
             self.assertIn("Log Warnings", html_text)
             self.assertIn("Quote fetch timeout for AMD", html_text)
             self.assertIn("Order rejected for AAPL", html_text)
+
+    def test_read_log_lines_preserves_raw_tracebacks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            self._write(
+                log_dir / "scan_20260417.log",
+                """
+2026-04-17 18:00:00,000 [INFO] run_scan: RUN_START script=run_scan run_id=scan-3 scan_kind=full run_stocks=1 run_crypto=1 dry_run=0
+Traceback (most recent call last):
+  File "/tmp/example.py", line 10, in <module>
+    raise RuntimeError("boom")
+RuntimeError: boom
+2026-04-17 18:00:02,000 [INFO] run_scan: RUN_END script=run_scan run_id=scan-3 status=ok duration_s=2.000 outcome=completed
+""".strip()
+                + "\n",
+            )
+
+            runtime = health.load_runtime_records(log_dir)
+            errors, warnings = health._find_matching_error_lines(runtime["findings_by_file"])
+
+            self.assertGreaterEqual(len(errors), 1)
+            self.assertTrue(any("Traceback" in finding.message for finding in errors))
+            self.assertTrue(any("RuntimeError: boom" in finding.message for finding in errors))
+            self.assertEqual(len(warnings), 0)
 
     def test_build_report_renders_html_and_terminal_output(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -310,6 +335,7 @@ PATH=/usr/local/bin:/usr/bin:/bin
             self.assertIn("Overall   : [OK]", terminal)
             self.assertIn("Alpaca connectivity : OK [OK]", terminal)
             self.assertIn("Errors in logs     : NO [OK]", terminal)
+            self.assertEqual(report.job_health[0].age, timedelta(minutes=5))
             self.assertNotIn("\x1b[", terminal)
             self.assertIn("[OK]", terminal)
             self.assertIn("Generated", html_text)

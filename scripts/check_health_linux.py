@@ -32,7 +32,6 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from core import alpaca_client as ac
 from tracking.performance import compute_summary, load_closed_trades
 from tracking.trade_log import get_open_trades
 
@@ -139,13 +138,17 @@ class JobHealth:
     missed_runs: int
     expected_runs: int
     status: str
+    evaluated_at: datetime | None = None
     latest_note: str | None = None
 
     @property
     def age(self) -> timedelta | None:
         if self.last_run_at is None:
             return None
-        return datetime.now().astimezone().replace(tzinfo=None) - self.last_run_at
+        reference_time = self.evaluated_at
+        if reference_time is None:
+            reference_time = datetime.now().astimezone().replace(tzinfo=None)
+        return reference_time - self.last_run_at
 
 
 @dataclass
@@ -540,11 +543,37 @@ def _read_log_lines(path: Path) -> list[LogFinding]:
     findings: list[LogFinding] = []
     if not path.exists():
         return findings
+    in_traceback = False
     with open(path, "r", encoding="utf-8", errors="replace") as f:
         for raw in f:
             finding = _parse_log_line(raw, path)
             if finding is not None:
                 findings.append(finding)
+                in_traceback = False
+                continue
+
+            raw_line = raw.rstrip("\n")
+            stripped = raw_line.strip()
+            if not stripped:
+                in_traceback = False
+                continue
+
+            lower = stripped.lower()
+            if "traceback (most recent call last):" in lower:
+                in_traceback = True
+            if not in_traceback and not any(token in lower for token in ("exception", "error", "traceback")):
+                continue
+
+            findings.append(
+                LogFinding(
+                    timestamp=None,
+                    level="ERROR",
+                    logger="traceback",
+                    message=raw_line,
+                    source_file=path,
+                    raw=raw_line,
+                )
+            )
     return findings
 
 
@@ -874,6 +903,7 @@ def _build_job_health(
     all_records: list[RunRecord],
     expected_runs: list[datetime],
     lookback_hours: float,
+    evaluated_at: datetime,
 ) -> JobHealth:
     latest_recent = recent_records[-1] if recent_records else None
     latest_any = all_records[-1] if all_records else None
@@ -899,6 +929,7 @@ def _build_job_health(
         missed_runs=missed,
         expected_runs=len(expected_runs),
         status=_job_status(latest_recent, missed, len(expected_runs)),
+        evaluated_at=evaluated_at,
         latest_note=latest_note,
     )
 
@@ -935,6 +966,7 @@ def _combined_scan_health(
             all_records=all_combined_records,
             expected_runs=combined_expected,
             lookback_hours=lookback_hours,
+            evaluated_at=now,
         ),
         "crypto_scan": _build_job_health(
             key="crypto_scan",
@@ -945,6 +977,7 @@ def _combined_scan_health(
             all_records=all_combined_records,
             expected_runs=combined_expected,
             lookback_hours=lookback_hours,
+            evaluated_at=now,
         ),
     }
 
@@ -1004,6 +1037,7 @@ def evaluate_job_health(
                 all_records=key_records,
                 expected_runs=all_expected,
                 lookback_hours=lookback_hours,
+                evaluated_at=now,
             )
         )
 
@@ -1121,6 +1155,20 @@ def fetch_alpaca_state() -> AlpacaState:
     buying_power = None
     broker_positions: list[dict] = []
     trade_log_open_rows = get_open_trades()
+
+    try:
+        from core import alpaca_client as ac
+    except Exception as exc:  # pragma: no cover - exercised in broken deployments
+        return AlpacaState(
+            connected=False,
+            account_error=str(exc),
+            positions_error=None,
+            portfolio_value=None,
+            cash=None,
+            buying_power=None,
+            broker_positions=[],
+            trade_log_open_rows=trade_log_open_rows,
+        )
 
     try:
         account = ac.get_account()
@@ -1287,8 +1335,9 @@ def _signed_value(value: float | None, *, enabled: bool = False, money: bool = F
     return f"{value:+,.2f}"
 
 
-def _count_value(value: int, *, enabled: bool = False) -> str:
-    return f"{value} {'[OK]' if value == 0 else '[NOK]'}"
+def _count_value(value: int, *, enabled: bool = False, nonzero_status: str = "red") -> str:
+    status = "green" if value == 0 else nonzero_status
+    return f"{value} {_severity_label(status, enabled)}"
 
 
 def _display_missed_runs(job_health: list[JobHealth]) -> int:
@@ -1432,8 +1481,10 @@ def format_terminal_report(report: HealthReport, *, use_color: bool = False) -> 
     lines.append("LOG HEALTH")
     errors_yesno = "YES [NOK]" if report.log_errors else "NO [OK]"
     warnings_yesno = "YES [WARN]" if report.log_warnings else "NO [OK]"
-    lines.append(f"Errors in logs     : {errors_yesno} ({len(report.log_errors)})")
-    lines.append(f"Warnings in logs   : {warnings_yesno} ({len(report.log_warnings)})")
+    error_count_display = _count_value(len(report.log_errors))
+    warning_count_display = _count_value(len(report.log_warnings), nonzero_status="yellow")
+    lines.append(f"Errors in logs     : {errors_yesno} ({error_count_display})")
+    lines.append(f"Warnings in logs   : {warnings_yesno} ({warning_count_display})")
     lines.append("")
     lines.append("TROUBLESHOOTING")
     lines.append("Latest errors:")

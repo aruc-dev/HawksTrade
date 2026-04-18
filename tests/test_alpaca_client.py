@@ -181,19 +181,34 @@ class SecretsSourceShmTests(unittest.TestCase):
         finally:
             importlib.reload(alpaca_client)
 
-    def test_shm_source_missing_file_raises_environment_error(self):
-        """secrets_source=shm with missing /dev/shm file raises EnvironmentError."""
+    def test_shm_source_missing_file_falls_back_to_local_when_mount_exists(self):
+        """Missing /dev/shm/.hawkstrade.env should fall back to local dotenv files."""
+        import importlib
         from pathlib import Path
-        missing = Path("/dev/shm/.hawkstrade_nonexistent_test.env")
+        from unittest.mock import MagicMock
 
-        # Simulate the guard that runs at import time
-        with self.assertRaises(EnvironmentError) as ctx:
-            if not missing.exists():
-                raise EnvironmentError(
-                    "secrets_source is \'shm\' but /dev/shm/.hawkstrade.env does not exist. "
-                    "Run scripts/fetch_secrets.sh first (or ensure the systemd boot unit ran)."
-                )
-        self.assertIn("fetch_secrets.sh", str(ctx.exception))
+        fake_cfg = {"mode": "paper", "secrets_source": "shm"}
+        mock_load_dotenv = MagicMock()
+        _real_exists = Path.exists
+
+        def _exists_missing_file(self):
+            if str(self) == "/dev/shm":
+                return True
+            if str(self) == "/dev/shm/.hawkstrade.env":
+                return False
+            return _real_exists(self)
+
+        try:
+            with patch("yaml.safe_load", return_value=fake_cfg), \
+                 patch("dotenv.load_dotenv", mock_load_dotenv), \
+                 patch.object(Path, "exists", _exists_missing_file):
+                importlib.reload(alpaca_client)
+
+            mock_load_dotenv.assert_any_call(alpaca_client.BASE_DIR / "config" / ".env")
+            mock_load_dotenv.assert_any_call(alpaca_client.BASE_DIR / ".env", override=True)
+            self.assertEqual(alpaca_client._SECRETS_SOURCE, "local")
+        finally:
+            importlib.reload(alpaca_client)
 
     def test_shm_source_falls_back_to_local_when_shm_mount_missing(self):
         """On dev machines without /dev/shm, shm config should fall back to local dotenv files."""
