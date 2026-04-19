@@ -11,7 +11,11 @@ intentions. The next timer run is the retry boundary.
 ## Templates
 
 - `hawkstrade-secrets.service` loads `/etc/hawkstrade/hawkstrade.secrets` into
-  `/dev/shm/.hawkstrade.env`.
+  `/dev/shm/.hawkstrade.env`. It is intentionally a non-persistent one-shot:
+  dependent services start it before each job so the tmpfs secret is recreated
+  if `/dev/shm` was cleared after boot. The generated file is `root`-owned and
+  group-readable by the HawksTrade service group so `systemd-logind` does not
+  remove it as `ec2-user` IPC when SSH/user sessions close.
 - `hawkstrade-stock-scan.service` and `.timer` run the 9:35 AM ET stock-only scan.
 - `hawkstrade-full-scan.service` and `.timer` run hourly full scans.
 - `hawkstrade-crypto-scan.service` and `.timer` run hourly crypto-only scans.
@@ -56,8 +60,8 @@ Load secrets first:
 
 ```bash
 sudo systemctl enable --now hawkstrade-secrets.service
-sudo systemctl status hawkstrade-secrets.service
 sudo -u "$HT_USER" test -s /dev/shm/.hawkstrade.env
+sudo -u "$HT_USER" test -r /dev/shm/.hawkstrade.env
 ```
 
 Enable timers:
@@ -106,6 +110,12 @@ sudo systemctl disable --now 'hawkstrade-*.timer'
 - Trading services require `hawkstrade-secrets.service` and
   `network-online.target`. The health-check service only wants the secret loader
   so it can still run and report missing or stale secrets.
+- `hawkstrade-secrets.service` does not use `RemainAfterExit`; it should be
+  allowed to return to `inactive (dead)` after copying secrets. This avoids a
+  stale `active (exited)` state when `/dev/shm/.hawkstrade.env` disappears.
+- The `/dev/shm/.hawkstrade.env` file is installed as `root:$HT_GROUP` with mode
+  `0640`; do not change it to be owned by the login user, or logind may remove
+  it when that user's sessions end.
 - Scan, risk-check, and report services run through
   `scripts/run_hawkstrade_job.sh`, so they use the project `.venv`, Alpaca
   preflight checks, and the shared trade-mutation lock.

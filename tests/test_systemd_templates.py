@@ -94,10 +94,11 @@ class SystemdTemplateTests(unittest.TestCase):
 
         self.assertIn("Before=hawkstrade-stock-scan.service", text)
         self.assertIn("ConditionPathExists=/etc/hawkstrade/hawkstrade.secrets", text)
-        self.assertIn("RemainAfterExit=yes", text)
-        self.assertIn("install -m 0600", text)
+        self.assertNotIn("RemainAfterExit=yes", text)
+        self.assertIn("install -m 0640 -o root", text)
+        self.assertIn('-g "${HAWKSTRADE_GROUP:-ec2-user}"', text)
         self.assertIn("/dev/shm/.hawkstrade.env", text)
-        self.assertIn("ExecStop=", text)
+        self.assertNotIn("ExecStop=", text)
 
     def test_timers_are_persistent_and_installed_to_timers_target(self):
         expected_calendar = {
