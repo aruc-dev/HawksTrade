@@ -11,9 +11,9 @@ from __future__ import annotations
 import csv
 import hashlib
 import re
+from contextlib import AbstractContextManager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
 
 from tracking.trade_log import locked_trade_log
 
@@ -81,7 +81,7 @@ def _ensure_file_unlocked(path: Path) -> None:
     _write_rows_unlocked(path, [])
 
 
-def _locked_intents(exclusive: bool = True) -> Iterator[Path]:
+def _locked_intents(exclusive: bool = True) -> AbstractContextManager[Path]:
     return locked_trade_log(ORDER_INTENTS, exclusive=exclusive)
 
 

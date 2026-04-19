@@ -1,6 +1,8 @@
 import tempfile
 import unittest
+from contextlib import AbstractContextManager
 from pathlib import Path
+from typing import get_type_hints
 
 from tracking import order_intents
 
@@ -61,6 +63,11 @@ class OrderIntentTests(unittest.TestCase):
         self.assertTrue(updated)
         self.assertEqual(rows[0]["status"], "submitted")
         self.assertEqual(rows[0]["broker_order_id"], "broker-1")
+
+    def test_locked_intents_is_annotated_as_context_manager(self):
+        hints = get_type_hints(order_intents._locked_intents)
+
+        self.assertEqual(hints["return"], AbstractContextManager[Path])
 
 
 if __name__ == "__main__":
