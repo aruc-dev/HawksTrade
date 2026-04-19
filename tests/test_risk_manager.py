@@ -34,6 +34,13 @@ class RiskManagerTests(unittest.TestCase):
         self.assertEqual(risk_manager.calculate_position_size(0), 0.0)
         self.assertEqual(risk_manager.calculate_position_size(-5), 0.0)
 
+    def test_kelly_position_size_rejects_non_positive_price_before_division(self):
+        with self.assertLogs("risk_manager", level="WARNING") as logs:
+            qty = risk_manager.kelly_position_size(price=0)
+
+        self.assertEqual(qty, 0.0)
+        self.assertTrue(any("Invalid price 0" in message for message in logs.output))
+
     def test_daily_loss_baseline_persists_across_process_state_reset(self):
         risk_manager._session_start_value = None
         risk_manager._session_date = None

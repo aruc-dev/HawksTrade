@@ -160,6 +160,22 @@ class OrderExecutorTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["status"], "open")
 
+    def test_exit_position_rejects_short_position(self):
+        position = SimpleNamespace(qty="-2", avg_entry_price="100")
+
+        with (
+            patch.object(order_executor.ac, "get_position", return_value=position),
+            patch.object(order_executor.ac, "get_stock_latest_price") as latest_price,
+            patch.object(order_executor.ac, "place_limit_order") as place_limit_order,
+            self.assertLogs("core.order_executor", level="ERROR") as logs,
+        ):
+            result = order_executor.exit_position("AAPL", "take profit", dry_run=False)
+
+        self.assertIsNone(result)
+        latest_price.assert_not_called()
+        place_limit_order.assert_not_called()
+        self.assertTrue(any("non-long position" in message for message in logs.output))
+
     def test_enter_position_logs_submitted_buy_without_open_exposure(self):
         order = SimpleNamespace(id="entry-submitted", status="new", filled_qty="0")
 

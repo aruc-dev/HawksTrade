@@ -344,6 +344,27 @@ class TradeLogTests(unittest.TestCase):
         self.assertGreater(age, 1.9)
         self.assertLess(age, 2.1)
 
+    def test_get_trade_age_days_matches_crypto_symbol_variants(self):
+        timestamp = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+
+        trade_log.log_trade({
+            "timestamp": timestamp,
+            "mode": "paper",
+            "symbol": "BTC/USD",
+            "strategy": "ma_crossover",
+            "asset_class": "crypto",
+            "side": "buy",
+            "qty": "0.1",
+            "entry_price": "75000",
+            "order_id": "crypto-aware",
+            "status": "open",
+        })
+
+        age = trade_log.get_trade_age_days("BTCUSD")
+
+        self.assertGreater(age, 1.9)
+        self.assertLess(age, 2.1)
+
     def test_get_open_trades_includes_only_broker_confirmed_buy_exposure(self):
         for side, status, symbol in (
             ("buy", "submitted", "SUBMITTED"),

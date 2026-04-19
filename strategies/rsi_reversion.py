@@ -34,8 +34,9 @@ def _calc_rsi(closes: pd.Series, period: int = 14) -> float:
     loss   = -delta.where(delta < 0, 0.0)
     avg_g  = gain.ewm(com=period - 1, min_periods=period).mean()
     avg_l  = loss.ewm(com=period - 1, min_periods=period).mean()
-    rs     = avg_g / avg_l
-    rsi    = 100 - (100 / (1 + rs))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rs  = avg_g / avg_l
+        rsi = 100 - (100 / (1 + rs))
     return float(rsi.iloc[-1])
 
 

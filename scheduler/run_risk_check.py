@@ -398,9 +398,18 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
         price_symbol = trade.get("symbol", symbol) if trade and asset_class == "crypto" else symbol
 
         try:
-            entry_price = float(getattr(pos, "avg_entry_price", None) or (trade or {}).get("entry_price"))
+            raw_entry_price = getattr(pos, "avg_entry_price", None)
+            entry_price = float(raw_entry_price)
         except (ValueError, TypeError):
-            log.warning(f"Invalid entry price for {symbol}, skipping.")
+            entry_price = 0.0
+        if entry_price <= 0:
+            try:
+                entry_price = float((trade or {}).get("entry_price"))
+            except (ValueError, TypeError):
+                log.warning(f"Invalid entry price for {symbol}, skipping.")
+                continue
+        if entry_price <= 0:
+            log.warning(f"Non-positive entry price {entry_price} for {symbol}, skipping.")
             continue
 
         try:

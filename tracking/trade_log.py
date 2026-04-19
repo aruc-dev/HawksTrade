@@ -419,7 +419,7 @@ def get_trade_age_days(symbol: str) -> float:
     """Return how many calendar days ago the most recent open trade was entered."""
     entries = [
         row for row in get_open_trades()
-        if row["symbol"] == symbol and row["side"] == "buy"
+        if _symbols_match(row.get("symbol", ""), symbol) and row.get("side") == "buy"
     ]
     if not entries:
         return 0.0

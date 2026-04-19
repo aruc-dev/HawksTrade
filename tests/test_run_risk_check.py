@@ -115,6 +115,84 @@ class RunRiskCheckTests(unittest.TestCase):
 
         exit_position.assert_called_once()
 
+    def test_risk_check_uses_trade_log_entry_when_broker_entry_is_zero(self):
+        position = SimpleNamespace(symbol="AAPL", avg_entry_price="0", asset_class="us_equity")
+        open_trade = {
+            "symbol": "AAPL",
+            "side": "buy",
+            "entry_price": "100",
+            "asset_class": "stock",
+        }
+
+        with (
+            patch.object(run_risk_check.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_risk_check, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_risk_check.ac, "get_all_positions", return_value=[position]),
+            patch.object(run_risk_check.ac, "get_stock_latest_price", return_value=80),
+            patch.object(run_risk_check.rm, "should_exit_position", return_value=(True, "Stop-loss hit")) as should_exit,
+            patch.object(run_risk_check.oe, "exit_position") as exit_position,
+        ):
+            run_risk_check.run(dry_run=True)
+
+        should_exit.assert_called_once_with("AAPL", 100.0, 80)
+        exit_position.assert_called_once()
+
+    def test_risk_check_uses_trade_log_entry_when_broker_entry_is_decimal_zero(self):
+        position = SimpleNamespace(symbol="AAPL", avg_entry_price="0.0", asset_class="us_equity")
+        open_trade = {
+            "symbol": "AAPL",
+            "side": "buy",
+            "entry_price": "100",
+            "asset_class": "stock",
+        }
+
+        with (
+            patch.object(run_risk_check.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_risk_check, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_risk_check.ac, "get_all_positions", return_value=[position]),
+            patch.object(run_risk_check.ac, "get_stock_latest_price", return_value=80),
+            patch.object(run_risk_check.rm, "should_exit_position", return_value=(True, "Stop-loss hit")) as should_exit,
+            patch.object(run_risk_check.oe, "exit_position") as exit_position,
+        ):
+            run_risk_check.run(dry_run=True)
+
+        should_exit.assert_called_once_with("AAPL", 100.0, 80)
+        exit_position.assert_called_once()
+
+    def test_risk_check_skips_non_positive_entry_price(self):
+        position = SimpleNamespace(symbol="AAPL", avg_entry_price="0", asset_class="us_equity")
+
+        with (
+            patch.object(run_risk_check.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_risk_check, "get_open_trades", return_value=[]),
+            patch.object(run_risk_check.ac, "get_all_positions", return_value=[position]),
+            patch.object(run_risk_check.ac, "get_stock_latest_price") as latest_price,
+            patch.object(run_risk_check.oe, "exit_position") as exit_position,
+            self.assertLogs("run_risk_check", level="WARNING") as logs,
+        ):
+            run_risk_check.run(dry_run=True)
+
+        latest_price.assert_not_called()
+        exit_position.assert_not_called()
+        self.assertTrue(any("Invalid entry price for AAPL" in message for message in logs.output))
+
+    def test_risk_check_skips_invalid_entry_price(self):
+        position = SimpleNamespace(symbol="AAPL", avg_entry_price="abc", asset_class="us_equity")
+
+        with (
+            patch.object(run_risk_check.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_risk_check, "get_open_trades", return_value=[]),
+            patch.object(run_risk_check.ac, "get_all_positions", return_value=[position]),
+            patch.object(run_risk_check.ac, "get_stock_latest_price") as latest_price,
+            patch.object(run_risk_check.oe, "exit_position") as exit_position,
+            self.assertLogs("run_risk_check", level="WARNING") as logs,
+        ):
+            run_risk_check.run(dry_run=True)
+
+        latest_price.assert_not_called()
+        exit_position.assert_not_called()
+        self.assertTrue(any("Invalid entry price for AAPL" in message for message in logs.output))
+
     def test_risk_check_exits_crypto_with_trade_log_symbol(self):
         position = SimpleNamespace(symbol="DOGEUSD", avg_entry_price="0.09", asset_class="crypto")
         open_trade = {

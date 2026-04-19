@@ -331,6 +331,10 @@ def kelly_position_size(win_rate: float = None, avg_win_pct: float = None,
     Caps position at trading.max_position_pct of portfolio and floors at 1%
     only when that floor is below the configured cap.
     """
+    if price <= 0:
+        log.warning(f"[Kelly] Invalid price {price}; falling back to standard sizing.")
+        return calculate_position_size(price)
+
     try:
         # Attempt to load dynamic params from recent trade history
         if win_rate is None or avg_win_pct is None or avg_loss_pct is None:

@@ -329,7 +329,13 @@ def exit_position(symbol: str, reason: str, asset_class: str = "stock", dry_run:
             log.info(f"No open position for {symbol}, skipping exit.")
             return None
 
-        qty = abs(float(position.qty))
+        qty = float(position.qty)
+        if qty <= 0:
+            log.error(
+                f"exit_position called on non-long position for {symbol} (qty={qty}); "
+                "HawksTrade is long-only. Skipping exit."
+            )
+            return None
 
         if asset_class == "crypto":
             current_price = ac.get_crypto_latest_price(symbol)

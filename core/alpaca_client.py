@@ -506,6 +506,7 @@ def get_stock_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
     tf = tf_map.get(timeframe, TimeFrame.Day)
     end = datetime.now(timezone.utc)
     start = end - _lookback_delta(timeframe, limit, market="stock")
+    request_limit = limit * max(len(symbols), 1)
     
     # Use SIP feed for live, IEX for paper (default)
     feed = DataFeed.SIP if MODE == "live" else DataFeed.IEX
@@ -516,7 +517,8 @@ def get_stock_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
         start=start,
         end=end,
         feed=feed,
-        adjustment=Adjustment.ALL
+        adjustment=Adjustment.ALL,
+        limit=request_limit,
     )
     return call_alpaca(
         f"stock_data.get_stock_bars[{len(symbols)}:{timeframe}]",
@@ -582,7 +584,14 @@ def get_crypto_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
     tf = tf_map.get(timeframe, TimeFrame.Day)
     end = datetime.now(timezone.utc)
     start = end - _lookback_delta(timeframe, limit, market="crypto")
-    req = CryptoBarsRequest(symbol_or_symbols=request_symbols, timeframe=tf, start=start, end=end)
+    request_limit = limit * max(len(request_symbols), 1)
+    req = CryptoBarsRequest(
+        symbol_or_symbols=request_symbols,
+        timeframe=tf,
+        start=start,
+        end=end,
+        limit=request_limit,
+    )
     return call_alpaca(
         f"crypto_data.get_crypto_bars[{len(request_symbols)}:{timeframe}]",
         lambda: get_crypto_data_client().get_crypto_bars(req),
