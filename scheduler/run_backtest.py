@@ -371,6 +371,15 @@ def _apply_runtime_strategy_config(cfg: dict) -> None:
     gap_up_module.INTRADAY_ON = cfg.get("intraday", {}).get("enabled", False)
 
 
+def _patch_runtime_risk_config(stack: contextlib.ExitStack, cfg: dict) -> None:
+    """Apply backtest-only trading config overrides to risk manager globals."""
+    stack.enter_context(patch("core.risk_manager.T", cfg["trading"]))
+    stack.enter_context(patch(
+        "core.risk_manager.INTRADAY_ENABLED",
+        cfg.get("intraday", {}).get("enabled", False),
+    ))
+
+
 def _enabled_strategy_names(cfg: dict) -> list:
     return [
         name
@@ -495,6 +504,7 @@ def run_backtest(
             "core.risk_manager.DAILY_BASELINE_FILE",
             Path(baseline_dir.name) / "daily_loss_baseline.json",
         ))
+        _patch_runtime_risk_config(stack, cfg)
         stack.enter_context(patch("core.risk_manager._session_start_value", None))
         stack.enter_context(patch("core.risk_manager._session_date", None))
         stack.enter_context(patch("core.alpaca_client.get_portfolio_value", side_effect=sim.get_portfolio_value))
