@@ -6,6 +6,7 @@ Tests for v6 improvements:
 """
 
 import unittest
+import contextlib
 import pandas as pd
 from datetime import datetime, timezone
 
@@ -19,7 +20,9 @@ from scheduler.run_backtest import (
     _apply_override,
     _compute_max_drawdown,
     _compute_quarterly_performance,
+    _patch_runtime_risk_config,
 )
+from core import risk_manager as rm
 from core.exit_policy import should_exit_for_hold
 
 
@@ -282,6 +285,28 @@ class TestBacktestExperimentControls(unittest.TestCase):
         self.assertEqual(cfg["strategies"]["momentum"]["top_n"], 3)
         self.assertFalse(cfg["screener"]["enabled"])
         self.assertEqual(cfg["screener"]["max_atr_pct"], 0.06)
+
+    def test_runtime_risk_config_applies_backtest_trading_overrides(self):
+        original_t = rm.T
+        original_intraday = rm.INTRADAY_ENABLED
+        cfg = {
+            "trading": {
+                **original_t,
+                "take_profit_pct": 0.25,
+                "stop_loss_pct": 0.06,
+            },
+            "intraday": {"enabled": True},
+        }
+
+        with contextlib.ExitStack() as stack:
+            _patch_runtime_risk_config(stack, cfg)
+
+            self.assertAlmostEqual(rm.take_profit_price(100), 125.0)
+            self.assertAlmostEqual(rm.stop_loss_price(100), 94.0)
+            self.assertTrue(rm.intraday_allowed())
+
+        self.assertIs(rm.T, original_t)
+        self.assertEqual(rm.INTRADAY_ENABLED, original_intraday)
 
     def test_compute_max_drawdown(self):
         df_curve = pd.DataFrame([
