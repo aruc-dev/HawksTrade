@@ -236,6 +236,23 @@ All five checks must pass before relying on the bot to run unattended.
 
 ---
 
+## Optional — Read-Only Web Dashboard
+
+After the bot is running, you can optionally add a personal web dashboard for
+viewing system health, open positions, today's realized P&L, session
+unrealized P&L, daily-loss headroom, recent trades, and per-strategy win
+rates from your laptop or phone.
+
+The dashboard is **read-only** (no trades, no config changes), runs as a
+dedicated `hawkstrade-dash` user with no access to the bot's secrets, and is
+exposed via a Cloudflare Tunnel + Cloudflare Access (Google SSO + MFA, no
+inbound port on EC2).
+
+See **[`cloud-setup/dashboard-setup.md`](./dashboard-setup.md)** for the
+full step-by-step guide.
+
+---
+
 ## Security Notes
 
 - **No keys on disk.** Secrets Manager + `/dev/shm` means your Alpaca keys are never written to the filesystem.

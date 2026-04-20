@@ -22,6 +22,7 @@ local/
 
 # Local system files
 .DS_Store
+.cloudflared/
 
 # Local agent worktrees
 .claude/worktrees/

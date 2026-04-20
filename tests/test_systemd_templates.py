@@ -4,6 +4,7 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SYSTEMD_DIR = BASE_DIR / "scheduler" / "systemd"
+LOGROTATE_DIR = BASE_DIR / "cloud-setup" / "logrotate"
 
 
 TRADE_SERVICES = [
@@ -37,6 +38,10 @@ class SystemdTemplateTests(unittest.TestCase):
             *TRADE_SERVICES,
             "hawkstrade-health-check.service",
             *TIMERS,
+            # Optional dashboard templates (see cloud-setup/dashboard-setup.md)
+            "hawkstrade-dashboard.service",
+            "hawkstrade-cloudflared.service",
+            "hawkstrade-dash.env.example",
         }
 
         self.assertEqual(
@@ -127,6 +132,14 @@ class SystemdTemplateTests(unittest.TestCase):
         self.assertIn("sudo systemctl enable --now", text)
         self.assertIn("journalctl -u hawkstrade-risk-check.service", text)
         self.assertIn("systemctl list-timers 'hawkstrade-*'", text)
+
+    def test_dashboard_logrotate_template_retains_access_logs_for_30_days(self):
+        text = (LOGROTATE_DIR / "hawkstrade-dashboard").read_text(encoding="utf-8")
+
+        self.assertIn("/home/ec2-user/HawksTrade/logs/dashboard_access_*.log", text)
+        self.assertIn("daily", text)
+        self.assertIn("rotate 30", text)
+        self.assertIn("copytruncate", text)
 
 
 if __name__ == "__main__":
