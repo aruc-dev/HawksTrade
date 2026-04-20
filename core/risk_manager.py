@@ -116,12 +116,96 @@ def daily_loss_exceeded() -> bool:
 
 # ── Position Count ────────────────────────────────────────────────────────────
 
-def max_positions_reached() -> bool:
-    positions = ac.get_all_positions()
-    count = len(positions)
-    if count >= T["max_positions"]:
-        log.info(f"Max positions reached: {count}/{T['max_positions']}")
+def _is_crypto_symbol(symbol: str, asset_class: Optional[str] = None) -> bool:
+    """Return True if the symbol/asset_class represents a crypto position."""
+    if asset_class is not None:
+        ac_lower = str(asset_class).lower()
+        if "crypto" in ac_lower:
+            return True
+        if ac_lower in ("us_equity", "stock", "equity"):
+            return False
+    return "/" in (symbol or "")
+
+
+def _classify_position(pos) -> str:
+    """Return 'crypto' or 'stock' for an Alpaca position-like object or dict."""
+    if isinstance(pos, dict):
+        symbol = pos.get("symbol", "")
+        asset_class = pos.get("asset_class")
+    else:
+        symbol = getattr(pos, "symbol", "")
+        asset_class = getattr(pos, "asset_class", None)
+        if asset_class is not None and hasattr(asset_class, "value"):
+            asset_class = asset_class.value
+    return "crypto" if _is_crypto_symbol(symbol, asset_class) else "stock"
+
+
+def _position_counts() -> tuple:
+    """Return (total, crypto_count, stock_count) from current Alpaca positions."""
+    positions = ac.get_all_positions() or []
+    crypto_count = 0
+    stock_count = 0
+    for p in positions:
+        if _classify_position(p) == "crypto":
+            crypto_count += 1
+        else:
+            stock_count += 1
+    return len(positions), crypto_count, stock_count
+
+
+def _get_crypto_limits() -> tuple:
+    """Return (max_crypto, min_crypto) with safe defaults and invariant enforcement."""
+    max_total = int(T.get("max_positions", 0))
+    # Sensible defaults if keys missing: crypto unrestricted up to global cap.
+    max_crypto = int(T.get("max_crypto_positions", max_total))
+    min_crypto = int(T.get("min_crypto_positions", 0))
+    # Enforce invariant: 0 <= min <= max <= max_positions
+    max_crypto = max(0, min(max_crypto, max_total))
+    min_crypto = max(0, min(min_crypto, max_crypto))
+    return max_crypto, min_crypto
+
+
+def max_positions_reached(asset_class: Optional[str] = None, symbol: str = "") -> bool:
+    """
+    Check asset-class-aware position caps.
+    - Global cap: total positions >= max_positions.
+    - Crypto cap: crypto positions >= max_crypto_positions (blocks crypto entries only).
+    - Stock reservation: stock positions >= max_positions - min_crypto_positions
+      (blocks stock entries to preserve reserved crypto slots).
+    When called with no args, preserves legacy behavior (global cap only).
+    """
+    total, crypto_count, stock_count = _position_counts()
+    max_total = T["max_positions"]
+    max_crypto, min_crypto = _get_crypto_limits()
+
+    if total >= max_total:
+        log.info(f"Max positions reached: {total}/{max_total}")
         return True
+
+    if asset_class is None and not symbol:
+        return False
+
+    is_crypto = _is_crypto_symbol(symbol, asset_class)
+    if is_crypto:
+        if max_crypto <= 0:
+            log.info(
+                f"Crypto entries disabled (max_crypto_positions={max_crypto})."
+            )
+            return True
+        if crypto_count >= max_crypto:
+            log.info(
+                f"Max crypto positions reached: {crypto_count}/{max_crypto}"
+            )
+            return True
+    else:
+        # Stock entries are blocked if they would saturate slots reserved for crypto.
+        stock_slots_available = max_total - min_crypto
+        if stock_count >= stock_slots_available:
+            log.info(
+                f"Stock slots exhausted: {stock_count}/{stock_slots_available} "
+                f"({min_crypto} reserved for crypto)"
+            )
+            return True
     return False
 
 
@@ -180,10 +264,12 @@ def intraday_allowed() -> bool:
 
 # ── Master Pre-Trade Check ────────────────────────────────────────────────────
 
-def pre_trade_check(price: float, symbol: str) -> dict:
+def pre_trade_check(price: float, symbol: str, asset_class: Optional[str] = None) -> dict:
     """
     Run all risk checks before entering a trade.
     Returns dict with 'approved' bool, 'qty', and 'reason'.
+    When asset_class is provided ('crypto' or 'stock'), applies asset-class-aware
+    position caps (max_crypto_positions, min_crypto_positions reservation).
     """
     result = {"approved": False, "qty": 0.0, "reason": ""}
 
@@ -191,8 +277,17 @@ def pre_trade_check(price: float, symbol: str) -> dict:
         result["reason"] = "Daily loss limit exceeded"
         return result
 
-    if max_positions_reached():
-        result["reason"] = "Max open positions reached"
+    if max_positions_reached(asset_class=asset_class, symbol=symbol):
+        is_crypto = _is_crypto_symbol(symbol, asset_class)
+        max_crypto, min_crypto = _get_crypto_limits()
+        if is_crypto and max_crypto <= 0:
+            result["reason"] = "Crypto trading disabled (max_crypto_positions=0)"
+        elif is_crypto:
+            result["reason"] = f"Max crypto positions reached ({max_crypto})"
+        elif min_crypto > 0:
+            result["reason"] = f"Stock slots exhausted (max_positions - min_crypto_positions reservation)"
+        else:
+            result["reason"] = "Max open positions reached"
         return result
 
     if price <= 0:

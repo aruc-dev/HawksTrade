@@ -218,8 +218,8 @@ def enter_position(symbol: str, strategy: str, asset_class: str = "stock", dry_r
             log.warning(f"Invalid price for {symbol}: {price}. Skipping entry.")
             return None
 
-        # Risk Check
-        check = rm.pre_trade_check(price, symbol)
+        # Risk Check (asset-class-aware for crypto reservation/cap enforcement)
+        check = rm.pre_trade_check(price, symbol, asset_class=asset_class)
         if not check["approved"]:
             log.info(f"Entry blocked for {symbol}: {check['reason']}")
             return None

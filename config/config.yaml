@@ -29,7 +29,12 @@ intraday:
 
 # --- GENERAL TRADING PARAMETERS ---
 trading:
-  max_positions: 10              # Maximum number of open positions at any time
+  max_positions: 10              # Maximum number of open positions at any time (global cap)
+  max_crypto_positions: 3        # Max open crypto positions. Set to 0 to disable crypto entries entirely.
+  min_crypto_positions: 0        # Reserved slots for crypto — stocks cannot fill these slots.
+                                 # Crypto is NOT required to use them; reservation only blocks stocks
+                                 # from saturating the portfolio. Set both max and min to 0 to disable crypto.
+                                 # Invariant: min_crypto_positions <= max_crypto_positions <= max_positions
   max_position_pct: 0.05         # Max % of portfolio per position (5%)
   stop_loss_pct: 0.035           # Stop-loss at 3.5% below entry
   take_profit_pct: 0.12          # Take-profit at 12% above entry
