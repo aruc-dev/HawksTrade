@@ -119,7 +119,11 @@ class CryptoPositionCapsTests(unittest.TestCase):
     def setUp(self):
         # Snapshot and restore the module-level T dict so mutations don't leak.
         self.orig_T = dict(risk_manager.T)
-        self.addCleanup(lambda: risk_manager.T.update(self.orig_T))
+        self.addCleanup(self._restore_trading_config)
+
+    def _restore_trading_config(self):
+        risk_manager.T.clear()
+        risk_manager.T.update(self.orig_T)
 
     def _set_limits(self, max_positions=10, max_crypto=3, min_crypto=0):
         risk_manager.T["max_positions"] = max_positions
