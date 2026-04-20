@@ -97,9 +97,9 @@ note_ok "config file found: ${CONFIG_FILE}"
 # script works even when the venv is broken. Simple grep is fine for
 # `mode: paper` / `mode: live`.
 
-MODE="$(grep -E '^\s*mode:\s*' "${CONFIG_FILE}" \
+MODE="$(grep -E '^[[:space:]]*mode:[[:space:]]*' "${CONFIG_FILE}" \
         | head -n1 \
-        | sed -E 's/^\s*mode:\s*"?([a-zA-Z]+)"?.*/\1/' \
+        | sed -E 's/^[[:space:]]*mode:[[:space:]]*"?([a-zA-Z]+)"?.*/\1/' \
         | tr -d '[:space:]' || true)"
 
 if [[ -z "${MODE}" ]]; then
@@ -109,9 +109,9 @@ else
     note_ok "Trading mode from config: ${C_BOLD}${MODE}${C_RESET}"
 fi
 
-SECRETS_SOURCE="$(grep -E '^\s*secrets_source:\s*' "${CONFIG_FILE}" \
+SECRETS_SOURCE="$(grep -E '^[[:space:]]*secrets_source:[[:space:]]*' "${CONFIG_FILE}" \
         | head -n1 \
-        | sed -E 's/^\s*secrets_source:\s*"?([a-zA-Z]+)"?.*/\1/' \
+        | sed -E 's/^[[:space:]]*secrets_source:[[:space:]]*"?([a-zA-Z]+)"?.*/\1/' \
         | tr -d '[:space:]' || true)"
 SECRETS_SOURCE="${SECRETS_SOURCE:-dotenv}"
 note_info "secrets_source: ${SECRETS_SOURCE}"
@@ -120,7 +120,10 @@ note_info "secrets_source: ${SECRETS_SOURCE}"
 
 section "1. systemd unit discovery"
 
-mapfile -t ALL_UNITS < <(
+ALL_UNITS=()
+while IFS= read -r unit; do
+    [[ -n "${unit}" ]] && ALL_UNITS+=("${unit}")
+done < <(
     systemctl list-unit-files --no-legend --no-pager 'hawkstrade-*' 2>/dev/null \
         | awk '{print $1}' \
         | sort -u
@@ -151,6 +154,68 @@ done
 # ── Unit file validation ──────────────────────────────────────────────────────
 
 section "2. Unit configuration validation"
+
+collapse_nonempty_lines() {
+    awk 'NF {
+        sub(/^[[:space:]]+/, "")
+        sub(/[[:space:]]+$/, "")
+        if (out) {
+            out = out " ; " $0
+        } else {
+            out = $0
+        }
+    } END { print out }'
+}
+
+timer_schedule_for_unit() {
+    local unit="$1"
+    local calendar monotonic fallback
+
+    # systemd exposes parsed timer schedules through these properties. Direct
+    # OnCalendar/OnBootSec properties are not portable across systemd versions.
+    calendar="$(systemctl show -p TimersCalendar --value "${unit}" 2>/dev/null | collapse_nonempty_lines)"
+    monotonic="$(systemctl show -p TimersMonotonic --value "${unit}" 2>/dev/null | collapse_nonempty_lines)"
+
+    [[ "${calendar}" == "n/a" ]] && calendar=""
+    [[ "${monotonic}" == "n/a" ]] && monotonic=""
+
+    if [[ -n "${calendar}" && -n "${monotonic}" ]]; then
+        printf '%s ; %s\n' "${calendar}" "${monotonic}"
+        return
+    fi
+    if [[ -n "${calendar}" ]]; then
+        printf '%s\n' "${calendar}"
+        return
+    fi
+    if [[ -n "${monotonic}" ]]; then
+        printf '%s\n' "${monotonic}"
+        return
+    fi
+
+    fallback="$(
+        systemctl cat "${unit}" 2>/dev/null | awk '
+            /^[[:space:]]*\[/ {
+                in_timer = ($0 ~ /^[[:space:]]*\[Timer\][[:space:]]*$/)
+                next
+            }
+            in_timer {
+                line = $0
+                sub(/[[:space:]]*[#;].*$/, "", line)
+                sub(/^[[:space:]]+/, "", line)
+                sub(/[[:space:]]+$/, "", line)
+                if (line ~ /^(OnCalendar|OnActiveSec|OnBootSec|OnStartupSec|OnUnitActiveSec|OnUnitInactiveSec)=.+/) {
+                    if (out) {
+                        out = out " ; " line
+                    } else {
+                        out = line
+                    }
+                }
+            }
+            END { print out }
+        '
+    )"
+    printf '%s\n' "${fallback}"
+}
 
 validate_unit() {
     local unit="$1"
@@ -201,12 +266,11 @@ validate_unit() {
 
         note_ok "${unit}: fragment OK, User=${user:-<default>} resolvable, ExecStart=${exec_bin}"
     else
-        # Timer: must have a [Timer] section (verified by presence of OnCalendar or OnBootSec)
-        local oncal onboot
-        oncal="$(systemctl show -p OnCalendar --value "${unit}" 2>/dev/null)"
-        onboot="$(systemctl show -p OnBootSec --value "${unit}" 2>/dev/null)"
-        if [[ -z "${oncal}" && -z "${onboot}" ]]; then
-            note_fail "${unit}: no OnCalendar or OnBootSec configured"
+        # Timer: must have at least one calendar or monotonic trigger.
+        local schedule
+        schedule="$(timer_schedule_for_unit "${unit}")"
+        if [[ -z "${schedule}" ]]; then
+            note_fail "${unit}: no calendar or monotonic timer schedule configured"
             return
         fi
         # Timer should point at a companion service that actually exists
@@ -218,7 +282,7 @@ validate_unit() {
             note_fail "${unit}: activates ${activates} but that unit does not exist"
             return
         fi
-        note_ok "${unit}: schedule='${oncal:-${onboot}}', activates=${activates}"
+        note_ok "${unit}: schedule='${schedule}', activates=${activates}"
     fi
 }
 
