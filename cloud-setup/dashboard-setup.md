@@ -204,13 +204,25 @@ Phase 2 adds:
   user is comfortably free)
 - Google account for SSO (Cloudflare Access supports email OTP as a fallback)
 
-### 2.1 Add your domain to Cloudflare (skip if already done)
+### 2.1 Add your domain to Cloudflare (skip if already active)
+
+Skip this step if the domain was purchased directly from Cloudflare, or if it
+already appears as an active domain in the same Cloudflare account where you
+will create the tunnel and Access policy. Cloudflare-purchased domains already
+use Cloudflare DNS, so there is no external registrar nameserver update to do.
+
+Only do this step if the domain was bought somewhere else (GoDaddy, Namecheap,
+AWS Route 53, etc.) or is not already active in this Cloudflare account:
 
 1. In the Cloudflare dashboard, click **Add a site** and enter your domain
 2. Choose the **Free** plan
 3. Cloudflare gives you two nameservers — go to your domain registrar and
    replace the existing NS records with these two
 4. Wait for propagation (usually < 1 hour)
+
+Before continuing, confirm the domain is visible and active under Cloudflare
+**Websites**. You still need the later tunnel and Access steps even when this
+domain-add step is skipped.
 
 ### 2.2 Create a Cloudflare Tunnel
 
