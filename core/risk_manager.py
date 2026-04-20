@@ -285,7 +285,7 @@ def pre_trade_check(price: float, symbol: str, asset_class: Optional[str] = None
         elif is_crypto:
             result["reason"] = f"Max crypto positions reached ({max_crypto})"
         elif min_crypto > 0:
-            result["reason"] = f"Stock slots exhausted (max_positions - min_crypto_positions reservation)"
+            result["reason"] = "Stock slots exhausted (max_positions - min_crypto_positions reservation)"
         else:
             result["reason"] = "Max open positions reached"
         return result
