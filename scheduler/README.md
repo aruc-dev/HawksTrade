@@ -6,7 +6,7 @@ creating a new Codex thread for every run.
 Use OS schedulers for operational trading tasks:
 
 - macOS: `launchd`
-- Linux: `cron`
+- Linux: `systemd` for production servers, or `cron` for simple deployments
 - Windows: Task Scheduler through PowerShell
 
 Codex or Claude automations can still be useful for summaries, but stop-loss
@@ -15,16 +15,18 @@ enforcement should be owned by the OS scheduler so it runs independently of an A
 ## Task Summary
 
 All schedules below assume the original laptop runs in Pacific time during US daylight
-saving time. Convert times if the host machine runs in another timezone.
+saving time. Convert times if the host machine runs in another timezone. The
+commands shown are the Linux cron commands; macOS and Windows runners are
+documented in their own sections below.
 
 | Task | Command | Eastern Time | Pacific Time |
 |------|---------|--------------|--------------|
-| First stock scan | `python3 scheduler/run_scan.py --stocks-only` | 9:35 AM Mon-Fri | 6:35 AM Mon-Fri |
-| Full scan | `python3 scheduler/run_scan.py` | 10:00 AM-3:00 PM hourly Mon-Fri | 7:00 AM-12:00 PM hourly Mon-Fri |
-| Risk check | `python3 scheduler/run_risk_check.py` | 9:45 AM-3:45 PM every 15 min Mon-Fri | 6:45 AM-12:45 PM every 15 min Mon-Fri |
-| Crypto scan | `python3 scheduler/run_scan.py --crypto-only` | Hourly, every day | Hourly, every day |
-| Daily report | `python3 scheduler/run_report.py` | 4:30 PM Mon-Fri | 1:30 PM Mon-Fri |
-| Weekly report | `python3 scheduler/run_report.py --weekly` | 8:00 AM Monday | 5:00 AM Monday |
+| First stock scan | `./scripts/run_hawkstrade_job.sh scheduler/run_scan.py --stocks-only` | 9:35 AM Mon-Fri | 6:35 AM Mon-Fri |
+| Full scan | `./scripts/run_hawkstrade_job.sh scheduler/run_scan.py` | 10:00 AM-3:00 PM hourly Mon-Fri | 7:00 AM-12:00 PM hourly Mon-Fri |
+| Risk check | `./scripts/run_hawkstrade_job.sh scheduler/run_risk_check.py` | 9:45 AM-3:45 PM every 15 min Mon-Fri | 6:45 AM-12:45 PM every 15 min Mon-Fri |
+| Crypto scan | `./scripts/run_hawkstrade_job.sh scheduler/run_scan.py --crypto-only` | Hourly, every day | Hourly, every day |
+| Daily report | `./scripts/run_hawkstrade_job.sh scheduler/run_report.py` | 4:30 PM Mon-Fri | 1:30 PM Mon-Fri |
+| Weekly report | `./scripts/run_hawkstrade_job.sh scheduler/run_report.py --weekly` | 8:00 AM Monday | 5:00 AM Monday |
 
 Before enabling schedules:
 
@@ -110,6 +112,17 @@ Logs:
 macOS caveat: user `LaunchAgents` run while the user session is available. If the Mac
 sleeps, executions may be missed or delayed.
 
+## Linux Systemd
+
+Production Linux servers should prefer systemd timers over cron when available.
+The templates in `scheduler/systemd/` add `network-online.target` ordering,
+`/dev/shm` secret loading, journal logs, and explicit one-shot services for scans,
+risk checks, reports, and health checks. The scan, risk-check, and report services
+still run through `scripts/run_hawkstrade_job.sh`, so they keep the `.venv`
+selection, Alpaca preflight checks, and shared trade-mutation lock used by cron.
+
+See `scheduler/systemd/README.md` for installation and operating commands.
+
 ## Linux Cron
 
 Templates:
@@ -123,6 +136,24 @@ Edit `HAWKSTRADE_DIR` in the chosen file, then install:
 ```bash
 crontab scheduler/cron/hawkstrade-eastern.cron
 ```
+
+The Linux cron templates run scheduled jobs through
+`scripts/run_hawkstrade_job.sh`, so scan, risk-check, and report jobs use the
+same Python environment selection. The wrapper chooses `.venv` when available.
+Before running the job, it verifies Alpaca credentials and connectivity with a
+broker clock call; failures are logged as `status=preflight_failed` and the job
+is not executed. It also uses a shared `flock` lock at
+`local/locks/trade-mutating-jobs.lock` for trade-mutating scan and risk-check
+jobs, so they cannot overlap while placing or closing orders. Full scans, stock
+scans, and risk checks wait up to 10 minutes for the lock; redundant
+`--crypto-only` runs skip when another trade-mutating job is already active.
+Report jobs use the same wrapper but do not take the trade-mutation lock.
+
+The Linux cron templates also set `HAWKSTRADE_REQUIRE_SHM=1`. When
+`config/config.yaml` uses `secrets_source: shm`, that environment guard makes
+cron jobs fail clearly instead of falling back to disk dotenv files if
+`/dev/shm/.hawkstrade.env` is missing, unreadable, or rejected by
+`HAWKSTRADE_SHM_MAX_AGE_SECONDS`.
 
 View installed jobs:
 
@@ -156,6 +187,29 @@ the host timezone. Terminal output uses plain status tags like `[OK]`, `[WARN]`,
 and `[NOK]` so it stays readable in cron logs and copied output. The HTML report
 includes the generation time, the active lookback window, and troubleshooting
 sections for the latest warnings and errors.
+
+Each run also writes timestamped HTML and JSON snapshots to
+`reports/health_snapshots/` by default. Use `--snapshot-dir` to change the
+location, `--snapshot-retention-days` to change the default 14-day pruning
+window, or `--no-snapshot` for ad-hoc runs that should not persist history.
+
+The health checker also writes an alert state file to
+`reports/alerts/health_alert_latest.txt`. When overall health is `[NOK]`, it
+writes a timestamped alert file in the same directory. Set
+`HAWKSTRADE_HEALTH_ALERT_WEBHOOK_URL` or pass `--alert-webhook-url` to POST the
+alert payload to an external notifier. Use `--no-alert` to disable alert file and
+webhook handling for ad-hoc runs.
+
+Risk checks persist consecutive latest-price failures in
+`data/price_fetch_failures.json`. The health checker displays those failures in
+the terminal and HTML reports, and marks the system `[NOK]` once a symbol reaches
+the alert threshold. A successful later price fetch clears that symbol's failure
+count.
+
+Scans and risk checks reconcile `data/trades.csv` with broker positions after
+non-dry-run execution. Reports and the Linux health checker reconcile before
+building summaries when Alpaca is reachable, so local open rows stay aligned with
+actual broker exposure without a separate manual reconciliation run.
 
 The scheduled entrypoints now emit structured `RUN_START` / `RUN_END` markers
 with unique `run_id` values. The health checker uses those markers first and

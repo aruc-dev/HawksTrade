@@ -27,6 +27,19 @@ SCFG = CFG["strategies"]["range_breakout"]
 log  = logging.getLogger("strategy.range_breakout")
 
 
+def _bars_for_symbol(bars_data, symbol: str):
+    """Return bars for slashed or slashless crypto symbols without raising on missing data."""
+    lookup_symbol = ac.to_crypto_pair_symbol(symbol)
+    for key in dict.fromkeys((lookup_symbol, symbol)):
+        try:
+            bars = bars_data[key]
+        except (AttributeError, KeyError, TypeError):
+            bars = None
+        if bars is not None:
+            return bars
+    return None
+
+
 class RangeBreakoutStrategy(BaseStrategy):
 
     name        = "range_breakout"
@@ -58,7 +71,7 @@ class RangeBreakoutStrategy(BaseStrategy):
 
         for symbol in universe:
             try:
-                bars = bars_data[symbol]
+                bars = _bars_for_symbol(bars_data, symbol)
                 if bars is None or len(bars) < 52:
                     continue
 

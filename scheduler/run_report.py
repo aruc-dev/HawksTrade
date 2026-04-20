@@ -17,8 +17,11 @@ from datetime import datetime, timezone
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import yaml
+from core import alpaca_client as ac
+from core.logging_config import runtime_log_handlers
 from core.portfolio import get_snapshot, print_snapshot
 from core.run_markers import run_scope
+from scheduler.reconcile_trade_log import safe_reconcile
 from tracking.performance import compute_summary, format_report, save_performance_snapshot
 
 BASE_DIR    = Path(__file__).resolve().parent.parent
@@ -34,10 +37,7 @@ def _utc_now():
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(LOG_DIR / f"report_{_utc_now().strftime('%Y%m%d')}.log"),
-    ],
+    handlers=runtime_log_handlers(LOG_DIR, f"report_{_utc_now().strftime('%Y%m%d')}.log"),
 )
 log = logging.getLogger("run_report")
 
@@ -48,6 +48,7 @@ with open(BASE_DIR / "config" / "config.yaml") as f:
 def run_daily_report():
     log.info("=== DAILY REPORT ===")
     ts = _utc_now().strftime("%Y-%m-%d")
+    safe_reconcile(context="run_report.daily_pre_summary", logger=log)
 
     # Portfolio snapshot
     snap = get_snapshot()
@@ -85,6 +86,7 @@ def run_daily_report():
 def run_weekly_report():
     log.info("=== WEEKLY REPORT ===")
     ts = _utc_now().strftime("%Y-W%W")
+    safe_reconcile(context="run_report.weekly_pre_summary", logger=log)
 
     summary = compute_summary()
     report_text = format_report(summary)
@@ -110,8 +112,27 @@ if __name__ == "__main__":
         "run_report",
         weekly=args.weekly,
         report_kind="weekly" if args.weekly else "daily",
-    ):
-        if args.weekly:
-            run_weekly_report()
-        else:
-            run_daily_report()
+    ) as marker:
+        try:
+            if args.weekly:
+                run_weekly_report()
+            else:
+                run_daily_report()
+        except Exception as e:
+            info = ac.classify_alpaca_error(e)
+            marker.mark_error(
+                stage="report_generation",
+                error_type=type(e).__name__,
+                error_category=info.category,
+                retryable=info.retryable,
+                status_code=info.status_code,
+            )
+            log.error(
+                "Report generation failed: %s | category=%s retryable=%s status_code=%s",
+                e,
+                info.category,
+                info.retryable,
+                info.status_code or "",
+                exc_info=True,
+            )
+            raise

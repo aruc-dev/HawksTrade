@@ -4,22 +4,23 @@
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 HAWKSTRADE_DIR=/path/to/HawksTrade
+HAWKSTRADE_REQUIRE_SHM=1
 
 # First stock-only scan after open: 13:35 UTC / 9:35 AM ET
-35 13 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_scan.py --stocks-only >> logs/cron.log 2>&1
+35 13 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && ./scripts/run_hawkstrade_job.sh scheduler/run_scan.py --stocks-only >> logs/cron.log 2>&1
 
 # Full stock + crypto scans: hourly from 14:00 through 19:00 UTC
-0 14-19 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_scan.py >> logs/cron.log 2>&1
+0 14-19 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && ./scripts/run_hawkstrade_job.sh scheduler/run_scan.py >> logs/cron.log 2>&1
 
 # Stop-loss / take-profit enforcement: 13:45 through 19:45 UTC
-45 13 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_risk_check.py >> logs/cron.log 2>&1
-0,15,30,45 14-19 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_risk_check.py >> logs/cron.log 2>&1
+45 13 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && ./scripts/run_hawkstrade_job.sh scheduler/run_risk_check.py >> logs/cron.log 2>&1
+0,15,30,45 14-19 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && ./scripts/run_hawkstrade_job.sh scheduler/run_risk_check.py >> logs/cron.log 2>&1
 
 # Crypto-only scan: hourly, every day
-0 * * * * cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
+0 * * * * cd "$HAWKSTRADE_DIR" && mkdir -p logs && ./scripts/run_hawkstrade_job.sh scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
 
 # Daily report: 20:30 UTC / 4:30 PM ET, weekdays
-30 20 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_report.py >> logs/cron.log 2>&1
+30 20 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && ./scripts/run_hawkstrade_job.sh scheduler/run_report.py >> logs/cron.log 2>&1
 
 # Weekly report: 12:00 UTC / 8:00 AM ET, Mondays
-0 12 * * 1 cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_report.py --weekly >> logs/cron.log 2>&1
+0 12 * * 1 cd "$HAWKSTRADE_DIR" && mkdir -p logs && ./scripts/run_hawkstrade_job.sh scheduler/run_report.py --weekly >> logs/cron.log 2>&1

@@ -7,6 +7,7 @@ Writes every trade to the trade log.
 """
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional, List, Dict
 from pathlib import Path
@@ -15,6 +16,7 @@ import yaml
 
 from core import alpaca_client as ac
 from core import risk_manager as rm
+from tracking import order_intents
 from tracking.trade_log import log_trade, mark_trade_closed, get_trade_age_days
 
 # ── Setup ───────────────────────────────────────────────────────────────────
@@ -27,6 +29,10 @@ MODE        = CFG["mode"]
 ORDER_TYPE  = CFG["trading"]["order_type"]
 SLIPPAGE    = CFG["trading"]["limit_slippage_pct"]
 log         = logging.getLogger("core.order_executor")
+
+
+class PendingExitOrderCheckFailed(RuntimeError):
+    """Raised when open sell orders cannot be inspected safely."""
 
 
 def _utc_now():
@@ -57,12 +63,58 @@ def _order_side(order) -> str | None:
     return str(getattr(side, "value", side)).lower()
 
 
+def _broker_order_id(order) -> str:
+    return str(_order_value(order, "id", _order_value(order, "order_id", "")) or "")
+
+
+def _current_run_id() -> str:
+    return os.getenv("HAWKSTRADE_RUN_ID") or "manual"
+
+
+def _create_order_intent(symbol: str, side: str, strategy: str, asset_class: str, qty, limit_price=None) -> dict | None:
+    if MODE == "backtest":
+        return None
+    intent, created = order_intents.get_or_create_order_intent(
+        run_id=_current_run_id(),
+        symbol=symbol,
+        side=side,
+        strategy=strategy,
+        asset_class=asset_class,
+        qty=qty,
+        limit_price=limit_price,
+    )
+    action = "created" if created else "reused"
+    log.info(f"Order intent {action}: {intent['client_order_id']} | {side} {symbol} | strategy={strategy}")
+    return intent
+
+
+def _mark_order_intent_submitted(intent: dict | None, order) -> None:
+    if not intent:
+        return
+    status = _order_status(order) or "submitted"
+    order_intents.update_order_intent(
+        intent["client_order_id"],
+        status=status,
+        broker_order_id=_broker_order_id(order),
+    )
+
+
+def _mark_order_intent_failed(intent: dict | None, exc: Exception) -> None:
+    if not intent:
+        return
+    order_intents.update_order_intent(
+        intent["client_order_id"],
+        status="submit_failed",
+        error=f"{type(exc).__name__}: {exc}",
+    )
+
+
 def _has_pending_exit_order(symbol: str) -> bool:
     try:
         orders = ac.get_open_orders()
     except Exception as e:
-        log.warning(f"Could not check pending exit orders for {symbol}; continuing with exit: {e}")
-        return False
+        log.error(f"Could not check pending exit orders for {symbol}; blocking exit fail-closed: {e}")
+        raise PendingExitOrderCheckFailed(f"Could not check pending exit orders for {symbol}") from e
 
     for order in orders or []:
         order_symbol = _order_value(order, "symbol", "")
@@ -81,6 +133,41 @@ def _order_filled_qty(order) -> float:
         return abs(float(str(raw_qty)))
     except (TypeError, ValueError):
         return 0.0
+
+
+def _order_filled_avg_price(order, fallback: float) -> float:
+    raw_price = _order_value(order, "filled_avg_price", None)
+    if raw_price in (None, ""):
+        return fallback
+    try:
+        filled_avg_price = float(str(raw_price))
+    except (TypeError, ValueError):
+        return fallback
+    return filled_avg_price if filled_avg_price > 0 else fallback
+
+
+def _entry_fill_qty(order, requested_qty: float) -> float:
+    """Return the broker-confirmed entry quantity that should count as exposure."""
+    status = _order_status(order)
+    filled_qty = _order_filled_qty(order)
+    if status is None:
+        return requested_qty
+    if status == "filled":
+        return filled_qty or requested_qty
+    if filled_qty >= requested_qty:
+        return filled_qty
+    if status == "partially_filled" or filled_qty > 0:
+        return filled_qty
+    return 0.0
+
+
+def _entry_log_status(order, requested_qty: float, filled_qty: float) -> str:
+    status = _order_status(order)
+    if status is None or status == "filled" or filled_qty >= requested_qty:
+        return "open"
+    if status == "partially_filled" or filled_qty > 0:
+        return "partially_filled"
+    return "submitted"
 
 
 def _exit_fill_qty(order, requested_qty: float) -> float:
@@ -151,29 +238,50 @@ def enter_position(symbol: str, strategy: str, asset_class: str = "stock", dry_r
             log.info(f"Entry size capped for {symbol}: requested={qty} capped={capped_qty}")
         qty = capped_qty
 
-        sl = rm.stop_loss_price(price)
-        tp = rm.take_profit_price(price)
-
         if dry_run:
             log.info(f"DRY RUN: would buy {qty} {symbol} @ {price}")
             return {"symbol": symbol, "status": "dry_run"}
 
         # Place Order
         if ORDER_TYPE == "market":
-            order = ac.place_market_order(symbol, qty, "buy", strategy=strategy)
+            intent = _create_order_intent(symbol, "buy", strategy, asset_class, qty)
+            try:
+                order = ac.place_market_order(
+                    symbol,
+                    qty,
+                    "buy",
+                    strategy=strategy,
+                    client_order_id=intent["client_order_id"] if intent else None,
+                )
+            except Exception as e:
+                _mark_order_intent_failed(intent, e)
+                raise
         else:
             limit_px = price * (1 + SLIPPAGE)
-            order = ac.place_limit_order(
-                symbol,
-                qty,
-                "buy",
-                limit_px,
-                strategy=strategy,
-                asset_class=asset_class,
-            )
+            intent = _create_order_intent(symbol, "buy", strategy, asset_class, qty, limit_price=limit_px)
+            try:
+                order = ac.place_limit_order(
+                    symbol,
+                    qty,
+                    "buy",
+                    limit_px,
+                    strategy=strategy,
+                    asset_class=asset_class,
+                    client_order_id=intent["client_order_id"] if intent else None,
+                )
+            except Exception as e:
+                _mark_order_intent_failed(intent, e)
+                raise
+        _mark_order_intent_submitted(intent, order)
 
         # Capture details for logging
         order_id = str(order.id) if hasattr(order, "id") else str(order.get("order_id"))
+        filled_qty = _entry_fill_qty(order, qty)
+        action_status = _entry_log_status(order, qty, filled_qty)
+        logged_qty = filled_qty if filled_qty > 0 else qty
+        entry_price = _order_filled_avg_price(order, price) if filled_qty > 0 else price
+        sl = rm.stop_loss_price(entry_price)
+        tp = rm.take_profit_price(entry_price)
         trade = {
             "timestamp":   _utc_now().isoformat(),
             "mode":        MODE,
@@ -181,15 +289,26 @@ def enter_position(symbol: str, strategy: str, asset_class: str = "stock", dry_r
             "strategy":    strategy,
             "asset_class": asset_class,
             "side":        "buy",
-            "qty":         qty,
-            "entry_price": price,
+            "qty":         logged_qty,
+            "entry_price": entry_price,
             "stop_loss":   sl,
             "take_profit": tp,
             "order_id":    order_id,
-            "status":      "open",
+            "status":      action_status,
         }
         log_trade(trade)
-        log.info(f"ENTERED {symbol} | strategy={strategy} | qty={qty} | price={price}")
+        if action_status == "open":
+            log.info(f"ENTERED {symbol} | strategy={strategy} | qty={logged_qty} | price={entry_price}")
+        elif action_status == "partially_filled":
+            log.warning(
+                f"Entry order partially filled for {symbol}; logged filled exposure only | "
+                f"strategy={strategy} | filled_qty={filled_qty} requested_qty={qty}"
+            )
+        else:
+            log.warning(
+                f"Entry order submitted for {symbol} but not filled yet; "
+                f"trade log status=submitted | strategy={strategy} | requested_qty={qty}"
+            )
         return trade
 
     except Exception as e:
@@ -210,7 +329,13 @@ def exit_position(symbol: str, reason: str, asset_class: str = "stock", dry_run:
             log.info(f"No open position for {symbol}, skipping exit.")
             return None
 
-        qty = abs(float(position.qty))
+        qty = float(position.qty)
+        if qty <= 0:
+            log.error(
+                f"exit_position called on non-long position for {symbol} (qty={qty}); "
+                "HawksTrade is long-only. Skipping exit."
+            )
+            return None
 
         if asset_class == "crypto":
             current_price = ac.get_crypto_latest_price(symbol)
@@ -259,7 +384,27 @@ def exit_position(symbol: str, reason: str, asset_class: str = "stock", dry_run:
             )
             return trade
 
-        if _has_pending_exit_order(order_symbol):
+        try:
+            has_pending_exit = _has_pending_exit_order(order_symbol)
+        except PendingExitOrderCheckFailed as e:
+            return {
+                "timestamp": _utc_now().isoformat(),
+                "mode": MODE,
+                "symbol": trade_symbol,
+                "strategy": strategy,
+                "asset_class": asset_class,
+                "side": "sell",
+                "qty": qty,
+                "entry_price": entry_price,
+                "exit_price": current_price,
+                "pnl_pct": round(pnl_pct, 6),
+                "exit_reason": reason,
+                "order_id": "",
+                "status": "pending_exit_check_failed",
+                "error": str(e),
+            }
+
+        if has_pending_exit:
             return {
                 "timestamp": _utc_now().isoformat(),
                 "mode": MODE,
@@ -277,17 +422,35 @@ def exit_position(symbol: str, reason: str, asset_class: str = "stock", dry_run:
             }
 
         if ORDER_TYPE == "market":
-            order = ac.place_market_order(order_symbol, qty, "sell", strategy=strategy)
+            intent = _create_order_intent(order_symbol, "sell", strategy, asset_class, qty)
+            try:
+                order = ac.place_market_order(
+                    order_symbol,
+                    qty,
+                    "sell",
+                    strategy=strategy,
+                    client_order_id=intent["client_order_id"] if intent else None,
+                )
+            except Exception as e:
+                _mark_order_intent_failed(intent, e)
+                raise
         else:
             limit_px = current_price * (1 - SLIPPAGE)
-            order = ac.place_limit_order(
-                order_symbol,
-                qty,
-                "sell",
-                limit_px,
-                strategy=strategy,
-                asset_class=asset_class,
-            )
+            intent = _create_order_intent(order_symbol, "sell", strategy, asset_class, qty, limit_price=limit_px)
+            try:
+                order = ac.place_limit_order(
+                    order_symbol,
+                    qty,
+                    "sell",
+                    limit_px,
+                    strategy=strategy,
+                    asset_class=asset_class,
+                    client_order_id=intent["client_order_id"] if intent else None,
+                )
+            except Exception as e:
+                _mark_order_intent_failed(intent, e)
+                raise
+        _mark_order_intent_submitted(intent, order)
 
         order_id = str(order.id) if hasattr(order, "id") else str(order.get("order_id"))
         filled_qty = _exit_fill_qty(order, qty)

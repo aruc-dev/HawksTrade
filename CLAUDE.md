@@ -189,9 +189,13 @@ These are set in `config/config.yaml → trading:` and enforced by `core/risk_ma
 | Max position size | 5% of portfolio per trade |
 | Stop-loss | 3.5% below entry |
 | Take-profit | 12% above entry |
-| Daily loss limit | 5% of portfolio → halt all trading |
+| Daily loss limit | 5% from first observed account value for the NY trading date → halt all trading |
 | Max open positions | 10 |
 | Min trade value | $100 USD |
+
+The daily-loss baseline is persisted in `data/daily_loss_baseline.json`. It is
+seeded from the first account value observed for the `America/New_York` trading
+date, not reconstructed from the prior close.
 
 ---
 

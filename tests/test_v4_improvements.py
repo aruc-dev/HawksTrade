@@ -1,9 +1,9 @@
 import unittest
+import warnings
 from unittest.mock import MagicMock, patch
 import pandas as pd
-import numpy as np
 from core import risk_manager as rm
-from strategies.rsi_reversion import RSIReversionStrategy
+from strategies.rsi_reversion import RSIReversionStrategy, _calc_rsi
 
 class V4ImprovementsTests(unittest.TestCase):
     # ── crypto_regime_ok (backtest path) ─────────────────────────────────────
@@ -126,6 +126,16 @@ class V4ImprovementsTests(unittest.TestCase):
         close_last  = float(mock_bars[-1].close)
         recovering = close_prev1 > close_prev2 and close_last > close_prev1
         self.assertFalse(recovering)
+
+    def test_rsi_all_gain_window_returns_100_without_runtime_warning(self):
+        closes = pd.Series(range(1, 40), dtype=float)
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            rsi = _calc_rsi(closes)
+
+        self.assertEqual(rsi, 100.0)
+        self.assertEqual(caught, [])
 
 if __name__ == "__main__":
     unittest.main()

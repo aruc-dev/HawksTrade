@@ -125,6 +125,13 @@ secrets_source: shm      # tells the bot to read from /dev/shm (RAM), not .env f
 
 Do **not** create a `config/.env` or `.env` file on EC2 — secrets come from Secrets Manager.
 
+The Linux cron templates set `HAWKSTRADE_REQUIRE_SHM=1`. With that guard enabled,
+HawksTrade refuses to fall back to local dotenv files when `secrets_source: shm`
+is configured and `/dev/shm/.hawkstrade.env` is missing, unreadable, or rejected
+by the optional age check. If you rotate secrets frequently, you can also set
+`HAWKSTRADE_SHM_MAX_AGE_SECONDS=<seconds>` in the cron file to reject stale RAM
+secret files.
+
 ---
 
 ## Step 7 — Set Up the Secrets Fetch Systemd Unit
@@ -186,6 +193,8 @@ HawksTrade includes ready-made cron templates. Use the UTC template on EC2
 # Edit HAWKSTRADE_DIR in the cron file first
 nano ~/HawksTrade/scheduler/cron/hawkstrade-utc.cron
 
+# Keep HAWKSTRADE_REQUIRE_SHM=1 enabled on EC2 so missing RAM secrets fail closed.
+
 # Install
 crontab ~/HawksTrade/scheduler/cron/hawkstrade-utc.cron
 
@@ -205,8 +214,8 @@ cd ~/HawksTrade
 # 1. Confirm secrets are in RAM
 cut -d= -f1 /dev/shm/.hawkstrade.env   # shows only key names, not values
 
-# 2. Confirm Alpaca connection works
-python3 -c "
+# 2. Confirm Alpaca connection works using the same fail-closed shm guard as cron
+HAWKSTRADE_REQUIRE_SHM=1 python3 -c "
 import sys; sys.path.insert(0, '.')
 from core.alpaca_client import get_account
 a = get_account()
@@ -214,10 +223,10 @@ print('Connected! Portfolio value:', a.portfolio_value)
 "
 
 # 3. Dry-run the scanner
-python3 scheduler/run_scan.py --dry-run
+HAWKSTRADE_REQUIRE_SHM=1 python3 scheduler/run_scan.py --dry-run
 
 # 4. Dry-run the risk check
-python3 scheduler/run_risk_check.py --dry-run
+HAWKSTRADE_REQUIRE_SHM=1 python3 scheduler/run_risk_check.py --dry-run
 
 # 5. Run unit tests
 python3 -m unittest discover -v

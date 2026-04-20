@@ -14,6 +14,47 @@ class CheckHealthLinuxTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
 
+    def _sample_report(
+        self,
+        *,
+        overall_status="green",
+        job_health=None,
+        log_errors=None,
+        log_warnings=None,
+        price_failures=None,
+    ):
+        generated_at = datetime(2026, 4, 17, 18, 5, 0)
+        return health.HealthReport(
+            generated_at=generated_at,
+            lookback_hours=4.0,
+            cron_template="custom",
+            cron_file=Path("/tmp/health.cron"),
+            local_timezone="UTC",
+            overall_status=overall_status,
+            alpaca=health.AlpacaState(
+                connected=True,
+                account_error=None,
+                positions_error=None,
+                portfolio_value=100000,
+                cash=50000,
+                buying_power=200000,
+                broker_positions=[],
+                trade_log_open_rows=[],
+            ),
+            job_health=job_health or [],
+            trade_summary={
+                "total_trades": 0,
+                "realized_pnl_dollars": 0.0,
+                "realized_pnl_pct": 0.0,
+                "unrealized_pnl_dollars": 0.0,
+                "total_pnl_dollars": 0.0,
+            },
+            log_errors=log_errors or [],
+            log_warnings=log_warnings or [],
+            price_failures=price_failures or [],
+            html_output=Path("/tmp/health.html"),
+        )
+
     def test_load_cron_jobs_parses_supported_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
             cron_file = Path(tmp) / "hawkstrade-pacific.cron"
@@ -22,8 +63,8 @@ class CheckHealthLinuxTests(unittest.TestCase):
                 """
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
-35 6 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_scan.py --stocks-only >> logs/cron.log 2>&1
-0 * * * * cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
+35 6 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && ./scripts/run_hawkstrade_job.sh scheduler/run_scan.py --stocks-only >> logs/cron.log 2>&1
+0 * * * * cd "$HAWKSTRADE_DIR" && mkdir -p logs && ./scripts/run_hawkstrade_job.sh scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
 """.strip()
                 + "\n",
             )
@@ -208,6 +249,7 @@ PATH=/usr/local/bin:/usr/bin:/bin
                     now=datetime(2026, 4, 17, 18, 5, 0),
                     lookback_hours=1.0,
                     alpaca_state=alpaca_state,
+                    price_failure_state_file=tmp_path / "missing_price_failures.json",
                 )
 
             terminal = health.format_terminal_report(report, use_color=False)
@@ -226,6 +268,347 @@ PATH=/usr/local/bin:/usr/bin:/bin
             self.assertIn("Log Warnings", html_text)
             self.assertIn("Quote fetch timeout for AMD", html_text)
             self.assertIn("Order rejected for AAPL", html_text)
+
+    def test_build_report_marks_repeated_price_failures_unhealthy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            cron_file = tmp_path / "health.cron"
+            log_dir = tmp_path / "logs"
+            html_output = tmp_path / "health.html"
+            price_state = tmp_path / "price_fetch_failures.json"
+            self._write(
+                cron_file,
+                """
+0 18 * * * cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_risk_check.py >> logs/cron.log 2>&1
+""".strip()
+                + "\n",
+            )
+            self._write(
+                log_dir / "risk_20260417.log",
+                """
+2026-04-17 18:00:00,000 [INFO] run_risk_check: RUN_START script=run_risk_check run_id=risk-1 dry_run=0
+2026-04-17 18:00:01,000 [INFO] run_risk_check: RUN_END script=run_risk_check run_id=risk-1 status=error duration_s=1.000 stage=price_fetch error_type=RepeatedPriceFetchFailure
+""".strip()
+                + "\n",
+            )
+            self._write(
+                price_state,
+                """
+{
+  "version": 1,
+  "threshold": 3,
+  "updated_at": "2026-04-17T18:00:01Z",
+  "symbols": {
+    "AAPL": {
+      "symbol": "AAPL",
+      "price_symbol": "AAPL",
+      "asset_class": "stock",
+      "count": 3,
+      "threshold": 3,
+      "status": "nok",
+      "reason": "exception",
+      "last_failed_at": "2026-04-17T18:00:01Z",
+      "last_error": "quote timeout",
+      "error_category": "timeout",
+      "retryable": true,
+      "status_code": 408
+    }
+  }
+}
+""".strip()
+                + "\n",
+            )
+
+            alpaca_state = health.AlpacaState(
+                connected=True,
+                account_error=None,
+                positions_error=None,
+                portfolio_value=101213.36,
+                cash=51104.76,
+                buying_power=289061.23,
+                broker_positions=[],
+                trade_log_open_rows=[],
+            )
+            summary = {
+                "generated_at": "2026-04-17T18:05:00",
+                "total_trades": 0,
+                "wins": 0,
+                "losses": 0,
+                "win_rate": 0.0,
+                "avg_win_pct": 0.0,
+                "avg_loss_pct": 0.0,
+                "total_pnl_pct": 0.0,
+                "realized_pnl_pct": 0.0,
+                "realized_pnl_dollars": 0.0,
+                "open_positions": 0,
+                "unrealized_pnl_dollars": 0.0,
+                "total_pnl_dollars": 0.0,
+                "monthly_pnl": {},
+                "by_strategy": {},
+            }
+
+            with (
+                patch.object(health, "load_closed_trades", return_value=pd.DataFrame()),
+                patch.object(health, "compute_summary", return_value=summary),
+            ):
+                report = health.build_health_report(
+                    cron_template="custom",
+                    cron_file=cron_file,
+                    log_dir=log_dir,
+                    html_output=html_output,
+                    now=datetime(2026, 4, 17, 18, 5, 0),
+                    lookback_hours=1.0,
+                    alpaca_state=alpaca_state,
+                    price_failure_state_file=price_state,
+                )
+
+            terminal = health.format_terminal_report(report, use_color=False)
+            html_text = health.write_html_report(report).read_text(encoding="utf-8")
+
+            self.assertEqual(report.overall_status, "red")
+            self.assertEqual(len(report.price_failures), 1)
+            self.assertIn("PRICE FETCH HEALTH", terminal)
+            self.assertIn("Repeated price failures : YES [NOK]", terminal)
+            self.assertIn("[NOK] Price fetch AAPL: 3/3 consecutive failure(s)", terminal)
+            self.assertIn("Price Fetch Health", html_text)
+            self.assertIn("AAPL", html_text)
+
+    def test_build_report_alerts_on_pending_exit_warning(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            cron_file = tmp_path / "health.cron"
+            log_dir = tmp_path / "logs"
+            self._write(
+                cron_file,
+                """
+0 18 * * * cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_risk_check.py >> logs/cron.log 2>&1
+""".strip()
+                + "\n",
+            )
+            self._write(
+                log_dir / "risk_20260417.log",
+                """
+2026-04-17 18:00:00,000 [INFO] run_risk_check: RUN_START script=run_risk_check run_id=risk-2 dry_run=0
+2026-04-17 18:00:00,500 [WARNING] core.order_executor: Exit order submitted for AAPL but not filled yet; leaving trade log open
+2026-04-17 18:00:01,000 [INFO] run_risk_check: RUN_END script=run_risk_check run_id=risk-2 status=ok duration_s=1.000 outcome=completed
+""".strip()
+                + "\n",
+            )
+            alpaca_state = health.AlpacaState(
+                connected=True,
+                account_error=None,
+                positions_error=None,
+                portfolio_value=100000,
+                cash=50000,
+                buying_power=200000,
+                broker_positions=[],
+                trade_log_open_rows=[],
+            )
+
+            report = health.build_health_report(
+                cron_template="custom",
+                cron_file=cron_file,
+                log_dir=log_dir,
+                html_output=tmp_path / "health.html",
+                now=datetime(2026, 4, 17, 18, 5, 0),
+                lookback_hours=1.0,
+                alpaca_state=alpaca_state,
+                trade_summary={"total_trades": 0},
+                price_failure_state_file=tmp_path / "missing_price_failures.json",
+            )
+
+            items = health.collect_alert_items(report)
+
+            self.assertEqual(report.overall_status, "red")
+            self.assertTrue(any("Pending exit warnings: 1 in window" in item for item in items))
+
+    def test_alert_items_include_red_operational_failures(self):
+        job = health.JobHealth(
+            key="risk_check",
+            label="Risk check",
+            schedule_lines=["0,15,30,45 * * * *"],
+            last_run_at=datetime(2026, 4, 17, 17, 0, 0),
+            last_success_at=datetime(2026, 4, 17, 17, 0, 0),
+            last_duration=timedelta(seconds=10),
+            missed_runs=2,
+            expected_runs=4,
+            status="red",
+            latest_note="No run in last 4 hours",
+        )
+        finding = health.LogFinding(
+            timestamp=datetime(2026, 4, 17, 18, 0, 0),
+            level="ERROR",
+            logger="run_scan",
+            message="Alpaca auth failed",
+            source_file=Path("scan_20260417.log"),
+            raw="raw",
+        )
+        price_failure = health.PriceFailureState(
+            symbol="AAPL",
+            price_symbol="AAPL",
+            asset_class="stock",
+            count=3,
+            threshold=3,
+            last_failed_at="2026-04-17T18:00:00Z",
+            reason="exception",
+            error_category="timeout",
+            retryable=True,
+            status_code=408,
+            last_error="quote timeout",
+        )
+        report = self._sample_report(
+            overall_status="red",
+            job_health=[job],
+            log_errors=[finding],
+            price_failures=[price_failure],
+        )
+
+        items = health.collect_alert_items(report)
+
+        self.assertTrue(any("Overall health is [NOK]" in item for item in items))
+        self.assertTrue(any("Cron Risk check [NOK]: 2 missed run(s)" in item for item in items))
+        self.assertTrue(any("Price fetch AAPL [NOK]" in item for item in items))
+        self.assertTrue(any("Log errors: 1 in window" in item for item in items))
+
+    def test_write_alert_files_updates_latest_and_timestamped_alert(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._sample_report(overall_status="red")
+            items = ["Overall health is [NOK]"]
+
+            result = health.write_alert_files(report, items, alert_dir=tmp)
+
+            self.assertTrue(result.active)
+            self.assertIsNotNone(result.latest_path)
+            self.assertIsNotNone(result.event_path)
+            self.assertTrue(result.latest_path.exists())
+            self.assertTrue(result.event_path.exists())
+            self.assertIn("HAWKSTRADE HEALTH ALERT", result.latest_path.read_text(encoding="utf-8"))
+            self.assertIn("Overall health is [NOK]", result.event_path.read_text(encoding="utf-8"))
+
+    def test_write_alert_files_clears_latest_when_healthy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._sample_report(overall_status="green")
+
+            result = health.write_alert_files(report, [], alert_dir=tmp)
+
+            self.assertFalse(result.active)
+            self.assertIsNotNone(result.latest_path)
+            self.assertIsNone(result.event_path)
+            self.assertTrue(result.latest_path.exists())
+            self.assertIn("No active health alert.", result.latest_path.read_text(encoding="utf-8"))
+
+    def test_write_health_snapshots_creates_html_json_and_prunes_old_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            snapshot_dir = Path(tmp)
+            self._write(snapshot_dir / "health_20260401T000000.html", "old html")
+            self._write(snapshot_dir / "health_20260401T000000.json", "{}")
+            self._write(snapshot_dir / "health_20260416T000000.json", "{}")
+            report = self._sample_report(overall_status="yellow")
+
+            result = health.write_health_snapshots(report, snapshot_dir=tmp, retention_days=7)
+
+            self.assertTrue(result.html_path.exists())
+            self.assertTrue(result.json_path.exists())
+            self.assertFalse((snapshot_dir / "health_20260401T000000.html").exists())
+            self.assertFalse((snapshot_dir / "health_20260401T000000.json").exists())
+            self.assertTrue((snapshot_dir / "health_20260416T000000.json").exists())
+            self.assertEqual(len(result.deleted_paths), 2)
+            self.assertIn("Linux Health Check", result.html_path.read_text(encoding="utf-8"))
+            payload = health.json.loads(result.json_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["overall_status"], "yellow")
+            self.assertEqual(payload["alpaca"]["open_position_count"], 0)
+            self.assertEqual(payload["lookback_hours"], 4.0)
+
+    def test_prune_health_snapshots_zero_retention_disables_deletion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            snapshot_dir = Path(tmp)
+            old_path = snapshot_dir / "health_20260401T000000.json"
+            self._write(old_path, "{}")
+
+            deleted = health.prune_health_snapshots(
+                snapshot_dir,
+                now=datetime(2026, 4, 17, 18, 5, 0),
+                retention_days=0,
+            )
+
+            self.assertEqual(deleted, [])
+            self.assertTrue(old_path.exists())
+
+    def test_health_report_to_dict_serializes_findings_and_jobs(self):
+        job = health.JobHealth(
+            key="risk_check",
+            label="Risk check",
+            schedule_lines=["0,15,30,45 * * * *"],
+            last_run_at=datetime(2026, 4, 17, 18, 0, 0),
+            last_success_at=datetime(2026, 4, 17, 18, 0, 0),
+            last_duration=timedelta(seconds=5),
+            missed_runs=0,
+            expected_runs=1,
+            status="green",
+        )
+        finding = health.LogFinding(
+            timestamp=datetime(2026, 4, 17, 18, 1, 0),
+            level="ERROR",
+            logger="run_scan",
+            message="boom",
+            source_file=Path("scan.log"),
+            raw="raw",
+        )
+        report = self._sample_report(job_health=[job], log_errors=[finding])
+
+        payload = health.health_report_to_dict(report)
+
+        self.assertEqual(payload["job_health"][0]["last_duration_s"], 5.0)
+        self.assertEqual(payload["job_health"][0]["last_run_at"], "2026-04-17T18:00:00")
+        self.assertEqual(payload["log_errors"][0]["message"], "boom")
+        self.assertEqual(payload["html_output"], "/tmp/health.html")
+
+    def test_fetch_alpaca_state_reconciles_before_trade_log_snapshot(self):
+        from core import alpaca_client as ac
+
+        account = type(
+            "Account",
+            (),
+            {"portfolio_value": "100000", "cash": "50000", "buying_power": "200000"},
+        )()
+        position = type(
+            "Position",
+            (),
+            {
+                "symbol": "AAPL",
+                "qty": "2",
+                "avg_entry_price": "100",
+                "current_price": "101",
+                "market_value": "202",
+                "unrealized_pl": "2",
+                "unrealized_plpc": "0.01",
+            },
+        )()
+        reconciled_rows = [
+            {
+                "symbol": "AAPL",
+                "qty": "2",
+                "entry_price": "100",
+                "side": "buy",
+                "status": "open",
+            }
+        ]
+
+        with (
+            patch.object(ac, "get_account", return_value=account),
+            patch.object(ac, "get_all_positions", return_value=[position]),
+            patch.object(health, "get_open_trades", side_effect=[[], reconciled_rows]),
+            patch.object(health, "safe_reconcile", return_value={"positions": 1}) as safe_reconcile,
+        ):
+            state = health.fetch_alpaca_state()
+
+        safe_reconcile.assert_called_once_with(
+            positions=[position],
+            context="health.pre_summary",
+            logger=health.log,
+        )
+        self.assertTrue(state.connected)
+        self.assertEqual(state.trade_log_open_rows, reconciled_rows)
 
     def test_read_log_lines_preserves_raw_tracebacks(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -249,7 +632,32 @@ RuntimeError: boom
             self.assertGreaterEqual(len(errors), 1)
             self.assertTrue(any("Traceback" in finding.message for finding in errors))
             self.assertTrue(any("RuntimeError: boom" in finding.message for finding in errors))
+            self.assertTrue(all(finding.timestamp == datetime(2026, 4, 17, 18, 0, 0) for finding in errors))
             self.assertEqual(len(warnings), 0)
+
+    def test_tracebacks_older_than_lookback_are_filtered(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "logs"
+            self._write(
+                log_dir / "scan_20260414.log",
+                """
+2026-04-14 18:00:00,000 [ERROR] run_scan: Failed to enter AAPL
+Traceback (most recent call last):
+  File "/tmp/example.py", line 10, in <module>
+    raise RuntimeError("old boom")
+RuntimeError: old boom
+""".strip()
+                + "\n",
+            )
+
+            runtime = health.load_runtime_records(log_dir)
+            errors, warnings = health._find_matching_error_lines(
+                runtime["findings_by_file"],
+                since=datetime(2026, 4, 17, 18, 0, 0),
+            )
+
+            self.assertEqual(errors, [])
+            self.assertEqual(warnings, [])
 
     def test_build_report_renders_html_and_terminal_output(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -323,6 +731,7 @@ RuntimeError: boom
                     html_output=html_output,
                     now=datetime(2026, 4, 16, 16, 35, 0),
                     alpaca_state=alpaca_state,
+                    price_failure_state_file=tmp_path / "missing_price_failures.json",
                 )
 
             terminal = health.format_terminal_report(report, use_color=False)

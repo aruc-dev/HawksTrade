@@ -11,6 +11,7 @@ mode: paper          # "paper" = simulation | "live" = real money
 # --- SECRETS SOURCE ---
 # "local" = load from config/.env or .env (for local dev)
 # "shm"   = load from /dev/shm/.hawkstrade.env (for EC2; populated at boot by scripts/fetch_secrets.sh)
+# Set HAWKSTRADE_REQUIRE_SHM=1 in production cron/systemd to fail closed if the shm file is unavailable.
 secrets_source: shm
 
 # --- ALPACA ENDPOINTS ---
@@ -32,7 +33,7 @@ trading:
   max_position_pct: 0.05         # Max % of portfolio per position (5%)
   stop_loss_pct: 0.035           # Stop-loss at 3.5% below entry
   take_profit_pct: 0.12          # Take-profit at 12% above entry
-  daily_loss_limit_pct: 0.05     # Hard stop: halt trading if daily P&L drops 5%
+  daily_loss_limit_pct: 0.05     # Hard stop from first observed account value for the NY trading date
   min_trade_value_usd: 100       # Minimum $ value per trade
   order_type: "limit"            # "market" or "limit"
   limit_slippage_pct: 0.001      # Limit price set 0.1% from current for fast fills

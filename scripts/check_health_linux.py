@@ -17,9 +17,14 @@ from __future__ import annotations
 
 import argparse
 import html
+import json
+import logging
+import os
 import re
 import shlex
 import sys
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -34,6 +39,7 @@ if str(BASE_DIR) not in sys.path:
 
 from tracking.performance import compute_summary, load_closed_trades
 from tracking.trade_log import get_open_trades
+from scheduler.reconcile_trade_log import safe_reconcile
 
 CONFIG_PATH = BASE_DIR / "config" / "config.yaml"
 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -42,11 +48,17 @@ with open(CONFIG_PATH, "r", encoding="utf-8") as f:
 LOG_DIR = BASE_DIR / CFG["reporting"]["logs_dir"]
 REPORTS_DIR = BASE_DIR / CFG["reporting"]["reports_dir"]
 DEFAULT_HTML_OUTPUT = REPORTS_DIR / "health_check_linux.html"
+DEFAULT_ALERT_DIR = REPORTS_DIR / "alerts"
+DEFAULT_SNAPSHOT_DIR = REPORTS_DIR / "health_snapshots"
+DEFAULT_SNAPSHOT_RETENTION_DAYS = 14.0
+DEFAULT_PRICE_FAILURE_STATE_FILE = BASE_DIR / "data" / "price_fetch_failures.json"
+DEFAULT_PRICE_FAILURE_ALERT_THRESHOLD = 3
 DEFAULT_CRON_FILES = {
     "eastern": BASE_DIR / "scheduler" / "cron" / "hawkstrade-eastern.cron",
     "pacific": BASE_DIR / "scheduler" / "cron" / "hawkstrade-pacific.cron",
     "utc": BASE_DIR / "scheduler" / "cron" / "hawkstrade-utc.cron",
 }
+log = logging.getLogger("check_health_linux")
 
 # ── Dataclasses ──────────────────────────────────────────────────────────────
 
@@ -169,6 +181,25 @@ class AlpacaState:
         return len(self.trade_log_open_rows)
 
 
+@dataclass(frozen=True)
+class PriceFailureState:
+    symbol: str
+    price_symbol: str
+    asset_class: str
+    count: int
+    threshold: int
+    last_failed_at: str | None
+    reason: str
+    error_category: str
+    retryable: bool
+    status_code: int | None
+    last_error: str
+
+    @property
+    def status(self) -> str:
+        return "red" if self.count >= self.threshold else "yellow"
+
+
 @dataclass
 class HealthReport:
     generated_at: datetime
@@ -182,7 +213,24 @@ class HealthReport:
     trade_summary: dict
     log_errors: list[LogFinding]
     log_warnings: list[LogFinding]
+    price_failures: list[PriceFailureState]
     html_output: Path
+
+
+@dataclass(frozen=True)
+class AlertResult:
+    active: bool
+    latest_path: Path | None
+    event_path: Path | None
+    webhook_sent: bool = False
+    webhook_error: str | None = None
+
+
+@dataclass(frozen=True)
+class SnapshotResult:
+    html_path: Path
+    json_path: Path
+    deleted_paths: list[Path]
 
 
 # ── Cron parsing ─────────────────────────────────────────────────────────────
@@ -198,6 +246,7 @@ LOG_LINE_RE = re.compile(
 )
 
 RUN_MARKER_RE = re.compile(r"^(?P<event>RUN_START|RUN_END)\s+(?P<fields>.*)$")
+HEALTH_SNAPSHOT_RE = re.compile(r"^health_(?P<stamp>\d{8}T\d{6})\.(?:html|json)$")
 TRUTHY_VALUES = {"1", "true", "yes", "on", "y"}
 
 
@@ -259,17 +308,17 @@ def _cron_pattern(minute_spec: str, hour_spec: str, dow_spec: str) -> CronPatter
 
 def _job_from_command(command: str) -> tuple[str, str] | None:
     normalized = command.lower()
-    if "python3 scheduler/run_scan.py --stocks-only" in normalized:
+    if "scheduler/run_scan.py" in normalized and "--stocks-only" in normalized:
         return "stock_scan", "Stock scan"
-    if "python3 scheduler/run_scan.py --crypto-only" in normalized:
+    if "scheduler/run_scan.py" in normalized and "--crypto-only" in normalized:
         return "crypto_scan", "Crypto scan"
-    if "python3 scheduler/run_scan.py" in normalized and "--stocks-only" not in normalized and "--crypto-only" not in normalized:
+    if "scheduler/run_scan.py" in normalized and "--stocks-only" not in normalized and "--crypto-only" not in normalized:
         return "full_scan", "Full scan"
-    if "python3 scheduler/run_risk_check.py" in normalized:
+    if "scheduler/run_risk_check.py" in normalized:
         return "risk_check", "Risk check"
-    if "python3 scheduler/run_report.py --weekly" in normalized:
+    if "scheduler/run_report.py" in normalized and "--weekly" in normalized:
         return "weekly_report", "Weekly report"
-    if "python3 scheduler/run_report.py" in normalized and "--weekly" not in normalized:
+    if "scheduler/run_report.py" in normalized and "--weekly" not in normalized:
         return "daily_report", "Daily report"
     return None
 
@@ -544,11 +593,13 @@ def _read_log_lines(path: Path) -> list[LogFinding]:
     if not path.exists():
         return findings
     in_traceback = False
+    last_timestamp: datetime | None = None
     with open(path, "r", encoding="utf-8", errors="replace") as f:
         for raw in f:
             finding = _parse_log_line(raw, path)
             if finding is not None:
                 findings.append(finding)
+                last_timestamp = finding.timestamp
                 in_traceback = False
                 continue
 
@@ -566,7 +617,7 @@ def _read_log_lines(path: Path) -> list[LogFinding]:
 
             findings.append(
                 LogFinding(
-                    timestamp=None,
+                    timestamp=last_timestamp,
                     level="ERROR",
                     logger="traceback",
                     message=raw_line,
@@ -591,8 +642,9 @@ def _find_matching_error_lines(
 
     for path in findings_by_file:
         for finding in findings_by_file[path]:
-            if since is not None and finding.timestamp is not None and finding.timestamp < since:
-                continue
+            if since is not None:
+                if finding.timestamp is None or finding.timestamp < since:
+                    continue
             msg = finding.message.lower()
             signature = (finding.timestamp, finding.level, finding.logger, finding.message)
             if finding.level == "ERROR" or "traceback" in msg:
@@ -821,7 +873,9 @@ def load_runtime_records(log_dir: Path) -> dict[str, object]:
     structured_risk_records = [r for r in structured_records if r.job_key == "risk_check"]
     structured_daily_report_records = [r for r in structured_records if r.job_key == "daily_report"]
     structured_weekly_report_records = [r for r in structured_records if r.job_key == "weekly_report"]
-    sort_key = lambda record: (record.start_time, record.run_id or "", record.source_file.name)
+    def sort_key(record: RunRecord) -> tuple[datetime, str, str]:
+        return record.start_time, record.run_id or "", record.source_file.name
+
     return {
         "scan": sorted(structured_scan_records + legacy_scan_records, key=sort_key),
         "risk_check": sorted(structured_risk_records + legacy_risk_records, key=sort_key),
@@ -1182,6 +1236,8 @@ def fetch_alpaca_state() -> AlpacaState:
     if connected:
         try:
             positions = ac.get_all_positions()
+            safe_reconcile(positions=positions, context="health.pre_summary", logger=log)
+            trade_log_open_rows = get_open_trades()
             for pos in positions or []:
                 broker_positions.append(
                     {
@@ -1210,6 +1266,83 @@ def fetch_alpaca_state() -> AlpacaState:
     )
 
 
+def _price_failure_default_threshold() -> int:
+    raw = os.getenv("HAWKSTRADE_PRICE_FAILURE_ALERT_THRESHOLD")
+    if raw is None:
+        return DEFAULT_PRICE_FAILURE_ALERT_THRESHOLD
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_PRICE_FAILURE_ALERT_THRESHOLD
+
+
+def _int_or_none(value: object) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def load_price_failure_state(path: str | Path = DEFAULT_PRICE_FAILURE_STATE_FILE) -> list[PriceFailureState]:
+    state_path = Path(path)
+    if not state_path.exists():
+        return []
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return [
+            PriceFailureState(
+                symbol=str(state_path),
+                price_symbol="",
+                asset_class="state_file",
+                count=1,
+                threshold=1,
+                last_failed_at=None,
+                reason="state_file_unreadable",
+                error_category="configuration",
+                retryable=False,
+                status_code=None,
+                last_error=f"Could not read price failure state file: {state_path}",
+            )
+        ]
+
+    if not isinstance(state, dict):
+        return []
+
+    default_threshold = _int_or_none(state.get("threshold")) or _price_failure_default_threshold()
+    symbols = state.get("symbols")
+    if not isinstance(symbols, dict):
+        return []
+
+    failures: list[PriceFailureState] = []
+    for key, raw_entry in sorted(symbols.items()):
+        if not isinstance(raw_entry, dict):
+            continue
+        count = _int_or_none(raw_entry.get("count")) or 0
+        if count <= 0:
+            continue
+        threshold = _int_or_none(raw_entry.get("threshold")) or default_threshold
+        failures.append(
+            PriceFailureState(
+                symbol=str(raw_entry.get("symbol") or key),
+                price_symbol=str(raw_entry.get("price_symbol") or ""),
+                asset_class=str(raw_entry.get("asset_class") or ""),
+                count=count,
+                threshold=max(1, threshold),
+                last_failed_at=raw_entry.get("last_failed_at"),
+                reason=str(raw_entry.get("reason") or ""),
+                error_category=str(raw_entry.get("error_category") or ""),
+                retryable=bool(raw_entry.get("retryable")),
+                status_code=_int_or_none(raw_entry.get("status_code")),
+                last_error=str(raw_entry.get("last_error") or ""),
+            )
+        )
+    return failures
+
+
 def build_health_report(
     *,
     cron_template: str = "auto",
@@ -1220,6 +1353,7 @@ def build_health_report(
     lookback_hours: float = 4.0,
     alpaca_state: AlpacaState | None = None,
     trade_summary: dict | None = None,
+    price_failure_state_file: str | Path = DEFAULT_PRICE_FAILURE_STATE_FILE,
 ) -> HealthReport:
     now = now or datetime.now().astimezone().replace(tzinfo=None)
     template_name, cron_path = resolve_cron_file(cron_template=cron_template, cron_file=cron_file)
@@ -1243,8 +1377,9 @@ def build_health_report(
     findings_by_file = runtime["findings_by_file"]
     window_start = now - timedelta(hours=lookback_hours)
     errors, warnings = _find_matching_error_lines(findings_by_file, since=window_start)
+    price_failures = load_price_failure_state(price_failure_state_file)
 
-    overall = _overall_status(alpaca_state, job_health, errors)
+    overall = _overall_status(alpaca_state, job_health, errors, warnings, price_failures)
 
     return HealthReport(
         generated_at=now,
@@ -1258,17 +1393,30 @@ def build_health_report(
         trade_summary=trade_summary,
         log_errors=errors,
         log_warnings=warnings,
+        price_failures=price_failures,
         html_output=Path(html_output).expanduser().resolve(),
     )
 
 
-def _overall_status(alpaca_state: AlpacaState, job_health: list[JobHealth], errors: list[LogFinding]) -> str:
+def _overall_status(
+    alpaca_state: AlpacaState,
+    job_health: list[JobHealth],
+    errors: list[LogFinding],
+    warnings: list[LogFinding],
+    price_failures: list[PriceFailureState],
+) -> str:
     if not alpaca_state.connected:
         return "red"
     if errors:
         return "red"
+    if any(_is_pending_exit_finding(finding) for finding in warnings):
+        return "red"
+    if any(failure.status == "red" for failure in price_failures):
+        return "red"
     if any(job.status == "red" for job in job_health):
         return "red"
+    if any(failure.status == "yellow" for failure in price_failures):
+        return "yellow"
     if any(job.status == "yellow" for job in job_health):
         return "yellow"
     return "green"
@@ -1359,6 +1507,16 @@ def _format_finding_entry(finding: LogFinding) -> str:
     return f"{timestamp} | {finding.source_file.name} | {finding.level} | {finding.logger} | {finding.message}"
 
 
+def _is_pending_exit_finding(finding: LogFinding) -> bool:
+    message = finding.message.lower()
+    return (
+        ("exit order" in message and ("not filled" in message or "submitted" in message))
+        or "pending sell order already exists" in message
+        or "pendingexitordercheckfailed" in message
+        or "pending_exit_check_failed" in message
+    )
+
+
 def _row_status(job: JobHealth, enabled: bool = False) -> str:
     return _severity_label(job.status, enabled)
 
@@ -1413,7 +1571,8 @@ def format_terminal_report(report: HealthReport, *, use_color: bool = False) -> 
     lines.append("")
 
     issues = [job for job in report.job_health if job.status != "green"]
-    if issues:
+    price_failure_issues = [failure for failure in report.price_failures if failure.status != "green"]
+    if issues or price_failure_issues:
         lines.append("ISSUE SUMMARY")
         for job in issues:
             reason_bits = []
@@ -1423,13 +1582,19 @@ def format_terminal_report(report: HealthReport, *, use_color: bool = False) -> 
                 reason_bits.append(job.latest_note)
             reason = "; ".join(reason_bits) if reason_bits else "status requires attention"
             lines.append(f"  - [NOK] {job.label}: {reason}")
+        for failure in price_failure_issues:
+            label = _severity_label(failure.status)
+            lines.append(
+                f"  - {label} Price fetch {failure.symbol}: "
+                f"{failure.count}/{failure.threshold} consecutive failure(s)"
+            )
         lines.append("")
 
     lines.append("PORTFOLIO")
     if report.alpaca.connected:
-        lines.append(f"Alpaca connectivity : OK [OK]")
+        lines.append("Alpaca connectivity : OK [OK]")
     else:
-        lines.append(f"Alpaca connectivity : FAILED [NOK]")
+        lines.append("Alpaca connectivity : FAILED [NOK]")
         if report.alpaca.account_error:
             lines.append(f"  Account error    : {report.alpaca.account_error}")
         if report.alpaca.positions_error:
@@ -1478,6 +1643,39 @@ def format_terminal_report(report: HealthReport, *, use_color: bool = False) -> 
             lines.append("No open positions detected.")
     lines.append("")
 
+    lines.append("PRICE FETCH HEALTH")
+    red_price_failures = [failure for failure in report.price_failures if failure.status == "red"]
+    yellow_price_failures = [failure for failure in report.price_failures if failure.status == "yellow"]
+    if red_price_failures:
+        price_failure_status = "YES [NOK]"
+    elif yellow_price_failures:
+        price_failure_status = "YES [WARN]"
+    else:
+        price_failure_status = "NO [OK]"
+    count_status = "red" if red_price_failures else "yellow" if yellow_price_failures else "green"
+    lines.append(
+        f"Repeated price failures : {price_failure_status} "
+        f"({len(report.price_failures)} {_severity_label(count_status)})"
+    )
+    if report.price_failures:
+        lines.append(
+            f"{'Symbol':<12} {'Price Source':<14} {'Asset':<8} {'Count':>7} "
+            f"{'Last Failure':<22} {'Category':<16} {'State':>8}"
+        )
+        lines.append("-" * 96)
+        for failure in report.price_failures:
+            source = failure.price_symbol or failure.symbol
+            category = failure.error_category or failure.reason or "unknown"
+            lines.append(
+                f"{failure.symbol:<12} {source:<14} {failure.asset_class:<8} "
+                f"{failure.count:>3}/{failure.threshold:<3} "
+                f"{(failure.last_failed_at or 'N/A')[:22]:<22} {category[:16]:<16} "
+                f"{_severity_label(failure.status):>8}"
+            )
+    else:
+        lines.append("No consecutive price-fetch failures tracked.")
+    lines.append("")
+
     lines.append("LOG HEALTH")
     errors_yesno = "YES [NOK]" if report.log_errors else "NO [OK]"
     warnings_yesno = "YES [WARN]" if report.log_warnings else "NO [OK]"
@@ -1523,6 +1721,12 @@ def render_html_report(report: HealthReport) -> str:
         ("Unrealized P/L", "green" if float(report.trade_summary.get("unrealized_pnl_dollars", 0) or 0) >= 0 else "red", _fmt_money(report.trade_summary.get("unrealized_pnl_dollars"))),
         ("Log Errors", "red" if report.log_errors else "green", f"{len(report.log_errors)}"),
         ("Log Warnings", "yellow" if report.log_warnings else "green", f"{len(report.log_warnings)}"),
+        (
+            "Price Failures",
+            "red" if any(item.status == "red" for item in report.price_failures)
+            else "yellow" if report.price_failures else "green",
+            str(len(report.price_failures)),
+        ),
         ("Missed Runs", "red" if any(job.missed_runs > 0 for job in report.job_health) else "green", str(_display_missed_runs(report.job_health))),
     ]
 
@@ -1574,6 +1778,24 @@ def render_html_report(report: HealthReport) -> str:
                 """
             )
 
+    price_failure_rows = []
+    for failure in report.price_failures:
+        source = failure.price_symbol or failure.symbol
+        category = failure.error_category or failure.reason or "unknown"
+        price_failure_rows.append(
+            f"""
+            <tr class="{failure.status}">
+              <td><code>{esc(failure.symbol)}</code></td>
+              <td><code>{esc(source)}</code></td>
+              <td>{esc(failure.asset_class)}</td>
+              <td>{failure.count}/{failure.threshold}</td>
+              <td><code>{esc(failure.last_failed_at or 'N/A')}</code></td>
+              <td>{esc(category)}</td>
+              <td>{badge(failure.status)}</td>
+            </tr>
+            """
+        )
+
     def finding_rows(findings: list[LogFinding], *, row_class: str, empty_message: str) -> str:
         recent = _recent_findings(findings, limit=10)
         if not recent:
@@ -1594,6 +1816,11 @@ def render_html_report(report: HealthReport) -> str:
 
     error_rows = finding_rows(report.log_errors, row_class="red", empty_message="No error lines found in runtime logs.")
     warning_rows = finding_rows(report.log_warnings, row_class="yellow", empty_message="No warning lines found in runtime logs.")
+    price_failure_status = (
+        "NOK"
+        if any(failure.status == "red" for failure in report.price_failures)
+        else "WARN" if report.price_failures else "OK"
+    )
 
     warning_count = len(report.log_warnings)
     generated_local = esc(report.generated_at.strftime("%Y-%m-%d %H:%M:%S"))
@@ -1864,6 +2091,27 @@ def render_html_report(report: HealthReport) -> str:
     </section>
 
     <section>
+      <h2>Price Fetch Health</h2>
+      <p class="muted">Consecutive latest-price failures: <strong>{esc(price_failure_status)}</strong></p>
+      <table>
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Price Source</th>
+            <th>Asset</th>
+            <th>Count</th>
+            <th>Last Failure</th>
+            <th>Category</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {''.join(price_failure_rows) if price_failure_rows else '<tr><td colspan="7" class="muted">No consecutive price-fetch failures tracked.</td></tr>'}
+        </tbody>
+      </table>
+    </section>
+
+    <section>
       <h2>Troubleshooting</h2>
       <p class="muted">Errors in logs: <strong>{'YES' if report.log_errors else 'NO'}</strong> | Warnings: <strong>{warning_count}</strong></p>
       <div class="trouble-grid">
@@ -1914,6 +2162,302 @@ def write_html_report(report: HealthReport) -> Path:
     return report.html_output
 
 
+# ── Health snapshots ────────────────────────────────────────────────────────
+
+
+def _dt_iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat()
+
+
+def _timedelta_seconds(value: timedelta | None) -> float | None:
+    if value is None:
+        return None
+    return round(value.total_seconds(), 3)
+
+
+def _finding_to_dict(finding: LogFinding) -> dict:
+    return {
+        "timestamp": _dt_iso(finding.timestamp),
+        "level": finding.level,
+        "logger": finding.logger,
+        "message": finding.message,
+        "source_file": str(finding.source_file),
+        "raw": finding.raw,
+    }
+
+
+def _job_health_to_dict(job: JobHealth) -> dict:
+    return {
+        "key": job.key,
+        "label": job.label,
+        "schedule_lines": job.schedule_lines,
+        "last_run_at": _dt_iso(job.last_run_at),
+        "last_success_at": _dt_iso(job.last_success_at),
+        "last_duration_s": _timedelta_seconds(job.last_duration),
+        "missed_runs": job.missed_runs,
+        "expected_runs": job.expected_runs,
+        "status": job.status,
+        "latest_note": job.latest_note,
+    }
+
+
+def _price_failure_to_dict(failure: PriceFailureState) -> dict:
+    return {
+        "symbol": failure.symbol,
+        "price_symbol": failure.price_symbol,
+        "asset_class": failure.asset_class,
+        "count": failure.count,
+        "threshold": failure.threshold,
+        "last_failed_at": failure.last_failed_at,
+        "reason": failure.reason,
+        "error_category": failure.error_category,
+        "retryable": failure.retryable,
+        "status_code": failure.status_code,
+        "last_error": failure.last_error,
+        "status": failure.status,
+    }
+
+
+def health_report_to_dict(report: HealthReport) -> dict:
+    return {
+        "generated_at": _dt_iso(report.generated_at),
+        "lookback_hours": report.lookback_hours,
+        "cron_template": report.cron_template,
+        "cron_file": str(report.cron_file),
+        "local_timezone": report.local_timezone,
+        "overall_status": report.overall_status,
+        "html_output": str(report.html_output),
+        "alpaca": {
+            "connected": report.alpaca.connected,
+            "account_error": report.alpaca.account_error,
+            "positions_error": report.alpaca.positions_error,
+            "portfolio_value": report.alpaca.portfolio_value,
+            "cash": report.alpaca.cash,
+            "buying_power": report.alpaca.buying_power,
+            "open_position_count": report.alpaca.open_position_count,
+            "broker_positions": report.alpaca.broker_positions,
+            "trade_log_open_rows": report.alpaca.trade_log_open_rows,
+        },
+        "job_health": [_job_health_to_dict(job) for job in report.job_health],
+        "trade_summary": report.trade_summary,
+        "price_failures": [_price_failure_to_dict(failure) for failure in report.price_failures],
+        "log_errors": [_finding_to_dict(finding) for finding in report.log_errors],
+        "log_warnings": [_finding_to_dict(finding) for finding in report.log_warnings],
+    }
+
+
+def _health_snapshot_stamp(report: HealthReport) -> str:
+    return report.generated_at.strftime("%Y%m%dT%H%M%S")
+
+
+def _snapshot_timestamp(path: Path) -> datetime | None:
+    match = HEALTH_SNAPSHOT_RE.match(path.name)
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group("stamp"), "%Y%m%dT%H%M%S")
+    except ValueError:
+        return None
+
+
+def prune_health_snapshots(
+    snapshot_dir: str | Path,
+    *,
+    now: datetime,
+    retention_days: float = DEFAULT_SNAPSHOT_RETENTION_DAYS,
+) -> list[Path]:
+    if retention_days <= 0:
+        return []
+
+    snapshot_path = Path(snapshot_dir).expanduser().resolve()
+    if not snapshot_path.exists():
+        return []
+
+    cutoff = now - timedelta(days=retention_days)
+    deleted: list[Path] = []
+    for path in sorted(snapshot_path.glob("health_*.*")):
+        if not path.is_file():
+            continue
+        snapshot_time = _snapshot_timestamp(path)
+        if snapshot_time is None or snapshot_time >= cutoff:
+            continue
+        try:
+            path.unlink()
+            deleted.append(path)
+        except OSError:
+            continue
+    return deleted
+
+
+def write_health_snapshots(
+    report: HealthReport,
+    *,
+    snapshot_dir: str | Path = DEFAULT_SNAPSHOT_DIR,
+    retention_days: float = DEFAULT_SNAPSHOT_RETENTION_DAYS,
+) -> SnapshotResult:
+    snapshot_path = Path(snapshot_dir).expanduser().resolve()
+    snapshot_path.mkdir(parents=True, exist_ok=True)
+
+    stamp = _health_snapshot_stamp(report)
+    html_path = snapshot_path / f"health_{stamp}.html"
+    json_path = snapshot_path / f"health_{stamp}.json"
+
+    html_path.write_text(render_html_report(report), encoding="utf-8")
+    json_path.write_text(
+        json.dumps(health_report_to_dict(report), indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    deleted = prune_health_snapshots(
+        snapshot_path,
+        now=report.generated_at,
+        retention_days=retention_days,
+    )
+    return SnapshotResult(html_path=html_path, json_path=json_path, deleted_paths=deleted)
+
+
+# ── Alerting ────────────────────────────────────────────────────────────────
+
+
+STATUS_RANK = {"green": 0, "yellow": 1, "red": 2}
+
+
+def _status_meets_threshold(status: str, threshold: str) -> bool:
+    return STATUS_RANK.get(status, 0) >= STATUS_RANK.get(threshold, 2)
+
+
+def _alert_status_label(status: str) -> str:
+    return {"green": "OK", "yellow": "WARN", "red": "NOK"}.get(status, status.upper())
+
+
+def collect_alert_items(report: HealthReport, *, alert_on: str = "red") -> list[str]:
+    """Return human-readable alert reasons for the requested severity threshold."""
+    if not _status_meets_threshold(report.overall_status, alert_on):
+        return []
+
+    items = [f"Overall health is [{_alert_status_label(report.overall_status)}]"]
+    include_yellow = STATUS_RANK.get(alert_on, 2) <= STATUS_RANK["yellow"]
+
+    if not report.alpaca.connected:
+        detail = report.alpaca.account_error or report.alpaca.positions_error or "Alpaca unavailable"
+        items.append(f"Alpaca connectivity failed: {detail}")
+
+    for job in report.job_health:
+        if not _status_meets_threshold(job.status, alert_on):
+            continue
+        details = []
+        if job.missed_runs:
+            details.append(f"{job.missed_runs} missed run(s)")
+        if job.latest_note:
+            details.append(job.latest_note)
+        if job.last_run_at is None:
+            details.append("no observed run")
+        suffix = f": {'; '.join(details)}" if details else ""
+        items.append(f"Cron {job.label} [{_alert_status_label(job.status)}]{suffix}")
+
+    for failure in report.price_failures:
+        if not _status_meets_threshold(failure.status, alert_on):
+            continue
+        items.append(
+            f"Price fetch {failure.symbol} [{_alert_status_label(failure.status)}]: "
+            f"{failure.count}/{failure.threshold} consecutive failure(s); "
+            f"{failure.error_category or failure.reason or 'unknown'}"
+        )
+
+    if report.log_errors:
+        latest = _format_finding_entry(_recent_findings(report.log_errors, limit=1)[0])
+        items.append(f"Log errors: {len(report.log_errors)} in window; latest: {latest}")
+
+    pending_exit_findings = [
+        finding for finding in report.log_warnings if _is_pending_exit_finding(finding)
+    ]
+    if pending_exit_findings:
+        latest = _format_finding_entry(_recent_findings(pending_exit_findings, limit=1)[0])
+        items.append(f"Pending exit warnings: {len(pending_exit_findings)} in window; latest: {latest}")
+
+    if include_yellow and report.log_warnings:
+        latest = _format_finding_entry(_recent_findings(report.log_warnings, limit=1)[0])
+        items.append(f"Log warnings: {len(report.log_warnings)} in window; latest: {latest}")
+
+    return items
+
+
+def render_alert_text(report: HealthReport, items: list[str]) -> str:
+    generated_tz = report.generated_at.astimezone().tzname() or report.local_timezone
+    lines = [
+        "HAWKSTRADE HEALTH ALERT",
+        f"Generated : {report.generated_at.strftime('%Y-%m-%d %H:%M:%S')} {generated_tz}",
+        f"Window    : last {report.lookback_hours:g}h",
+        f"Overall   : [{_alert_status_label(report.overall_status)}]",
+        f"HTML      : {report.html_output}",
+        "",
+    ]
+    if items:
+        lines.append("Reasons:")
+        lines.extend(f"- {item}" for item in items)
+    else:
+        lines.append("No active health alert.")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def write_alert_files(
+    report: HealthReport,
+    items: list[str],
+    *,
+    alert_dir: str | Path = DEFAULT_ALERT_DIR,
+) -> AlertResult:
+    alert_path = Path(alert_dir).expanduser().resolve()
+    alert_path.mkdir(parents=True, exist_ok=True)
+
+    latest_path = alert_path / "health_alert_latest.txt"
+    text = render_alert_text(report, items)
+    latest_path.write_text(text, encoding="utf-8")
+
+    if not items:
+        return AlertResult(active=False, latest_path=latest_path, event_path=None)
+
+    stamp = report.generated_at.strftime("%Y%m%dT%H%M%S")
+    event_path = alert_path / f"health_alert_{stamp}.txt"
+    event_path.write_text(text, encoding="utf-8")
+    return AlertResult(active=True, latest_path=latest_path, event_path=event_path)
+
+
+def _alert_payload(report: HealthReport, items: list[str]) -> dict:
+    return {
+        "source": "hawkstrade",
+        "kind": "health_alert",
+        "generated_at": report.generated_at.isoformat(),
+        "overall_status": report.overall_status,
+        "lookback_hours": report.lookback_hours,
+        "html_output": str(report.html_output),
+        "items": items,
+    }
+
+
+def send_alert_webhook(webhook_url: str, report: HealthReport, items: list[str]) -> None:
+    payload = json.dumps(_alert_payload(report, items)).encode("utf-8")
+    request = urllib.request.Request(
+        webhook_url,
+        data=payload,
+        headers={"Content-Type": "application/json", "User-Agent": "hawkstrade-health-check"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        response.read()
+
+
+def _float_env(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
 # ── Command line interface ───────────────────────────────────────────────────
 
 
@@ -1954,6 +2498,52 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Where to write the HTML dashboard",
     )
     parser.add_argument(
+        "--snapshot-dir",
+        default=str(DEFAULT_SNAPSHOT_DIR),
+        help="Directory for timestamped health HTML/JSON snapshots (default: reports/health_snapshots)",
+    )
+    parser.add_argument(
+        "--snapshot-retention-days",
+        type=float,
+        default=_float_env("HAWKSTRADE_HEALTH_SNAPSHOT_RETENTION_DAYS", DEFAULT_SNAPSHOT_RETENTION_DAYS),
+        help="Delete health snapshots older than this many days; use 0 to disable pruning (default: 14)",
+    )
+    parser.add_argument(
+        "--no-snapshot",
+        action="store_true",
+        help="Do not write timestamped health snapshots",
+    )
+    parser.add_argument(
+        "--alert-dir",
+        default=str(DEFAULT_ALERT_DIR),
+        help="Directory for health alert files (default: reports/alerts)",
+    )
+    parser.add_argument(
+        "--alert-on",
+        choices=["red", "yellow"],
+        default=os.getenv("HAWKSTRADE_HEALTH_ALERT_ON", "red").lower(),
+        help="Minimum health severity that writes an active alert (default: red)",
+    )
+    parser.add_argument(
+        "--alert-webhook-url",
+        default=os.getenv("HAWKSTRADE_HEALTH_ALERT_WEBHOOK_URL", ""),
+        help="Optional webhook URL for active health alerts; also supports HAWKSTRADE_HEALTH_ALERT_WEBHOOK_URL",
+    )
+    parser.add_argument(
+        "--no-alert",
+        action="store_true",
+        help="Do not write alert files or send alert webhooks",
+    )
+    parser.add_argument(
+        "--price-failure-state-file",
+        default=os.getenv("HAWKSTRADE_PRICE_FAILURE_STATE_FILE", str(DEFAULT_PRICE_FAILURE_STATE_FILE)),
+        help=(
+            "Path to the price-fetch failure state JSON written by run_risk_check.py "
+            "(default: data/price_fetch_failures.json); "
+            "also supports HAWKSTRADE_PRICE_FAILURE_STATE_FILE env var"
+        ),
+    )
+    parser.add_argument(
         "--no-color",
         action="store_true",
         help="Legacy compatibility flag; terminal output now uses plain status tags",
@@ -1976,12 +2566,48 @@ def main(argv: list[str] | None = None) -> int:
         log_dir=args.log_dir,
         html_output=args.html_output,
         lookback_hours=args.lookback_hours,
+        price_failure_state_file=args.price_failure_state_file,
     )
     terminal = format_terminal_report(report, use_color=False).replace("\r", "")
     terminal = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", terminal)
     print(terminal)
     output_path = write_html_report(report)
     print(f"\nHTML report written to: {output_path}")
+
+    if not args.no_snapshot:
+        snapshot = write_health_snapshots(
+            report,
+            snapshot_dir=args.snapshot_dir,
+            retention_days=args.snapshot_retention_days,
+        )
+        print(f"Health snapshots written to: {snapshot.html_path} and {snapshot.json_path}")
+        if snapshot.deleted_paths:
+            print(f"Health snapshot retention deleted {len(snapshot.deleted_paths)} old file(s).")
+
+    if not args.no_alert:
+        alert_items = collect_alert_items(report, alert_on=args.alert_on)
+        alert_result = write_alert_files(report, alert_items, alert_dir=args.alert_dir)
+        print(f"Health alert state written to: {alert_result.latest_path}")
+        if alert_result.event_path:
+            print(f"Active alert written to: {alert_result.event_path}")
+        if alert_items and args.alert_webhook_url:
+            try:
+                send_alert_webhook(args.alert_webhook_url, report, alert_items)
+                alert_result = AlertResult(
+                    active=alert_result.active,
+                    latest_path=alert_result.latest_path,
+                    event_path=alert_result.event_path,
+                    webhook_sent=True,
+                )
+                print("Health alert webhook sent.")
+            except (OSError, urllib.error.URLError, TimeoutError) as exc:
+                alert_result = AlertResult(
+                    active=alert_result.active,
+                    latest_path=alert_result.latest_path,
+                    event_path=alert_result.event_path,
+                    webhook_error=str(exc),
+                )
+                print(f"Health alert webhook failed: {exc}", file=sys.stderr)
 
     if report.overall_status == "red":
         return 1

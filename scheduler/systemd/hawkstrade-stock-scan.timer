@@ -1,0 +1,11 @@
+[Unit]
+Description=Run HawksTrade stock-only scan at 13:35 UTC on weekdays
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 13:35:00
+Persistent=true
+AccuracySec=1min
+Unit=hawkstrade-stock-scan.service
+
+[Install]
+WantedBy=timers.target

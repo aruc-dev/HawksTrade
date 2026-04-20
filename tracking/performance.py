@@ -17,6 +17,8 @@ from typing import Dict
 import yaml
 import pandas as pd
 
+from tracking.trade_log import locked_trade_log
+
 BASE_DIR  = Path(__file__).resolve().parent.parent
 with open(BASE_DIR / "config" / "config.yaml") as f:
     CFG = yaml.safe_load(f)
@@ -31,9 +33,10 @@ def _utc_now():
 
 
 def load_closed_trades() -> pd.DataFrame:
-    if not TRADE_LOG.exists():
-        return pd.DataFrame()
-    df = pd.read_csv(TRADE_LOG)
+    with locked_trade_log(TRADE_LOG, exclusive=False) as trade_log_path:
+        if not trade_log_path.exists():
+            return pd.DataFrame()
+        df = pd.read_csv(trade_log_path)
     df = df[(df["status"] == "closed") & (df["side"] == "sell")].copy()
     if df.empty:
         return df

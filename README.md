@@ -87,7 +87,12 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
 - **Asymmetric Reward**: 3.5% stop-loss / 12% take-profit.
 - **Capital Protection**: SMA-based trend filters on all strategies.
 - **Position Limits**: Max 5% of portfolio per trade, cap of 10 concurrent positions.
-- **Daily Guardrail**: 5% daily loss limit (hard stop for the day).
+- **Daily Guardrail**: 5% daily loss limit (hard stop for the day), keyed to the `America/New_York` trading-session date so UTC cloud hosts do not reset the baseline at UTC midnight. The baseline is the first observed account value for that trading date and is persisted in `data/daily_loss_baseline.json`; it is not reconstructed from the prior close.
+- **Broker Resilience**: Alpaca timeouts, rate limits, and 5xx outages use bounded retry; auth failures, not-found responses, and broker rejections are classified for fail-closed logging.
+- **Price-Fetch Visibility**: Risk checks track consecutive latest-price failures per open position and surface repeated failures as `[NOK]` in the Linux health dashboard.
+- **Trade-Log Reconciliation**: Scheduled scans, risk checks, reports, and health checks reconcile `data/trades.csv` with broker positions when Alpaca is reachable.
+- **Health Alerts**: Linux health checks write `reports/alerts/health_alert_latest.txt`, timestamped alert files for `[NOK]` states, and can POST alerts to `HAWKSTRADE_HEALTH_ALERT_WEBHOOK_URL`.
+- **Health Snapshots**: Linux health checks persist timestamped HTML/JSON snapshots in `reports/health_snapshots/` with retention pruning for recent operational history.
 
 ---
 

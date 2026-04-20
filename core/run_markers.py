@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
@@ -51,12 +52,15 @@ class RunScope(AbstractContextManager["RunScope"]):
     started_at: datetime = field(default_factory=utc_now)
     status: str = "ok"
     end_fields: dict[str, Any] = field(default_factory=dict)
+    previous_env_run_id: str | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
         if not self.run_id:
             self.run_id = new_run_id(self.script)
 
     def __enter__(self) -> "RunScope":
+        self.previous_env_run_id = os.environ.get("HAWKSTRADE_RUN_ID")
+        os.environ["HAWKSTRADE_RUN_ID"] = self.run_id
         self.logger.info(
             _format_marker(
                 "RUN_START",
@@ -99,6 +103,10 @@ class RunScope(AbstractContextManager["RunScope"]):
                 },
             )
         )
+        if self.previous_env_run_id is None:
+            os.environ.pop("HAWKSTRADE_RUN_ID", None)
+        else:
+            os.environ["HAWKSTRADE_RUN_ID"] = self.previous_env_run_id
         return False
 
 

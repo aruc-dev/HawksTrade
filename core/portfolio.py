@@ -14,6 +14,7 @@ import yaml
 import pandas as pd
 
 from core import alpaca_client as ac
+from tracking.trade_log import locked_trade_log
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 with open(BASE_DIR / "config" / "config.yaml") as f:
@@ -97,6 +98,7 @@ def print_snapshot():
 
 def load_trade_history() -> pd.DataFrame:
     """Load the full local trade history CSV."""
-    if not TRADE_LOG.exists():
-        return pd.DataFrame()
-    return pd.read_csv(TRADE_LOG)
+    with locked_trade_log(TRADE_LOG, exclusive=False) as trade_log_path:
+        if not trade_log_path.exists():
+            return pd.DataFrame()
+        return pd.read_csv(trade_log_path)

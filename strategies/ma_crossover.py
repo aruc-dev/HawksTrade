@@ -50,6 +50,19 @@ def _detect_crossover(fast: pd.Series, slow: pd.Series) -> str:
     return "none"
 
 
+def _bars_for_symbol(bars_data, symbol: str):
+    """Return bars for slashed or slashless crypto symbols without raising on missing data."""
+    lookup_symbol = ac.to_crypto_pair_symbol(symbol)
+    for key in dict.fromkeys((lookup_symbol, symbol)):
+        try:
+            bars = bars_data[key]
+        except (AttributeError, KeyError, TypeError):
+            bars = None
+        if bars is not None:
+            return bars
+    return None
+
+
 class MACrossoverStrategy(BaseStrategy):
 
     name        = "ma_crossover"
@@ -81,7 +94,7 @@ class MACrossoverStrategy(BaseStrategy):
 
         for symbol in universe:
             try:
-                bars = bars_data[symbol]
+                bars = _bars_for_symbol(bars_data, symbol)
                 if bars is None or len(bars) < slow_span + 5:
                     continue
 
@@ -132,7 +145,7 @@ class MACrossoverStrategy(BaseStrategy):
 
         try:
             bars_data = ac.get_crypto_bars([symbol], timeframe=timeframe, limit=slow_span + 10)
-            bars      = bars_data[symbol]
+            bars      = _bars_for_symbol(bars_data, symbol)
             if bars is None or len(bars) < slow_span + 2:
                 return False, ""
 

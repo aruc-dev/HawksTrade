@@ -14,6 +14,7 @@ import logging
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import yaml
 import numpy as np
@@ -36,6 +37,17 @@ log = logging.getLogger("risk_manager")
 _session_start_value: Optional[float] = None
 _session_date: Optional[date] = None
 DAILY_BASELINE_FILE = BASE_DIR / "data" / "daily_loss_baseline.json"
+TRADING_SESSION_TIMEZONE = "America/New_York"
+_TRADING_SESSION_TZ = ZoneInfo(TRADING_SESSION_TIMEZONE)
+
+
+def _current_trading_session_date(now: Optional[datetime] = None) -> date:
+    """Return the risk-session date in the market timezone, not host local time."""
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return now.astimezone(_TRADING_SESSION_TZ).date()
 
 
 def _load_daily_baseline(today: date) -> Optional[float]:
@@ -60,6 +72,7 @@ def _save_daily_baseline(today: date, portfolio_value: float):
         "date": today.isoformat(),
         "portfolio_value": float(portfolio_value),
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "session_timezone": TRADING_SESSION_TIMEZONE,
     }
     with open(tmp_path, "w") as f:
         json.dump(payload, f, indent=2, sort_keys=True)
@@ -68,14 +81,17 @@ def _save_daily_baseline(today: date, portfolio_value: float):
 
 def _refresh_session():
     global _session_start_value, _session_date
-    today = date.today()
+    today = _current_trading_session_date()
     if _session_date != today:
         _session_start_value = _load_daily_baseline(today)
         if _session_start_value is None:
             _session_start_value = ac.get_portfolio_value()
             _save_daily_baseline(today, _session_start_value)
         _session_date = today
-        log.info(f"Session start portfolio value: ${_session_start_value:,.2f} on {today}")
+        log.info(
+            "Session start portfolio value: "
+            f"${_session_start_value:,.2f} on {today} ({TRADING_SESSION_TIMEZONE})"
+        )
 
 
 def daily_loss_exceeded() -> bool:
@@ -315,6 +331,10 @@ def kelly_position_size(win_rate: float = None, avg_win_pct: float = None,
     Caps position at trading.max_position_pct of portfolio and floors at 1%
     only when that floor is below the configured cap.
     """
+    if price <= 0:
+        log.warning(f"[Kelly] Invalid price {price}; falling back to standard sizing.")
+        return calculate_position_size(price)
+
     try:
         # Attempt to load dynamic params from recent trade history
         if win_rate is None or avg_win_pct is None or avg_loss_pct is None:

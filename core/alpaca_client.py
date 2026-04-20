@@ -7,6 +7,7 @@ Reads mode (paper/live) from config and picks the correct keys from .env.
 
 import os
 import logging
+import time
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -26,6 +27,13 @@ from alpaca.data.requests import (
 )
 from alpaca.data.enums import DataFeed, Adjustment
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+from core.alpaca_errors import (
+    call_alpaca,
+    classify_alpaca_error,
+    exception_status_code,
+    exception_text,
+    is_not_found_error,
+)
 
 # ── Setup ───────────────────────────────────────────────────────────────────
 
@@ -38,11 +46,69 @@ MODE = CFG["mode"].strip().lower()  # "paper" or "live"
 if MODE not in {"paper", "live"}:
     raise ValueError("config mode must be 'paper' or 'live'")
 
+
+def _env_truthy(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _load_local_dotenv_files() -> None:
+    load_dotenv(BASE_DIR / "config" / ".env")
+    load_dotenv(BASE_DIR / ".env", override=True)
+
+
+def _shm_max_age_seconds() -> int | None:
+    raw = os.getenv("HAWKSTRADE_SHM_MAX_AGE_SECONDS", "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(
+            "HAWKSTRADE_SHM_MAX_AGE_SECONDS must be an integer number of seconds"
+        ) from exc
+    return value if value > 0 else None
+
+
+def _validate_shm_secret_file(path: Path) -> bool:
+    """Return True when shm secrets are usable; return False unless fail-closed is required."""
+    require_shm = _env_truthy("HAWKSTRADE_REQUIRE_SHM")
+    if not path.exists():
+        if require_shm:
+            raise EnvironmentError(
+                f"HAWKSTRADE_REQUIRE_SHM=1 but shm secret file is missing: {path}"
+            )
+        return False
+    if path.is_symlink():
+        if require_shm:
+            raise EnvironmentError(f"shm secret path must not be a symlink: {path}")
+        return False
+    if not path.is_file():
+        if require_shm:
+            raise EnvironmentError(f"shm secret path is not a regular file: {path}")
+        return False
+    if not os.access(path, os.R_OK):
+        if require_shm:
+            raise PermissionError(f"shm secret file is not readable: {path}")
+        return False
+
+    max_age_seconds = _shm_max_age_seconds()
+    if max_age_seconds is not None:
+        age_seconds = max(0.0, time.time() - path.stat().st_mtime)
+        if age_seconds > max_age_seconds:
+            if require_shm:
+                raise EnvironmentError(
+                    f"shm secret file is stale: {path} age={age_seconds:.0f}s "
+                    f"max_age={max_age_seconds}s"
+                )
+            return False
+    return True
+
+
 # Load secrets based on secrets_source setting in config.yaml:
 #   "local" — load from config/.env then .env (original behaviour)
-#   "shm"   — load from /dev/shm/.hawkstrade.env when present; if the shared
-#            memory file is missing, fall back to the local .env files so
-#            imports and test runs still work out of the box.
+#   "shm"   — load from /dev/shm/.hawkstrade.env when present. When
+#            HAWKSTRADE_REQUIRE_SHM=1, a missing/unreadable/stale shm file
+#            fails closed instead of falling back to local dotenv files.
 _raw_secrets_source = CFG.get("secrets_source", "local")
 if not isinstance(_raw_secrets_source, str):
     raise ValueError("config secrets_source must be a string: 'local' or 'shm'")
@@ -52,19 +118,17 @@ if _SECRETS_SOURCE not in {"local", "shm"}:
 
 if _SECRETS_SOURCE == "shm":
     _SHM_ENV = Path("/dev/shm/.hawkstrade.env")
-    if _SHM_ENV.exists():
+    if _validate_shm_secret_file(_SHM_ENV):
         load_dotenv(_SHM_ENV)
     else:
-        # Fall back to local dotenv files if the shm secret file is missing.
+        # Fall back to local dotenv files if shm secrets are missing or unusable.
         # This keeps imports safe on CI and developer machines while still
         # allowing EC2 to prefer shm when the boot-time secret loader ran.
         _SECRETS_SOURCE = "local"
-        load_dotenv(BASE_DIR / "config" / ".env")
-        load_dotenv(BASE_DIR / ".env", override=True)
+        _load_local_dotenv_files()
 else:
     # Default local behaviour: config/.env, then .env (root overrides)
-    load_dotenv(BASE_DIR / "config" / ".env")
-    load_dotenv(BASE_DIR / ".env", override=True)
+    _load_local_dotenv_files()
 
 log = logging.getLogger("alpaca_client")
 
@@ -126,7 +190,7 @@ def get_crypto_data_client() -> CryptoHistoricalDataClient:
 # ── Account ──────────────────────────────────────────────────────────────────
 
 def get_account():
-    return get_trading_client().get_account()
+    return call_alpaca("trading.get_account", lambda: get_trading_client().get_account())
 
 
 def get_portfolio_value() -> float:
@@ -147,22 +211,74 @@ def get_buying_power() -> float:
 # ── Positions ────────────────────────────────────────────────────────────────
 
 def get_all_positions():
-    return get_trading_client().get_all_positions()
+    return call_alpaca("trading.get_all_positions", lambda: get_trading_client().get_all_positions())
+
+
+def _exception_status_code(exc: Exception) -> int | None:
+    """Best-effort HTTP status extraction across Alpaca and requests errors."""
+    return exception_status_code(exc)
+
+
+def _exception_text(exc: Exception) -> str:
+    return exception_text(exc).lower()
+
+
+def _is_position_not_found_error(exc: Exception) -> bool:
+    return is_not_found_error(exc)
+
+
+def _is_duplicate_client_order_id_error(exc: Exception) -> bool:
+    text = _exception_text(exc)
+    return (
+        ("client_order_id" in text or "client order id" in text)
+        and ("duplicate" in text or "already" in text or "unique" in text)
+    )
+
+
+def _submit_order(client, req, operation: str, client_order_id: Optional[str] = None):
+    if not client_order_id:
+        return client.submit_order(req)
+    try:
+        return call_alpaca(operation, lambda: client.submit_order(req))
+    except Exception as exc:
+        if not _is_duplicate_client_order_id_error(exc):
+            raise
+        log.warning(
+            "Order submit reported duplicate client_order_id; loading existing broker order: %s",
+            client_order_id,
+        )
+        return call_alpaca(
+            f"trading.get_order_by_client_id[{client_order_id}]",
+            lambda: client.get_order_by_client_id(client_order_id),
+        )
 
 
 def get_position(symbol: str):
     client = get_trading_client()
     for candidate in _symbol_lookup_variants(symbol):
         try:
-            return client.get_open_position(candidate)
-        except Exception:
-            continue
+            return call_alpaca(
+                f"trading.get_open_position[{candidate}]",
+                lambda candidate=candidate: client.get_open_position(candidate),
+            )
+        except Exception as e:
+            if _is_position_not_found_error(e):
+                log.debug(f"No open position for {candidate}: {e}")
+                continue
+            raise
     return None
 
 
 # ── Orders ───────────────────────────────────────────────────────────────────
 
-def place_market_order(symbol: str, qty: float, side: str, time_in_force: str = "day", strategy: str = "unknown"):
+def place_market_order(
+    symbol: str,
+    qty: float,
+    side: str,
+    time_in_force: str = "day",
+    strategy: str = "unknown",
+    client_order_id: Optional[str] = None,
+):
     """Place a market order. side = 'buy' or 'sell'."""
     side = side.lower()
     if side not in {"buy", "sell"}:
@@ -173,6 +289,7 @@ def place_market_order(symbol: str, qty: float, side: str, time_in_force: str = 
         qty=qty,
         side=OrderSide.BUY if side == "buy" else OrderSide.SELL,
         time_in_force=TimeInForce.DAY if time_in_force == "day" else TimeInForce.GTC,
+        client_order_id=client_order_id,
     )
     # Attach strategy for backtest mock visibility (bypass Pydantic strictness)
     try:
@@ -180,19 +297,28 @@ def place_market_order(symbol: str, qty: float, side: str, time_in_force: str = 
     except Exception:
         pass
 
-    order = client.submit_order(req)
+    order = _submit_order(
+        client,
+        req,
+        f"trading.submit_market_order[{side}:{symbol}]",
+        client_order_id=client_order_id,
+    )
     # Store strategy in mock-friendly way for backtests
     if hasattr(order, "__setitem__"): order["strategy"] = strategy
     elif hasattr(order, "strategy"): order.strategy = strategy
     
     order_id = order.id if hasattr(order, "id") else order.get("order_id")
-    log.info(f"Market order submitted: {side} {qty} {symbol} | strategy={strategy} | id={order_id}")
+    log.info(
+        f"Market order submitted: {side} {qty} {symbol} | strategy={strategy} "
+        f"| id={order_id} | client_order_id={client_order_id or ''}"
+    )
     return order
 
 
 def place_limit_order(symbol: str, qty: float, side: str, limit_price: float,
                       time_in_force: str = "gtc", strategy: str = "unknown",
-                      asset_class: Optional[str] = None):
+                      asset_class: Optional[str] = None,
+                      client_order_id: Optional[str] = None):
     """Place a limit order."""
     side = side.lower()
     if side not in {"buy", "sell"}:
@@ -211,6 +337,7 @@ def place_limit_order(symbol: str, qty: float, side: str, limit_price: float,
         side=OrderSide.BUY if side == "buy" else OrderSide.SELL,
         limit_price=normalized_limit_price,
         time_in_force=normalized_time_in_force,
+        client_order_id=client_order_id,
     )
     # Attach strategy for backtest mock visibility (bypass Pydantic strictness)
     try:
@@ -218,7 +345,12 @@ def place_limit_order(symbol: str, qty: float, side: str, limit_price: float,
     except Exception:
         pass
 
-    order = client.submit_order(req)
+    order = _submit_order(
+        client,
+        req,
+        f"trading.submit_limit_order[{side}:{symbol}]",
+        client_order_id=client_order_id,
+    )
     # Store strategy in mock-friendly way for backtests
     if hasattr(order, "__setitem__"): order["strategy"] = strategy
     elif hasattr(order, "strategy"): order.strategy = strategy
@@ -226,19 +358,22 @@ def place_limit_order(symbol: str, qty: float, side: str, limit_price: float,
     order_id = order.id if hasattr(order, "id") else order.get("order_id")
     log.info(
         f"Limit order submitted: {side} {qty} {symbol} @ {normalized_limit_price} "
-        f"| strategy={strategy} | id={order_id}"
+        f"| strategy={strategy} | id={order_id} | client_order_id={client_order_id or ''}"
     )
     return order
 
 
 def cancel_order(order_id: str):
-    get_trading_client().cancel_order_by_id(order_id)
+    call_alpaca(
+        f"trading.cancel_order[{order_id}]",
+        lambda: get_trading_client().cancel_order_by_id(order_id),
+    )
     log.info(f"Order cancelled: {order_id}")
 
 
 def get_open_orders():
     req = GetOrdersRequest(status=QueryOrderStatus.OPEN)
-    return get_trading_client().get_orders(filter=req)
+    return call_alpaca("trading.get_open_orders", lambda: get_trading_client().get_orders(filter=req))
 
 
 def normalize_symbol(symbol: str) -> str:
@@ -304,7 +439,10 @@ def _get_crypto_price_increment(symbol: str) -> Optional[Decimal]:
     if pair_symbol in _crypto_price_increment_cache:
         return _crypto_price_increment_cache[pair_symbol]
     try:
-        asset = get_trading_client().get_asset(pair_symbol)
+        asset = call_alpaca(
+            f"trading.get_asset[{pair_symbol}]",
+            lambda: get_trading_client().get_asset(pair_symbol),
+        )
         price_increment = getattr(asset, "price_increment", None)
         if price_increment:
             increment = Decimal(str(price_increment))
@@ -329,9 +467,9 @@ def _round_price_to_increment(value: float, increment: Decimal) -> float:
 
 def _symbol_lookup_variants(symbol: str) -> list:
     normalized = normalize_symbol(symbol)
-    variants = [symbol]
+    variants = [normalized]
     if normalized != symbol:
-        variants.append(normalized)
+        variants.append(symbol)
     paired = to_crypto_pair_symbol(normalized)
     if paired not in variants:
         variants.append(paired)
@@ -368,6 +506,7 @@ def get_stock_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
     tf = tf_map.get(timeframe, TimeFrame.Day)
     end = datetime.now(timezone.utc)
     start = end - _lookback_delta(timeframe, limit, market="stock")
+    request_limit = limit * max(len(symbols), 1)
     
     # Use SIP feed for live, IEX for paper (default)
     feed = DataFeed.SIP if MODE == "live" else DataFeed.IEX
@@ -378,20 +517,30 @@ def get_stock_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
         start=start,
         end=end,
         feed=feed,
-        adjustment=Adjustment.ALL
+        adjustment=Adjustment.ALL,
+        limit=request_limit,
     )
-    return get_stock_data_client().get_stock_bars(req)
+    return call_alpaca(
+        f"stock_data.get_stock_bars[{len(symbols)}:{timeframe}]",
+        lambda: get_stock_data_client().get_stock_bars(req),
+    )
 
 
 def get_stock_latest_quote(symbol: str):
     req = StockLatestQuoteRequest(symbol_or_symbols=[symbol])
-    data = get_stock_data_client().get_stock_latest_quote(req)
+    data = call_alpaca(
+        f"stock_data.get_latest_quote[{symbol}]",
+        lambda: get_stock_data_client().get_stock_latest_quote(req),
+    )
     return data.get(symbol)
 
 
 def get_stock_latest_trade(symbol: str):
     req = StockLatestTradeRequest(symbol_or_symbols=[symbol])
-    data = get_stock_data_client().get_stock_latest_trade(req)
+    data = call_alpaca(
+        f"stock_data.get_latest_trade[{symbol}]",
+        lambda: get_stock_data_client().get_stock_latest_trade(req),
+    )
     return data.get(symbol)
 
 
@@ -435,8 +584,18 @@ def get_crypto_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
     tf = tf_map.get(timeframe, TimeFrame.Day)
     end = datetime.now(timezone.utc)
     start = end - _lookback_delta(timeframe, limit, market="crypto")
-    req = CryptoBarsRequest(symbol_or_symbols=request_symbols, timeframe=tf, start=start, end=end)
-    return get_crypto_data_client().get_crypto_bars(req)
+    request_limit = limit * max(len(request_symbols), 1)
+    req = CryptoBarsRequest(
+        symbol_or_symbols=request_symbols,
+        timeframe=tf,
+        start=start,
+        end=end,
+        limit=request_limit,
+    )
+    return call_alpaca(
+        f"crypto_data.get_crypto_bars[{len(request_symbols)}:{timeframe}]",
+        lambda: get_crypto_data_client().get_crypto_bars(req),
+    )
 
 
 def get_crypto_latest_price(symbol: str) -> float:
@@ -444,7 +603,10 @@ def get_crypto_latest_price(symbol: str) -> float:
     request_symbol = to_crypto_pair_symbol(symbol)
     try:
         req = CryptoLatestOrderbookRequest(symbol_or_symbols=[request_symbol])
-        data = get_crypto_data_client().get_crypto_latest_orderbook(req)
+        data = call_alpaca(
+            f"crypto_data.get_latest_orderbook[{request_symbol}]",
+            lambda: get_crypto_data_client().get_crypto_latest_orderbook(req),
+        )
         ob = data.get(request_symbol) or data.get(symbol)
         if ob and ob.bids and ob.asks:
             best_bid = float(ob.bids[0].price)
@@ -458,7 +620,7 @@ def get_crypto_latest_price(symbol: str) -> float:
 # ── Market Hours ─────────────────────────────────────────────────────────────
 
 def is_market_open() -> bool:
-    clock = get_trading_client().get_clock()
+    clock = call_alpaca("trading.get_clock", lambda: get_trading_client().get_clock())
     return clock.is_open
 
 
@@ -481,7 +643,10 @@ def get_all_tradable_assets(asset_class: str = "us_equity") -> list:
         asset_class=asset_class_map.get(asset_class, AssetClass.US_EQUITY),
         status=AssetStatus.ACTIVE,
     )
-    assets = client.get_all_assets(request)
+    assets = call_alpaca(
+        f"trading.get_all_assets[{asset_class}]",
+        lambda: client.get_all_assets(request),
+    )
     symbols = [
         a.symbol for a in assets
         if a.tradable

@@ -36,6 +36,7 @@ from core.exit_policy import should_exit_for_hold
 from core.run_markers import RunScope, run_scope
 from core.logging_config import runtime_log_handlers
 from core.portfolio import get_open_symbols, print_snapshot
+from scheduler.reconcile_trade_log import safe_reconcile
 from tracking.trade_log import get_open_trades, get_trade_age_days
 from strategies.momentum import MomentumStrategy
 from strategies.rsi_reversion import RSIReversionStrategy
@@ -157,6 +158,8 @@ def _register_entry_result(result, symbol: str, open_symbols: list, planned_symb
         return
     normalized = ac.normalize_symbol(symbol)
     planned_symbols.add(normalized)
+    if result.get("status") not in {"open", "partially_filled", "dry_run"}:
+        return
     new_entry_symbols.add(normalized)
     if not _already_holding(symbol, open_symbols):
         open_symbols.append(symbol)
@@ -180,6 +183,42 @@ def _latest_price_for_trade(symbol: str, asset_class: str) -> float:
     return ac.get_stock_latest_price(symbol)
 
 
+def _mark_unhealthy_exit_result(marker: RunScope | None, result: dict | None, stage: str):
+    if marker is None or not result:
+        return
+    if result.get("status") == "pending_exit_check_failed":
+        marker.mark_error(
+            stage=stage,
+            error_type="PendingExitOrderCheckFailed",
+            blocked_exit_symbol=result.get("symbol", ""),
+        )
+
+
+def _mark_alpaca_error(marker: RunScope | None, stage: str, exc: Exception):
+    info = ac.classify_alpaca_error(exc)
+    if marker is not None:
+        marker.mark_error(
+            stage=stage,
+            error_type=type(exc).__name__,
+            error_category=info.category,
+            retryable=info.retryable,
+            status_code=info.status_code,
+        )
+    return info
+
+
+def _reconcile_trade_log_after_run(marker: RunScope | None, dry_run: bool) -> None:
+    if dry_run:
+        log.info("Trade-log reconciliation skipped during dry run.")
+        return
+    summary = safe_reconcile(context="run_scan.post_run", logger=log)
+    if summary is None and marker is not None:
+        marker.mark_error(
+            stage="trade_log_reconciliation",
+            error_type="TradeLogReconciliationFailed",
+        )
+
+
 def _estimate_peak_price_since_entry(symbol: str, asset_class: str, current_price: float, age_days: float) -> float:
     """Estimate high-water price for trailing exits from recent daily bars."""
     limit = max(int(age_days) + 5, 15)
@@ -198,7 +237,7 @@ def _estimate_peak_price_since_entry(symbol: str, asset_class: str, current_pric
         return current_price
 
 
-def _check_hold_day_exits(open_symbols: list, dry_run: bool = False):
+def _check_hold_day_exits(open_symbols: list, dry_run: bool = False, marker: RunScope | None = None):
     """Exit any swing trade that has been held beyond its target hold_days."""
     open_trades = get_open_trades()
     for trade in open_trades:
@@ -235,7 +274,8 @@ def _check_hold_day_exits(open_symbols: list, dry_run: bool = False):
                     )
                     continue
                 log.info(f"Momentum hold exit for {symbol}: {reason}")
-                oe.exit_position(symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
+                result = oe.exit_position(symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
+                _mark_unhealthy_exit_result(marker, result, "hold_day_exit")
                 continue
 
             log.info(
@@ -243,10 +283,17 @@ def _check_hold_day_exits(open_symbols: list, dry_run: bool = False):
                 f"{age_days:.1f}d >= {target_days}d — exiting."
             )
             asset_class = trade.get("asset_class", "stock")
-            oe.exit_position(symbol, reason="Hold period expired", asset_class=asset_class, dry_run=dry_run)
+            result = oe.exit_position(symbol, reason="Hold period expired", asset_class=asset_class, dry_run=dry_run)
+            _mark_unhealthy_exit_result(marker, result, "hold_day_exit")
 
 
-def _check_strategy_exits(strategies, open_symbols, dry_run: bool = False, skip_symbols=None):
+def _check_strategy_exits(
+    strategies,
+    open_symbols,
+    dry_run: bool = False,
+    skip_symbols=None,
+    marker: RunScope | None = None,
+):
     """Ask each strategy if any open position should be exited."""
     skip_symbols = skip_symbols or set()
     open_trades = get_open_trades()
@@ -277,7 +324,8 @@ def _check_strategy_exits(strategies, open_symbols, dry_run: bool = False, skip_
             should_exit, reason = strategy.should_exit(strategy_symbol, entry_price)
             if should_exit:
                 log.info(f"Strategy exit signal for {strategy_symbol}: {reason}")
-                oe.exit_position(strategy_symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
+                result = oe.exit_position(strategy_symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
+                _mark_unhealthy_exit_result(marker, result, "strategy_exit")
                 break  # position closed, no need to check further
 
 
@@ -299,9 +347,16 @@ def run(
         market_open  = ac.is_market_open()
         open_symbols = get_open_symbols()
     except Exception as e:
-        if marker is not None:
-            marker.mark_error(stage="initial_connection", error_type=type(e).__name__)
-        log.error(f"Alpaca connection failed before scan; skipping run: {e}", exc_info=True)
+        info = _mark_alpaca_error(marker, "initial_connection", e)
+        log.error(
+            "Alpaca connection failed before scan; skipping run: %s "
+            "| category=%s retryable=%s status_code=%s",
+            e,
+            info.category,
+            info.retryable,
+            info.status_code or "",
+            exc_info=True,
+        )
         return
 
     log.info(f"Market open: {market_open} | Open positions: {len(open_symbols)}")
@@ -310,9 +365,16 @@ def run(
     try:
         loss_exceeded = rm.daily_loss_exceeded()
     except Exception as e:
-        if marker is not None:
-            marker.mark_error(stage="daily_loss_check", error_type=type(e).__name__)
-        log.error(f"Daily loss check failed; skipping scan to avoid unsafe trading: {e}", exc_info=True)
+        info = _mark_alpaca_error(marker, "daily_loss_check", e)
+        log.error(
+            "Daily loss check failed; skipping scan to avoid unsafe trading: %s "
+            "| category=%s retryable=%s status_code=%s",
+            e,
+            info.category,
+            info.retryable,
+            info.status_code or "",
+            exc_info=True,
+        )
         return
 
     if loss_exceeded:
@@ -383,21 +445,36 @@ def run(
     try:
         open_symbols = get_open_symbols()  # refresh after entries
     except Exception as e:
-        if marker is not None:
-            marker.mark_error(stage="refresh_open_positions", error_type=type(e).__name__)
-        log.error(f"Could not refresh open positions; skipping exit checks: {e}", exc_info=True)
+        info = _mark_alpaca_error(marker, "refresh_open_positions", e)
+        log.error(
+            "Could not refresh open positions; skipping exit checks: %s "
+            "| category=%s retryable=%s status_code=%s",
+            e,
+            info.category,
+            info.retryable,
+            info.status_code or "",
+            exc_info=True,
+        )
         return
     skip_symbols = set() if INTRADAY_ON else new_entry_symbols
-    _check_strategy_exits(all_strategies, open_symbols, dry_run=dry_run, skip_symbols=skip_symbols)
+    _check_strategy_exits(
+        all_strategies,
+        open_symbols,
+        dry_run=dry_run,
+        skip_symbols=skip_symbols,
+        marker=marker,
+    )
 
     # --- Hold-day expiry exits ---
     log.info("--- Checking hold-day expiry ---")
-    _check_hold_day_exits(open_symbols, dry_run=dry_run)
+    _check_hold_day_exits(open_symbols, dry_run=dry_run, marker=marker)
+
+    _reconcile_trade_log_after_run(marker, dry_run)
 
     # --- Print snapshot ---
     print_snapshot()
     log.info("Scan complete.")
-    if marker is not None:
+    if marker is not None and marker.status != "error":
         marker.mark_status("ok", outcome="completed")
 
 
