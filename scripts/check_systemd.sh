@@ -311,9 +311,13 @@ else
         mtime="$(stat -c '%y' "${SHM_FILE}" 2>/dev/null || stat -f '%Sm' "${SHM_FILE}")"
         note_ok "${SHM_FILE}: mode=${perms}, owner=${owner}, size=${size}B, mtime=${mtime}"
 
-        if [[ "${perms}" != "600" ]]; then
-            note_warn "Permissions are ${perms} (recommended: 600)"
-        fi
+        case "${perms}" in
+            600|0600|640|0640)
+                ;;
+            *)
+                note_warn "Permissions are ${perms} (recommended: 600, or 640 for root-owned group-readable deployments)"
+                ;;
+        esac
 
         # Age check
         if [[ -n "${HAWKSTRADE_SHM_MAX_AGE_SECONDS:-}" ]]; then
