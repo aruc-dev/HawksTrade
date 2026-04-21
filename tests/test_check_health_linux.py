@@ -597,6 +597,7 @@ PATH=/usr/local/bin:/usr/bin:/bin
         with (
             patch.object(ac, "get_account", return_value=account),
             patch.object(ac, "get_all_positions", return_value=[position]),
+            patch.object(ac, "get_closed_orders", return_value=[]),
             patch.object(health, "get_open_trades", side_effect=[[], reconciled_rows]),
             patch.object(health, "safe_reconcile", return_value={"positions": 1}) as safe_reconcile,
         ):
@@ -604,6 +605,7 @@ PATH=/usr/local/bin:/usr/bin:/bin
 
         safe_reconcile.assert_called_once_with(
             positions=[position],
+            closed_orders=[],
             context="health.pre_summary",
             logger=health.log,
         )

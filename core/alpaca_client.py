@@ -376,6 +376,11 @@ def get_open_orders():
     return call_alpaca("trading.get_open_orders", lambda: get_trading_client().get_orders(filter=req))
 
 
+def get_closed_orders(limit: int = 200):
+    req = GetOrdersRequest(status=QueryOrderStatus.CLOSED, limit=limit, nested=True)
+    return call_alpaca("trading.get_closed_orders", lambda: get_trading_client().get_orders(filter=req))
+
+
 def normalize_symbol(symbol: str) -> str:
     return symbol.replace("/", "").upper()
 

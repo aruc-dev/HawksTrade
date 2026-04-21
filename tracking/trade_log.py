@@ -29,6 +29,7 @@ TRADE_LOG = BASE_DIR / CFG["reporting"]["trade_log_file"]
 log = logging.getLogger("trade_log")
 QTY_EPSILON = Decimal("0.00000001")
 ACTIVE_ENTRY_STATUSES = {"open", "partially_filled"}
+PENDING_EXIT_STATUSES = {"submitted", "partially_filled"}
 
 
 def _utc_now():
@@ -77,6 +78,43 @@ def _position_asset_class(position) -> str:
     return "crypto" if "crypto" in raw else "stock"
 
 
+def _order_value(order, name: str, default=None):
+    if isinstance(order, dict):
+        return order.get(name, default)
+    return getattr(order, name, default)
+
+
+def _order_status(order) -> str:
+    status = _order_value(order, "status", "") or ""
+    return str(getattr(status, "value", status)).strip().lower()
+
+
+def _order_side(order) -> str:
+    side = _order_value(order, "side", "") or ""
+    return str(getattr(side, "value", side)).strip().lower()
+
+
+def _order_id(order) -> str:
+    return str(_order_value(order, "id", _order_value(order, "order_id", "")) or "")
+
+
+def _order_filled_qty(order) -> Decimal:
+    return _to_decimal(_order_value(order, "filled_qty", None), Decimal("0")) or Decimal("0")
+
+
+def _order_filled_avg_price(order) -> Decimal | None:
+    return _to_decimal(_order_value(order, "filled_avg_price", None))
+
+
+def _order_filled_at_iso(order) -> str | None:
+    filled_at = _order_value(order, "filled_at", None)
+    if filled_at in (None, ""):
+        return None
+    if isinstance(filled_at, datetime):
+        return _as_utc(filled_at).isoformat()
+    return str(filled_at)
+
+
 def _close_row(row: dict, exit_price: float, pnl_pct: float, reason: str):
     row["status"] = "closed"
     row["exit_price"] = round(exit_price, 6)
@@ -89,6 +127,56 @@ def _clear_exit_fields(row: dict):
     row["exit_price"] = ""
     row["pnl_pct"] = ""
     row["exit_reason"] = ""
+
+
+def _apply_close_to_matching_buy_rows(
+    rows: list[dict],
+    symbol: str,
+    *,
+    exit_price: float,
+    pnl_pct: float,
+    reason: str,
+    closed_qty: Decimal | None = None,
+) -> tuple[bool, Decimal | None, bool]:
+    remaining = closed_qty
+    updated = False
+    partial_close_logged = False
+
+    for row in reversed(rows):
+        if not (
+            _symbols_match(row.get("symbol", ""), symbol)
+            and row.get("status") in ACTIVE_ENTRY_STATUSES
+            and row.get("side") == "buy"
+        ):
+            continue
+
+        if remaining is None:
+            _close_row(row, exit_price, pnl_pct, reason)
+            updated = True
+            break
+
+        open_qty = _to_decimal(row.get("qty"), Decimal("0")) or Decimal("0")
+        if open_qty <= QTY_EPSILON:
+            _close_row(row, exit_price, pnl_pct, reason)
+            updated = True
+            continue
+
+        if remaining + QTY_EPSILON >= open_qty:
+            _close_row(row, exit_price, pnl_pct, reason)
+            remaining -= open_qty
+            updated = True
+            if remaining <= QTY_EPSILON:
+                break
+        else:
+            residual_qty = open_qty - remaining
+            row["qty"] = _fmt_decimal(residual_qty)
+            _clear_exit_fields(row)
+            updated = True
+            partial_close_logged = True
+            remaining = Decimal("0")
+            break
+
+    return updated, remaining, partial_close_logged
 
 COLUMNS = [
     "timestamp", "mode", "symbol", "strategy", "asset_class",
@@ -212,45 +300,20 @@ def mark_trade_closed(
             log.warning(f"Trade close ignored for {symbol}: closed_qty={closed_qty}")
             return False
 
-        updated = False
-        partial_close_logged = False  # set True when a partial exit log is emitted
-        for row in reversed(rows):
-            if not (
-                _symbols_match(row.get("symbol", ""), symbol)
-                and row.get("status") in ACTIVE_ENTRY_STATUSES
-                and row.get("side") == "buy"
-            ):
-                continue
-
-            if remaining is None:
-                _close_row(row, exit_price, pnl_pct, reason)
-                updated = True
-                break
-
-            open_qty = _to_decimal(row.get("qty"), Decimal("0")) or Decimal("0")
-            if open_qty <= QTY_EPSILON:
-                _close_row(row, exit_price, pnl_pct, reason)
-                updated = True
-                continue
-
-            if remaining + QTY_EPSILON >= open_qty:
-                _close_row(row, exit_price, pnl_pct, reason)
-                remaining -= open_qty
-                updated = True
-                if remaining <= QTY_EPSILON:
-                    break
-            else:
-                residual_qty = open_qty - remaining
-                row["qty"] = _fmt_decimal(residual_qty)
-                _clear_exit_fields(row)
-                updated = True
-                log.info(
-                    f"Trade partially closed: {symbol} | closed_qty={_fmt_decimal(remaining)} "
-                    f"| remaining_qty={row['qty']} | reason={reason}"
-                )
-                partial_close_logged = True
-                remaining = Decimal("0")
-                break
+        updated, remaining, partial_close_logged = _apply_close_to_matching_buy_rows(
+            rows,
+            symbol,
+            exit_price=exit_price,
+            pnl_pct=pnl_pct,
+            reason=reason,
+            closed_qty=remaining,
+        )
+        if partial_close_logged:
+            closed_amount = _to_decimal(closed_qty, Decimal("0")) or Decimal("0")
+            log.info(
+                f"Trade partially closed: {symbol} | closed_qty={_fmt_decimal(closed_amount)} "
+                f"| reason={reason}"
+            )
 
         if updated:
             with open(trade_log_path, "w", newline="") as f:
@@ -273,12 +336,16 @@ def mark_trade_closed(
     return True
 
 
-def reconcile_open_trades_with_positions(positions: Iterable) -> dict:
+def reconcile_open_trades_with_positions(
+    positions: Iterable,
+    closed_orders: Iterable | None = None,
+) -> dict:
     """
     Align data/trades.csv open buy rows with broker-reported open positions.
 
     This repairs drift caused by submitted-but-unfilled exit orders or
-    fractional fills. It does not place orders; it only rewrites trades.csv.
+    later-filled submitted exits. It does not place orders; it only rewrites
+    trades.csv.
     """
     with locked_trade_log(exclusive=True) as trade_log_path:
         rows = _read_rows_unlocked(trade_log_path)
@@ -289,8 +356,57 @@ def reconcile_open_trades_with_positions(positions: Iterable) -> dict:
             "reopened_rows": 0,
             "created_rows": 0,
             "marked_unfilled_sells": 0,
+            "closed_filled_sells": 0,
             "closed_stale_rows": 0,
         }
+
+        filled_sell_orders = {}
+        for order in closed_orders or []:
+            if _order_side(order) != "sell" or _order_status(order) != "filled":
+                continue
+            order_id = _order_id(order)
+            if not order_id:
+                continue
+            filled_qty = _order_filled_qty(order)
+            if filled_qty <= QTY_EPSILON:
+                continue
+            filled_sell_orders[order_id] = order
+
+        for row in rows:
+            if row.get("side") != "sell" or row.get("status") not in PENDING_EXIT_STATUSES:
+                continue
+            order = filled_sell_orders.pop(str(row.get("order_id", "") or ""), None)
+            if order is None:
+                continue
+
+            fill_price = _order_filled_avg_price(order)
+            entry_price = _to_decimal(row.get("entry_price"), Decimal("0")) or Decimal("0")
+            if fill_price is None:
+                fill_price = _to_decimal(row.get("exit_price"), entry_price) or entry_price
+            filled_qty = _order_filled_qty(order)
+            pnl_pct = 0.0
+            if entry_price > 0:
+                pnl_pct = float((fill_price - entry_price) / entry_price)
+
+            filled_at = _order_filled_at_iso(order)
+            if filled_at:
+                row["timestamp"] = filled_at
+            row["status"] = "closed"
+            row["qty"] = _fmt_decimal(filled_qty)
+            row["exit_price"] = _fmt_decimal(fill_price)
+            row["pnl_pct"] = round(pnl_pct, 6)
+
+            reason = row.get("exit_reason", "") or "broker reconciliation: exit fill confirmed"
+            row["exit_reason"] = reason
+            _apply_close_to_matching_buy_rows(
+                rows,
+                row.get("symbol", ""),
+                exit_price=float(fill_price),
+                pnl_pct=pnl_pct,
+                reason=reason,
+                closed_qty=filled_qty,
+            )
+            summary["closed_filled_sells"] += 1
 
         broker_positions = [
             p for p in positions

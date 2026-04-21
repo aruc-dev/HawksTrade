@@ -22,25 +22,40 @@ from tracking.trade_log import reconcile_open_trades_with_positions
 log = logging.getLogger("reconcile_trade_log")
 
 
-def run(positions: Iterable | None = None) -> dict:
+def run(
+    positions: Iterable | None = None,
+    closed_orders: Iterable | None = None,
+) -> dict:
+    fetched_positions = positions is None
     if positions is None:
         positions = ac.get_all_positions()
+    if closed_orders is None and fetched_positions:
+        closed_orders = ac.get_closed_orders()
+    elif closed_orders is None:
+        closed_orders = []
     positions = list(positions)
-    summary = reconcile_open_trades_with_positions(positions)
-    log.info("Reconciled trades.csv with %s broker position(s): %s", len(positions), summary)
+    closed_orders = list(closed_orders)
+    summary = reconcile_open_trades_with_positions(positions, closed_orders=closed_orders)
+    log.info(
+        "Reconciled trades.csv with %s broker position(s) and %s closed broker order(s): %s",
+        len(positions),
+        len(closed_orders),
+        summary,
+    )
     return summary
 
 
 def safe_reconcile(
     *,
     positions: Iterable | None = None,
+    closed_orders: Iterable | None = None,
     context: str = "manual",
     logger: logging.Logger | None = None,
     raise_on_error: bool = False,
 ) -> dict | None:
     target_log = logger or log
     try:
-        summary = run(positions=positions)
+        summary = run(positions=positions, closed_orders=closed_orders)
     except Exception as exc:
         info = ac.classify_alpaca_error(exc)
         target_log.warning(

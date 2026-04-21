@@ -15,11 +15,13 @@ class ReconcileTradeLogTests(unittest.TestCase):
             "reopened_rows": 0,
             "created_rows": 0,
             "marked_unfilled_sells": 0,
+            "closed_filled_sells": 0,
             "closed_stale_rows": 0,
         }
 
         with (
             patch.object(reconcile_trade_log.ac, "get_all_positions") as get_all_positions,
+            patch.object(reconcile_trade_log.ac, "get_closed_orders") as get_closed_orders,
             patch.object(
                 reconcile_trade_log,
                 "reconcile_open_trades_with_positions",
@@ -29,7 +31,8 @@ class ReconcileTradeLogTests(unittest.TestCase):
             result = reconcile_trade_log.run(positions=positions)
 
         get_all_positions.assert_not_called()
-        reconcile.assert_called_once_with(positions)
+        get_closed_orders.assert_not_called()
+        reconcile.assert_called_once_with(positions, closed_orders=[])
         self.assertEqual(result, summary)
 
     def test_safe_reconcile_logs_and_continues_on_failure(self):

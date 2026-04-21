@@ -1236,7 +1236,13 @@ def fetch_alpaca_state() -> AlpacaState:
     if connected:
         try:
             positions = ac.get_all_positions()
-            safe_reconcile(positions=positions, context="health.pre_summary", logger=log)
+            closed_orders = ac.get_closed_orders()
+            safe_reconcile(
+                positions=positions,
+                closed_orders=closed_orders,
+                context="health.pre_summary",
+                logger=log,
+            )
             trade_log_open_rows = get_open_trades()
             for pos in positions or []:
                 broker_positions.append(
