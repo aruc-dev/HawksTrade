@@ -45,13 +45,22 @@ class AppEndToEndTests(unittest.TestCase):
              "strategy": "momentum", "side": "buy", "status": "open"}
         ]
         fake_account = {"portfolio_value": 100000.0, "cash": 50000.0, "buying_power": 50000.0}
+        fake_snapshot = {
+            "generated_at": "2026-04-20T12:00:00+00:00",
+            "lookback_hours": 4,
+            "cron_template": "utc",
+            "overall_status": "green",
+            "alpaca": {"connected": True, "portfolio_value": 100000.0, "open_position_count": 1},
+            "job_health": [{"label": "Crypto scan", "status": "green", "missed_runs": 0, "last_run_at": "2026-04-20T12:00:00+00:00"}],
+            "log_errors": [],
+            "log_warnings": [],
+        }
         with patch.object(app_module, "get_positions_as_dicts", return_value=fake_positions), \
                 patch.object(app_module, "read_trades", return_value=fake_rows), \
                 patch.object(app_module, "get_account_summary", return_value=fake_account), \
                 patch.object(app_module, "alpaca_reachable", return_value=True), \
-                patch.object(app_module, "run_check_systemd",
-                             return_value={"ok": True, "stdout": "all good",
-                                           "stderr": "", "returncode": 0, "error": None}), \
+                patch.object(app_module, "read_latest_health_snapshot",
+                             return_value={"ok": True, "path": "/tmp/health.json", "data": fake_snapshot, "error": None}), \
                 patch.object(app_module, "read_recent_log_issues", return_value=[]):
             r = self.client.get("/api/state")
         self.assertEqual(r.status_code, 200)
@@ -65,6 +74,7 @@ class AppEndToEndTests(unittest.TestCase):
         self.assertEqual(len(body["positions"]), 1)
         self.assertEqual(body["positions"][0]["strategy"], "momentum")
         self.assertIn("hold_days", body["positions"][0])
+        self.assertEqual(body["health"]["status"], "green")
 
     def test_no_mutation_endpoints_exist(self):
         # The app must not expose anything that could place/cancel orders.

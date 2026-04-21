@@ -15,7 +15,7 @@ Endpoints:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -33,10 +33,10 @@ from dashboard.alpaca_readonly import (
 from dashboard.config import cfg
 from dashboard.data_sources import (
     enrich_positions_with_trade_metadata,
-    read_recent_log_issues,
     read_daily_baseline,
+    read_latest_health_snapshot,
+    read_recent_log_issues,
     read_trades,
-    run_check_systemd,
 )
 from dashboard.pnl import (
     current_ny_date,
@@ -52,6 +52,9 @@ from dashboard.security import (
 )
 
 log = logging.getLogger("dashboard.app")
+HEALTH_SNAPSHOT_WARN_AGE = timedelta(minutes=20)
+HEALTH_SNAPSHOT_FAIL_AGE = timedelta(minutes=40)
+STATUS_RANK = {"green": 0, "yellow": 1, "red": 2}
 
 
 HERE = Path(__file__).resolve().parent
@@ -192,35 +195,148 @@ def _get_enriched_positions(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return enrich_positions_with_trade_metadata(get_positions_as_dicts(), rows)
 
 
+def _parse_iso_timestamp(value: Any) -> datetime | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        return datetime.fromisoformat(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_age(delta: timedelta) -> str:
+    total_seconds = max(0, int(delta.total_seconds()))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes}m"
+    if minutes:
+        return f"{minutes}m {seconds}s"
+    return f"{seconds}s"
+
+
+def _status_label(status: str) -> str:
+    return {"green": "[OK]", "yellow": "[WARN]", "red": "[NOK]"}.get(status, f"[{status.upper()}]")
+
+
+def _merge_status(*statuses: str) -> str:
+    return max(statuses, key=lambda value: STATUS_RANK.get(value, 0))
+
+
+def _format_snapshot_log_issues(snapshot: Dict[str, Any]) -> List[Dict[str, str]]:
+    issues: List[Dict[str, str]] = []
+    for key, level in (("log_errors", "ERROR"), ("log_warnings", "WARNING")):
+        for item in snapshot.get(key, []) or []:
+            source_path = str(item.get("source_file") or "")
+            source_name = Path(source_path).name if source_path else "health_snapshot"
+            issues.append({
+                "file": source_name,
+                "level": level,
+                "line": item.get("raw") or item.get("message") or "",
+            })
+    issues.sort(key=lambda item: item.get("line", ""), reverse=True)
+    return issues[:20]
+
+
+def _snapshot_stdout_lines(snapshot: Dict[str, Any], *, age: timedelta, stale_status: str | None) -> List[str]:
+    generated_at = str(snapshot.get("generated_at") or "unknown")
+    overall = str(snapshot.get("overall_status") or "red")
+    alpaca = snapshot.get("alpaca") or {}
+    lines = [
+        "Health source : latest health snapshot",
+        f"Generated     : {generated_at} ({_format_age(age)} ago)",
+        f"Template      : {snapshot.get('cron_template') or 'unknown'} | Window: last {snapshot.get('lookback_hours') or '?'}h",
+        f"Overall       : {_status_label(overall)}",
+        (
+            f"Alpaca        : {'Connected' if alpaca.get('connected') else 'Unavailable'}"
+            f" | Portfolio: ${float(alpaca.get('portfolio_value') or 0.0):,.2f}"
+            f" | Open positions: {int(alpaca.get('open_position_count') or 0)}"
+        ),
+    ]
+    if stale_status:
+        lines.append(
+            f"Snapshot age  : {_status_label(stale_status)} older than expected; check hawkstrade-health-check.timer"
+        )
+    lines.append("Jobs:")
+    for job in snapshot.get("job_health", []) or []:
+        last_run = str(job.get("last_run_at") or "never")
+        missed = int(job.get("missed_runs") or 0)
+        lines.append(
+            f"  {_status_label(str(job.get('status') or 'red'))} {job.get('label') or job.get('key') or 'job'}"
+            f" | missed={missed} | last={last_run}"
+        )
+    error_count = len(snapshot.get("log_errors", []) or [])
+    warning_count = len(snapshot.get("log_warnings", []) or [])
+    lines.append(f"Log findings   : errors={error_count} warnings={warning_count}")
+    return lines[-40:]
+
+
 def _build_health() -> Dict[str, Any]:
-    """Compose the health panel payload from check_systemd output and log tails."""
-    systemd = run_check_systemd()
-    log_issues = read_recent_log_issues()
+    """Compose the health panel payload from health snapshots and recent logs."""
+    snapshot_state = read_latest_health_snapshot()
+    live_log_issues = read_recent_log_issues()
+    snapshot_log_issues: List[Dict[str, str]] = []
+    live_log_issues: List[Dict[str, str]] = []
+    stdout_tail: List[str] = []
+    stderr_tail: List[str] = []
+    system_error = snapshot_state.get("error")
+    system_ok = bool(snapshot_state.get("ok"))
+    snapshot_status = "red"
+    stale_status: str | None = None
+
+    if system_ok and isinstance(snapshot_state.get("data"), dict):
+        snapshot = snapshot_state["data"]
+        snapshot_status = str(snapshot.get("overall_status") or "red")
+        generated_at = _parse_iso_timestamp(snapshot.get("generated_at"))
+        if generated_at is not None:
+            if generated_at.tzinfo is None:
+                generated_at = generated_at.replace(tzinfo=timezone.utc)
+            age = datetime.now(timezone.utc) - generated_at.astimezone(timezone.utc)
+            if age > HEALTH_SNAPSHOT_FAIL_AGE:
+                stale_status = "red"
+            elif age > HEALTH_SNAPSHOT_WARN_AGE:
+                stale_status = "yellow"
+        else:
+            age = timedelta.max
+            stale_status = "red"
+        if stale_status:
+            snapshot_status = _merge_status(snapshot_status, stale_status)
+        snapshot_log_issues = _format_snapshot_log_issues(snapshot)
+        stdout_tail = _snapshot_stdout_lines(snapshot, age=age, stale_status=stale_status)
+    else:
+        live_log_issues = read_recent_log_issues()
+        stdout_tail = [
+            "Health source : snapshot unavailable",
+            str(system_error or "No health snapshot available."),
+            "Check hawkstrade-health-check.service and hawkstrade-health-check.timer.",
+        ]
+
+    log_issues = snapshot_log_issues if system_ok else live_log_issues
     has_log_errors = any(i.get("level") in {"CRITICAL", "ERROR"} for i in log_issues)
     has_log_warnings = any(i.get("level") == "WARNING" for i in log_issues)
-    # Traffic-light derivation:
-    #   green  — systemd script returned 0
-    #   yellow — systemd script returned 1 (warnings)
-    #   red    — anything else (failures or error fetching)
-    rc = systemd.get("returncode")
-    if systemd.get("error") or has_log_errors:
-        status = "red"
-    elif rc == 0:
-        status = "yellow" if has_log_warnings else "green"
-    elif rc == 1:
-        status = "yellow"
-    else:
-        status = "red"
+    status = snapshot_status
+    if has_log_errors:
+        status = _merge_status(status, "red")
+    elif has_log_warnings:
+        status = _merge_status(status, "yellow")
+
     return {
         "status": status,
         "log_issue_count": len(log_issues),
         "log_issues": log_issues,
         "systemd": {
-            "ok": systemd.get("ok"),
-            "returncode": rc,
-            "stdout_tail": (systemd.get("stdout") or "").splitlines()[-40:],
-            "stderr_tail": (systemd.get("stderr") or "").splitlines()[-10:],
-            "error": systemd.get("error"),
+            "ok": system_ok,
+            "source": "health_snapshot",
+            "path": snapshot_state.get("path"),
+            "returncode": 0 if system_ok else None,
+            "stdout_tail": stdout_tail,
+            "stderr_tail": stderr_tail,
+            "error": system_error,
         },
     }
 

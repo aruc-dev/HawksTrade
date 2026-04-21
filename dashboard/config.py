@@ -71,6 +71,10 @@ class DashboardConfig:
         return BASE_DIR / rel
 
     @property
+    def health_snapshot_dir(self) -> Path:
+        return BASE_DIR / "reports" / "health_snapshots"
+
+    @property
     def check_systemd_script(self) -> Path:
         return BASE_DIR / "scripts" / "check_systemd.sh"
 

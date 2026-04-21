@@ -140,6 +140,28 @@ class RunCheckSystemdTests(unittest.TestCase):
         self.assertIn("hello", out["stdout"])
 
 
+class ReadLatestHealthSnapshotTests(unittest.TestCase):
+    def test_returns_latest_snapshot_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "health_20260420T010000.json").write_text(json.dumps({"overall_status": "yellow"}))
+            latest = root / "health_20260420T020000.json"
+            latest.write_text(json.dumps({"overall_status": "green", "generated_at": "2026-04-20T02:00:00"}))
+
+            out = data_sources.read_latest_health_snapshot(root)
+
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["path"], str(latest))
+        self.assertEqual(out["data"]["overall_status"], "green")
+
+    def test_returns_error_when_snapshot_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = data_sources.read_latest_health_snapshot(Path(tmp))
+
+        self.assertFalse(out["ok"])
+        self.assertIn("No health snapshot JSON found", out["error"])
+
+
 class ReadRecentLogIssuesTests(unittest.TestCase):
     def test_reads_recent_runtime_warnings_and_errors(self):
         with tempfile.TemporaryDirectory() as tmp:

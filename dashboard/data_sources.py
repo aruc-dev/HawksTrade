@@ -1,7 +1,7 @@
 """Data source readers for the dashboard.
 
 Reads local files produced by the bot — trades.csv, daily_loss_baseline.json,
-logs/ — plus the output of scripts/check_systemd.sh. All file reads are
+logs/, and health snapshots in reports/health_snapshots. All file reads are
 read-only by OS permissions (the hawkstrade-dash user has r-only on data/).
 """
 from __future__ import annotations
@@ -24,6 +24,7 @@ NY_TZ = ZoneInfo("America/New_York")
 ACTIVE_ENTRY_STATUSES = {"open", "partially_filled"}
 LOG_ISSUE_RE = re.compile(r"\b(CRITICAL|ERROR|WARNING|WARN)\b")
 MAX_LOG_ISSUES = 20
+HEALTH_SNAPSHOT_NAME_RE = re.compile(r"^health_\d{8}T\d{6}\.json$")
 
 
 def _parse_iso(ts: str) -> Optional[datetime]:
@@ -225,6 +226,51 @@ def read_recent_log_issues(
             if len(issues) >= max_issues:
                 return issues
     return issues
+
+
+def latest_health_snapshot_path(snapshot_dir: Optional[Path] = None) -> Optional[Path]:
+    """Return the newest health snapshot JSON path, or None if unavailable."""
+    root = snapshot_dir or cfg().health_snapshot_dir
+    if not root.exists() or not root.is_dir():
+        return None
+    candidates = [
+        path for path in root.iterdir()
+        if path.is_file() and HEALTH_SNAPSHOT_NAME_RE.match(path.name)
+    ]
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda path: path.name)[-1]
+
+
+def read_latest_health_snapshot(snapshot_dir: Optional[Path] = None) -> Dict[str, Any]:
+    """Read the newest JSON health snapshot produced by check_health_linux.py."""
+    result: Dict[str, Any] = {
+        "ok": False,
+        "path": None,
+        "data": None,
+        "error": None,
+    }
+    path = latest_health_snapshot_path(snapshot_dir)
+    if path is None:
+        root = snapshot_dir or cfg().health_snapshot_dir
+        result["error"] = f"No health snapshot JSON found in {root}"
+        return result
+
+    result["path"] = str(path)
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception as exc:
+        result["error"] = f"Could not read health snapshot at {path}: {exc}"
+        return result
+
+    if not isinstance(payload, dict):
+        result["error"] = f"Health snapshot at {path} does not contain a JSON object"
+        return result
+
+    result["ok"] = True
+    result["data"] = payload
+    return result
 
 
 def run_check_systemd(timeout_sec: int = 10) -> Dict[str, Any]:
