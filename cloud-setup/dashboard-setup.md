@@ -185,12 +185,18 @@ otherwise.
 From your laptop (not the EC2):
 
 ```bash
-# -N = no remote command, -L = local port forward
-ssh -N -L 8080:127.0.0.1:8080 ec2-user@<your-ec2-ip>
+# -N = no remote command, -L = local port forward, -i = EC2 PEM key
+ssh -i /path/to/your-key.pem -N -L 8080:127.0.0.1:8080 ec2-user@<your-ec2-ip>
 ```
 
 Then in your browser visit `http://localhost:8080/`. You should see the
 HawksTrade dashboard with live data.
+
+If your key file is too open, SSH will reject it. Fix that first:
+
+```bash
+chmod 400 /path/to/your-key.pem
+```
 
 End of Phase 1. If everything renders, proceed to Phase 2 to make it reachable
 from your phone.
