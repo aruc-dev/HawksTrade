@@ -88,10 +88,10 @@
       " (" + pct(h.delta_pct) + ")</span>" +
       " • remaining " + money(h.remaining_usd);
 
-    // P&L today
-    const r = s.realized_today || {};
+    // P&L snapshot
+    const r = s.realized_7d || s.realized_today || {};
     const u = s.position_summary || {};
-    $("ny-date").textContent = s.ny_date ? "(" + s.ny_date + ")" : "";
+    $("pnl-window-label").textContent = "(" + String(r.window_days || 7) + "d realized)";
     const rEl = $("pnl-realized");
     rEl.textContent = money(r.total_usd, true);
     rEl.className = "text-2xl font-mono " + colorFor(r.total_usd);

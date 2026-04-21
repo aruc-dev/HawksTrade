@@ -41,6 +41,7 @@ from dashboard.data_sources import (
 from dashboard.pnl import (
     current_ny_date,
     daily_loss_headroom,
+    realized_pnl_window,
     realized_pnl_today,
     strategy_summary,
     unrealized_pnl_summary,
@@ -55,6 +56,7 @@ log = logging.getLogger("dashboard.app")
 HEALTH_SNAPSHOT_WARN_AGE = timedelta(minutes=20)
 HEALTH_SNAPSHOT_FAIL_AGE = timedelta(minutes=40)
 STATUS_RANK = {"green": 0, "yellow": 1, "red": 2}
+REALIZED_WINDOW_DAYS = 7
 
 
 HERE = Path(__file__).resolve().parent
@@ -144,6 +146,7 @@ def _build_state_snapshot() -> Dict[str, Any]:
     account = get_account_summary()
 
     pnl_today = realized_pnl_today(rows, ny_date_str=current_ny_date())
+    pnl_7d = realized_pnl_window(rows, lookback_days=REALIZED_WINDOW_DAYS, now_utc=now)
     unrealized = unrealized_pnl_summary(positions)
     baseline = read_daily_baseline()
     headroom = daily_loss_headroom(
@@ -168,6 +171,7 @@ def _build_state_snapshot() -> Dict[str, Any]:
         "positions": positions,
         "position_summary": unrealized,
         "realized_today": pnl_today,
+        "realized_7d": pnl_7d,
         "daily_loss_headroom": headroom,
         "strategies": strategies,
         "recent_trades": closed[:10],
@@ -182,6 +186,10 @@ def _build_pnl_today() -> Dict[str, Any]:
     account = get_account_summary()
     return {
         "realized": realized_pnl_today(rows, ny_date_str=current_ny_date()),
+        "realized_7d": realized_pnl_window(
+            rows,
+            lookback_days=REALIZED_WINDOW_DAYS,
+        ),
         "unrealized": unrealized_pnl_summary(positions),
         "headroom": daily_loss_headroom(
             baseline=read_daily_baseline(),

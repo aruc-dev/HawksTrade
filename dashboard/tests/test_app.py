@@ -68,6 +68,7 @@ class AppEndToEndTests(unittest.TestCase):
         self.assertIn("account", body)
         self.assertIn("positions", body)
         self.assertIn("realized_today", body)
+        self.assertIn("realized_7d", body)
         self.assertIn("daily_loss_headroom", body)
         self.assertIn("strategies", body)
         self.assertIn("health", body)

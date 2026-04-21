@@ -5,7 +5,7 @@ deterministic given its inputs so it can be unit-tested with fixture data.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 from dashboard.data_sources import NY_TZ, _parse_iso, _to_utc, trades_closed_on_ny_date
@@ -49,20 +49,16 @@ def realized_pnl_for_trade(row: Dict[str, Any]) -> float:
     return 0.0
 
 
-def realized_pnl_today(
-    all_rows: Iterable[Dict[str, Any]],
-    ny_date_str: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Sum realized P&L (and count) for trades closed on the given NY date."""
-    ny_date_str = ny_date_str or current_ny_date()
-    closed_today = trades_closed_on_ny_date(all_rows, ny_date_str)
+def _summarize_realized_rows(closed_rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     total = 0.0
     wins = 0
     losses = 0
+    trade_count = 0
     per_symbol: Dict[str, float] = {}
-    for row in closed_today:
+    for row in closed_rows:
         pnl = realized_pnl_for_trade(row)
         total += pnl
+        trade_count += 1
         if pnl > 0:
             wins += 1
         elif pnl < 0:
@@ -71,12 +67,53 @@ def realized_pnl_today(
         if symbol:
             per_symbol[symbol] = per_symbol.get(symbol, 0.0) + pnl
     return {
-        "date": ny_date_str,
         "total_usd": round(total, 2),
-        "trade_count": len(closed_today),
+        "trade_count": trade_count,
         "wins": wins,
         "losses": losses,
         "per_symbol": {k: round(v, 2) for k, v in per_symbol.items()},
+    }
+
+
+def realized_pnl_today(
+    all_rows: Iterable[Dict[str, Any]],
+    ny_date_str: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Sum realized P&L (and count) for trades closed on the given NY date."""
+    ny_date_str = ny_date_str or current_ny_date()
+    closed_today = trades_closed_on_ny_date(all_rows, ny_date_str)
+    return {
+        "date": ny_date_str,
+        **_summarize_realized_rows(closed_today),
+    }
+
+
+def realized_pnl_window(
+    all_rows: Iterable[Dict[str, Any]],
+    lookback_days: int = 7,
+    now_utc: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Sum realized P&L over a rolling lookback window measured from now."""
+    now_utc = _to_utc(now_utc or datetime.now(timezone.utc))
+    lookback_days = max(1, int(lookback_days or 1))
+    cutoff = now_utc - timedelta(days=lookback_days)
+    closed_rows = []
+    for row in all_rows:
+        if (row.get("status") or "").strip().lower() != "closed":
+            continue
+        if (row.get("side") or "").strip().lower() != "sell":
+            continue
+        dt = _parse_iso(row.get("timestamp", ""))
+        if dt is None:
+            continue
+        if _to_utc(dt) < cutoff:
+            continue
+        closed_rows.append(row)
+    return {
+        "window_days": lookback_days,
+        "window_start_utc": cutoff.isoformat(),
+        "window_end_utc": now_utc.isoformat(),
+        **_summarize_realized_rows(closed_rows),
     }
 
 

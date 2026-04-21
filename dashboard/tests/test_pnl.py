@@ -77,6 +77,38 @@ class RealizedTodayTests(unittest.TestCase):
         self.assertEqual(out["total_usd"], 50.0)
 
 
+class RealizedWindowTests(unittest.TestCase):
+    def test_empty_rows_returns_zero(self):
+        now = datetime(2026, 4, 20, 12, 0, tzinfo=timezone.utc)
+        out = pnl.realized_pnl_window([], lookback_days=7, now_utc=now)
+        self.assertEqual(out["total_usd"], 0.0)
+        self.assertEqual(out["trade_count"], 0)
+        self.assertEqual(out["window_days"], 7)
+
+    def test_includes_only_rows_within_rolling_window(self):
+        now = datetime(2026, 4, 20, 12, 0, tzinfo=timezone.utc)
+        rows = [
+            _closed_sell("AAPL", "momentum", 100, 110, 10, 0.10,
+                         "2026-04-19T14:00:00+00:00"),
+            _closed_sell("MSFT", "momentum", 100, 90, 10, -0.10,
+                         "2026-04-12T11:59:59+00:00"),
+        ]
+        out = pnl.realized_pnl_window(rows, lookback_days=7, now_utc=now)
+        self.assertEqual(out["trade_count"], 1)
+        self.assertEqual(out["total_usd"], 100.0)
+        self.assertEqual(out["wins"], 1)
+
+    def test_counts_boundary_rows_inside_window(self):
+        now = datetime(2026, 4, 20, 12, 0, tzinfo=timezone.utc)
+        rows = [
+            _closed_sell("AAPL", "momentum", 100, 110, 10, 0.10,
+                         "2026-04-13T12:00:00+00:00"),
+        ]
+        out = pnl.realized_pnl_window(rows, lookback_days=7, now_utc=now)
+        self.assertEqual(out["trade_count"], 1)
+        self.assertEqual(out["total_usd"], 100.0)
+
+
 class UnrealizedSummaryTests(unittest.TestCase):
     def test_splits_crypto_and_stock(self):
         positions = [
