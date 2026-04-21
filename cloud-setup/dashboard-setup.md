@@ -82,12 +82,21 @@ sudo useradd --system --no-create-home --shell /usr/sbin/nologin hawkstrade-dash
 sudo chgrp -R hawkstrade-dash ~/HawksTrade
 sudo chmod -R g+rX ~/HawksTrade
 sudo chmod -R g+rwX ~/HawksTrade/logs
+
+# Also allow the service user to traverse /home/ec2-user so systemd can chdir
+# into /home/ec2-user/HawksTrade. Prefer ACL over loosening the whole home dir.
+sudo setfacl -m u:hawkstrade-dash:--x /home/ec2-user
+
+# If setfacl is unavailable, the fallback is:
+# sudo chmod 711 /home/ec2-user
 ```
 
 > The dashboard service uses `ProtectSystem=strict` + `ReadOnlyPaths=` +
 > `ReadWritePaths=` to enforce filesystem access at the kernel level. The
 > group-permission grants above are the minimum needed for the user to read
-> the tree at all.
+> the tree at all. The extra execute bit / ACL on `/home/ec2-user` is required
+> so the `hawkstrade-dash` user can traverse the parent directory; otherwise
+> systemd fails the unit with `status=200/CHDIR` before Uvicorn even starts.
 
 ### 1.3 Install the env file (Phase 1 settings)
 
@@ -480,7 +489,24 @@ journalctl -u hawkstrade-dashboard.service -n 100 --no-pager
 
 Common causes: missing `requirements-dashboard.txt` install in `.venv`, the
 `hawkstrade-dash` user can't read `~/HawksTrade` (re-run the `chgrp`/`chmod`
-in §1.2), or `/etc/hawkstrade-dash/env` is mode-locked away from the user.
+in §1.2), the user cannot traverse `/home/ec2-user`, or
+`/etc/hawkstrade-dash/env` is mode-locked away from the user.
+
+If the journal shows:
+
+```text
+Changing to the requested working directory failed: Permission denied
+Failed at step CHDIR ...
+```
+
+then apply the parent-directory fix from §1.2:
+
+```bash
+sudo setfacl -m u:hawkstrade-dash:--x /home/ec2-user
+# fallback if ACL tools are unavailable:
+# sudo chmod 711 /home/ec2-user
+sudo systemctl restart hawkstrade-dashboard.service
+```
 
 **Cloudflared can't connect**
 
