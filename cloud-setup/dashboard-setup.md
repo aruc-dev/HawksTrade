@@ -239,26 +239,15 @@ Before continuing, confirm the domain is visible and active under Cloudflare
 **Websites**. You still need the later tunnel and Access steps even when this
 domain-add step is skipped.
 
-### 2.2 Create a Cloudflare Tunnel
+### 2.2 Install `cloudflared` on EC2
 
-1. Open [Cloudflare Zero Trust → Networks → Tunnels](https://one.dash.cloudflare.com/)
-2. Click **Create a tunnel**, choose **Cloudflared**, name it `hawkstrade`
-3. Cloudflare shows an install command — **don't use the all-in-one installer**.
-   We'll install `cloudflared` manually under systemd. Copy the **tunnel token**
-   shown on screen instead. (You can also copy the tunnel UUID and credentials
-   JSON for the file-based config flow used below.)
-4. Under **Public Hostname**, add:
-
-   | Field | Value |
-   |-------|-------|
-   | Subdomain | `hawks` (or any name you like) |
-   | Domain | your `.us` (or other) domain |
-   | Type | `HTTP` |
-   | URL | `127.0.0.1:8080` |
-
-   Save. Cloudflare auto-creates the DNS CNAME at the edge.
-
-### 2.3 Install `cloudflared` on EC2
+We install `cloudflared` first because the rest of the tunnel setup is done
+from the command line on the EC2 instance, **not** from the Cloudflare web
+dashboard. The dashboard's "Create a tunnel" wizard only hands out a tunnel
+token — it does *not* produce the per-tunnel `<UUID>.json` credentials file
+that the systemd unit in this guide expects. So we'll skip that wizard and
+create the tunnel via `cloudflared tunnel create`, which writes the JSON
+credentials locally.
 
 Cloudflare publishes separate RPMs for x86_64 and arm64. Detect the instance
 architecture first, then download the matching build:
@@ -284,49 +273,94 @@ cloudflared --version
 > different architecture"), just delete `/tmp/cloudflared.rpm` and re-run the
 > block above — it's safe.
 
-### 2.4 Authenticate and write the tunnel config
+### 2.3 Authenticate `cloudflared` against your Cloudflare account
 
 ```bash
-# Browser-based login — opens a URL you visit on your laptop
+# Browser-based login — prints a URL you visit on your laptop and pick the domain
 cloudflared tunnel login
-
-# This drops the certificate at ~/.cloudflared/cert.pem.
-# Move it to /etc/cloudflared so the systemd unit can read it.
-sudo install -d -m 0750 /etc/cloudflared
-sudo mv ~/.cloudflared/cert.pem /etc/cloudflared/cert.pem
-
-# Find your tunnel UUID (or use the one Cloudflare showed in 2.2)
-cloudflared tunnel list
-
-# Move the tunnel credentials JSON into /etc/cloudflared (named after UUID)
-sudo mv ~/.cloudflared/<UUID>.json /etc/cloudflared/<UUID>.json
-sudo chown -R root:cloudflared /etc/cloudflared
-sudo chmod 0640 /etc/cloudflared/*.json /etc/cloudflared/cert.pem
 ```
 
-Create `/etc/cloudflared/config.yml`:
+This downloads `~/.cloudflared/cert.pem` (an *origin certificate* tied to your
+chosen Cloudflare zone). Move it into the system config directory so the
+systemd unit can read it:
 
 ```bash
-sudo tee /etc/cloudflared/config.yml > /dev/null <<'YAML'
-tunnel: <UUID>
-credentials-file: /etc/cloudflared/<UUID>.json
+sudo install -d -m 0750 /etc/cloudflared
+sudo mv ~/.cloudflared/cert.pem /etc/cloudflared/cert.pem
+sudo chown root:root /etc/cloudflared/cert.pem
+sudo chmod 0640 /etc/cloudflared/cert.pem
+```
+
+> From now on, every `cloudflared tunnel ...` command must run with
+> `sudo --origincert /etc/cloudflared/cert.pem`, because the cert is no longer
+> in the default per-user search path.
+
+### 2.4 Create the tunnel and write the config
+
+```bash
+# 1. Create the tunnel — this writes the credentials JSON into /etc/cloudflared/
+sudo cloudflared --origincert /etc/cloudflared/cert.pem tunnel create hawkstrade
+```
+
+The output looks like:
+
+```
+Tunnel credentials written to /etc/cloudflared/<UUID>.json. cloudflared chose
+this file based on where your origin certificate was found. Keep this file
+secret. To revoke these credentials, delete the tunnel.
+
+Created tunnel hawkstrade with id <UUID>
+```
+
+Note the `<UUID>` — you'll use it in the next two commands. You can also
+re-print it any time with `sudo cloudflared --origincert /etc/cloudflared/cert.pem tunnel list`.
+
+```bash
+# 2. Capture the UUID into a shell variable for the rest of this section
+UUID="$(sudo cloudflared --origincert /etc/cloudflared/cert.pem tunnel list \
+  | awk '$2=="hawkstrade"{print $1}')"
+echo "Tunnel UUID: $UUID"
+
+# 3. Write /etc/cloudflared/config.yml (REPLACE hawks.<yourdomain>.us)
+sudo tee /etc/cloudflared/config.yml > /dev/null <<YAML
+tunnel: $UUID
+credentials-file: /etc/cloudflared/$UUID.json
 
 ingress:
   - hostname: hawks.<yourdomain>.us
     service: http://127.0.0.1:8080
   - service: http_status:404
 YAML
+
+sudo cat /etc/cloudflared/config.yml
+
+# 4. Create the public DNS CNAME at the Cloudflare edge for that hostname
+sudo cloudflared --origincert /etc/cloudflared/cert.pem \
+  tunnel route dns "$UUID" hawks.<yourdomain>.us
 ```
 
-Replace `<UUID>` and `<yourdomain>.us` with your real values.
+Replace `hawks.<yourdomain>.us` with your real subdomain + your real
+Cloudflare-managed domain (e.g. `hawks.arunbabu.us`). The `route dns`
+command prints `Added CNAME hawks.<yourdomain>.us which will route to this
+tunnel`.
 
 ### 2.5 Create the `cloudflared` system user and install its unit
 
 ```bash
-sudo useradd --system --no-create-home --shell /usr/sbin/nologin cloudflared
+# Create the cloudflared service account (the group already exists from earlier
+# chgrp commands; this attaches the new user to it).
+sudo groupadd --system cloudflared 2>/dev/null || true
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin \
+  -g cloudflared cloudflared
+id cloudflared
+
+# Lock down /etc/cloudflared so only root + the cloudflared service user see it
 sudo chown -R root:cloudflared /etc/cloudflared
 sudo chmod 0750 /etc/cloudflared
+sudo chmod 0640 /etc/cloudflared/*.json /etc/cloudflared/cert.pem /etc/cloudflared/config.yml
+sudo ls -la /etc/cloudflared/
 
+# Install and start the systemd unit
 sudo install -m 0644 \
   ~/HawksTrade/scheduler/systemd/hawkstrade-cloudflared.service \
   /etc/systemd/system/hawkstrade-cloudflared.service
@@ -335,6 +369,10 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now hawkstrade-cloudflared.service
 sudo systemctl status hawkstrade-cloudflared.service
 ```
+
+> If `systemctl status` shows `status=217/USER`, it means systemd couldn't
+> find the `cloudflared` user — re-run the `useradd` block above and then
+> `sudo systemctl restart hawkstrade-cloudflared.service`.
 
 Tail the journal to confirm a clean connection:
 
