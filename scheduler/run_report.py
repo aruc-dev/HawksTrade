@@ -8,6 +8,8 @@ Run directly:
   python scheduler/run_report.py [--weekly]
 """
 
+from __future__ import annotations
+
 import sys
 import logging
 import argparse

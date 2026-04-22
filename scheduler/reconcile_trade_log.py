@@ -7,6 +7,8 @@ the local CSV so status dashboards that depend on trades.csv see the same
 open quantities as Alpaca.
 """
 
+from __future__ import annotations
+
 import argparse
 import logging
 import sys

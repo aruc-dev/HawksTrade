@@ -7,6 +7,8 @@ Exits when the fast EMA crosses back below the slow EMA.
 Works 24/7 on crypto pairs.
 """
 
+from __future__ import annotations
+
 import logging
 from typing import List, Dict
 from pathlib import Path

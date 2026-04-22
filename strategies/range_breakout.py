@@ -7,6 +7,8 @@ with volume confirmation. Holds for hold_days days.
 Works 24/7 on crypto pairs.
 """
 
+from __future__ import annotations
+
 import logging
 from datetime import datetime
 from typing import List, Dict

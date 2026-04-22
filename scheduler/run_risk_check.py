@@ -9,6 +9,8 @@ Run directly:
   python scheduler/run_risk_check.py [--dry-run]
 """
 
+from __future__ import annotations
+
 import sys
 import logging
 import argparse

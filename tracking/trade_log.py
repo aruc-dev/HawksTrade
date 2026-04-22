@@ -5,6 +5,8 @@ Appends every trade (entry or exit) to data/trades.csv.
 Thread-safe via file locking.
 """
 
+from __future__ import annotations
+
 import csv
 import contextlib
 import logging

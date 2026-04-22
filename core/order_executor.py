@@ -6,6 +6,8 @@ Uses risk_manager checks before every entry.
 Writes every trade to the trade log.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 from datetime import datetime, timezone

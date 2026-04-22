@@ -260,15 +260,29 @@ domain-add step is skipped.
 
 ### 2.3 Install `cloudflared` on EC2
 
+Cloudflare publishes separate RPMs for x86_64 and arm64. Detect the instance
+architecture first, then download the matching build:
+
 ```bash
-# Amazon Linux 2023 (arm64) — adjust for x86_64 if needed
+# Detect architecture and pick the matching cloudflared build
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64)  CF_RPM="cloudflared-linux-x86_64.rpm"  ;;
+  aarch64) CF_RPM="cloudflared-linux-aarch64.rpm" ;;
+  *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
+esac
+
 curl -L --output /tmp/cloudflared.rpm \
-  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-aarch64.rpm
+  "https://github.com/cloudflare/cloudflared/releases/latest/download/$CF_RPM"
 sudo rpm -i /tmp/cloudflared.rpm
 rm /tmp/cloudflared.rpm
 
 cloudflared --version
 ```
+
+> If you already downloaded the wrong RPM (`rpm -i` reported "intended for a
+> different architecture"), just delete `/tmp/cloudflared.rpm` and re-run the
+> block above — it's safe.
 
 ### 2.4 Authenticate and write the tunnel config
 
