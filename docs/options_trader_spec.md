@@ -94,8 +94,11 @@ after a portfolio-level blowup.
                   │   OptionsTrader (EC2)        │
                   │                              │
                   │   scheduler/  (systemd)      │
-                  │     • scan.service (15 min)  │
+                  │     • scan.service (30 min)  │
                   │     • risk_check.service     │
+                  │       (5 min baseline)       │
+                  │     • risk_watch.service     │
+                  │       (1 min elevated)       │
                   │     • roll_check.service     │
                   │     • eod_report.service     │
                   │                              │
@@ -197,6 +200,7 @@ OptionsTrader/
 ├── scheduler/
 │   ├── run_scan.py
 │   ├── run_risk_check.py
+│   ├── run_risk_watch.py
 │   ├── run_roll_check.py
 │   ├── run_eod_report.py
 │   ├── run_backtest.py
@@ -205,6 +209,8 @@ OptionsTrader/
 │       ├── optionstrader-scan.timer
 │       ├── optionstrader-risk-check.service
 │       ├── optionstrader-risk-check.timer
+│       ├── optionstrader-risk-watch.service
+│       ├── optionstrader-risk-watch.timer
 │       ├── optionstrader-roll-check.service
 │       ├── optionstrader-roll-check.timer
 │       ├── optionstrader-eod-report.service
@@ -359,9 +365,11 @@ ai:
 # --- DASHBOARD / SCHEDULING (inherit HawksTrade shape) ---
 schedule:
   scan_interval_min: 30
-  risk_check_interval_min: 15
+  risk_check_interval_min: 5
+  elevated_risk_check_interval_min: 1
   roll_check_interval_min: 60
   eod_report_time: "16:45"       # 16:45 ET after options settlement data
+  expiration_exit_cutoff_time: "15:15"  # ET; do not rely on Alpaca's 15:30 expiry handling
 
 reporting:
   trade_log_file: data/trades.csv
@@ -608,6 +616,8 @@ dashboard aggregates back to the strategy level.
 - Implement `cash_secured_put` strategy
 - Implement `core/risk_manager.py` with all §0 gates
 - Implement `core/order_executor.py` for single-leg orders
+- Implement `run_risk_check.py` (5-minute baseline) and `run_risk_watch.py`
+  (1-minute elevated monitoring)
 - Backtesting harness: replay 180 days of SPY chain data, simulate CSP
 - Paper trade for 14 days
 - Go/no-go review before proceeding
@@ -735,7 +745,12 @@ This is the most important file in the codebase. Every order passes through
 14. AI veto gate (if enabled): pass.
 15. If any gate fails: reject trade, log reason, DO NOT retry.
 
-### 9.2 Continuous risk checks (every 15 min via `run_risk_check.py`)
+### 9.2 Continuous risk checks (5 min baseline via `run_risk_check.py`)
+
+The 5-minute loop is the **baseline**, not the whole defense. Options risk
+accelerates near expiry and around assignment/ex-dividend events, so the
+system must escalate monitoring instead of assuming one scheduler cadence is
+always enough.
 
 - Refresh Greeks for all open positions.
 - Mark-to-market P&L per position.
@@ -746,6 +761,43 @@ This is the most important file in the codebase. Every order passes through
 - Check upcoming earnings — close positions 2 days before earnings per §0.7.
 - Compute portfolio Greeks (aggregate delta, theta, vega).
 - Write a snapshot to `data/greeks_snapshots/YYYYMMDD-HHMM.json` for audit.
+
+### 9.2.1 Elevated-risk monitoring (1 min via `run_risk_watch.py`)
+
+Any open strategy enters elevated monitoring when **any** of the following is
+true:
+
+- Strategy has `<= 21 DTE`
+- Any short leg is ITM
+- Short-leg delta has breached the strategy's warning/roll threshold
+- Ex-dividend date is next trading day for a short-call position
+- Earnings blackout closure window has started
+- Position mark-to-market loss exceeds 75% of the strategy stop level
+- It is expiration day
+
+When elevated monitoring is active:
+
+- Run risk checks every 1 minute for flagged strategies
+- Re-poll open orders until terminal status instead of waiting for the next
+  baseline pass
+- Emit health/dashboard alerts immediately when the flagged state begins
+- Do not open new positions in the same underlying until the flagged state clears
+
+### 9.2.2 Expiration-day rule
+
+The system must not depend on Alpaca's expiration handling as its risk plan.
+Alpaca begins evaluating expiring positions around 3:30 PM ET on expiration
+day, and may auto-assign or liquidate based on moneyness and buying power.
+
+Required behavior:
+
+- Short-premium positions should normally be closed before expiration day
+- If any short-premium position is still open on expiration day, it is
+  automatically promoted to elevated monitoring
+- No new positions may be opened or rolled into the same-day expiry
+- Any remaining expiring short-premium position must be exited by
+  `schedule.expiration_exit_cutoff_time`
+- Failure to exit by cutoff is a critical alert condition
 
 ### 9.3 Daily-loss kill switch
 
