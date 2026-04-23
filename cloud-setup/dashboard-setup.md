@@ -407,7 +407,7 @@ This is the identity gate. Without it the tunnel would be world-reachable.
 6. Add a policy:
    - Name: `Allow only me`
    - Action: **Allow**
-   - Include → **Emails** → enter your email (e.g. `arunbabuc.dev@gmail.com`)
+   - Include → **Emails** → enter your email (e.g. `you@example.com`)
 7. Under the application's **Overview** tab, copy the **Application Audience
    (AUD) Tag** — you'll paste it into the env file below
 
@@ -427,7 +427,7 @@ Set:
 DASHBOARD_AUTH_MODE=cloudflare
 CF_ACCESS_TEAM_DOMAIN=<yourteam>.cloudflareaccess.com
 CF_ACCESS_AUD=<paste the AUD tag from Step 2.6>
-DASHBOARD_ALLOWED_EMAILS=arunbabuc.dev@gmail.com
+DASHBOARD_ALLOWED_EMAILS=you@example.com
 
 ALPACA_PAPER_API_KEY=<read-only paper key>
 ALPACA_PAPER_SECRET_KEY=<read-only paper secret>

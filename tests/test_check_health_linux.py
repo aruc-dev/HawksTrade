@@ -597,6 +597,7 @@ PATH=/usr/local/bin:/usr/bin:/bin
         with (
             patch.object(ac, "get_account", return_value=account),
             patch.object(ac, "get_all_positions", return_value=[position]),
+            patch.object(ac, "get_open_orders", return_value=[]),
             patch.object(ac, "get_closed_orders", return_value=[]),
             patch.object(health, "get_open_trades", side_effect=[[], reconciled_rows]),
             patch.object(health, "safe_reconcile", return_value={"positions": 1}) as safe_reconcile,
@@ -605,12 +606,57 @@ PATH=/usr/local/bin:/usr/bin:/bin
 
         safe_reconcile.assert_called_once_with(
             positions=[position],
+            open_orders=[],
             closed_orders=[],
             context="health.pre_summary",
             logger=health.log,
         )
         self.assertTrue(state.connected)
         self.assertEqual(state.trade_log_open_rows, reconciled_rows)
+
+    def test_fetch_alpaca_state_keeps_connection_when_closed_orders_fail(self):
+        from core import alpaca_client as ac
+
+        account = type(
+            "Account",
+            (),
+            {"portfolio_value": "100000", "cash": "50000", "buying_power": "200000"},
+        )()
+        position = type(
+            "Position",
+            (),
+            {
+                "symbol": "AAPL",
+                "qty": "2",
+                "avg_entry_price": "100",
+                "current_price": "101",
+                "market_value": "202",
+                "unrealized_pl": "2",
+                "unrealized_plpc": "0.01",
+            },
+        )()
+
+        with (
+            patch.object(ac, "get_account", return_value=account),
+            patch.object(ac, "get_all_positions", return_value=[position]),
+            patch.object(ac, "get_open_orders", return_value=[]),
+            patch.object(ac, "get_closed_orders", side_effect=RuntimeError("closed orders unavailable")),
+            patch.object(health, "get_open_trades", return_value=[]),
+            patch.object(health, "safe_reconcile", return_value={"positions": 1}) as safe_reconcile,
+            self.assertLogs("check_health_linux", level="WARNING") as logs,
+        ):
+            state = health.fetch_alpaca_state()
+
+        self.assertTrue(state.connected)
+        self.assertIsNone(state.positions_error)
+        safe_reconcile.assert_called_once_with(
+            positions=[position],
+            open_orders=[],
+            closed_orders=[],
+            context="health.pre_summary",
+            logger=health.log,
+        )
+        self.assertTrue(any("Could not fetch closed broker orders during health snapshot" in message for message in logs.output))
 
     def test_read_log_lines_preserves_raw_tracebacks(self):
         with tempfile.TemporaryDirectory() as tmp:

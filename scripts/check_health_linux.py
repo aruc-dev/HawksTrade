@@ -1236,9 +1236,27 @@ def fetch_alpaca_state() -> AlpacaState:
     if connected:
         try:
             positions = ac.get_all_positions()
-            closed_orders = ac.get_closed_orders()
+            try:
+                open_orders = ac.get_open_orders()
+            except Exception as exc:
+                log.warning(
+                    "Could not fetch open broker orders during health snapshot; "
+                    "continuing without intent reconciliation support: %s",
+                    exc,
+                )
+                open_orders = []
+            try:
+                closed_orders = ac.get_closed_orders()
+            except Exception as exc:
+                log.warning(
+                    "Could not fetch closed broker orders during health snapshot; "
+                    "continuing without closed-order reconciliation: %s",
+                    exc,
+                )
+                closed_orders = []
             safe_reconcile(
                 positions=positions,
+                open_orders=open_orders,
                 closed_orders=closed_orders,
                 context="health.pre_summary",
                 logger=log,

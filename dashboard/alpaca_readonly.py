@@ -77,6 +77,17 @@ def get_cash() -> float:
 def get_buying_power() -> float:
     return float(get_account().buying_power)
 
+
+def _account_value_as_float(acct: Any, field_name: str, default: float = 0.0) -> float:
+    try:
+        if isinstance(acct, dict):
+            value = acct.get(field_name, default)
+        else:
+            value = getattr(acct, field_name, default)
+        return float(value or default)
+    except (TypeError, ValueError):
+        return default
+
 _READ_FUNCTIONS = {
     "get_account": get_account,
     "get_all_positions": get_all_positions,
@@ -147,23 +158,24 @@ def get_positions_as_dicts() -> List[Dict[str, Any]]:
     return [_position_to_dict(p) for p in positions]
 
 
-def get_account_summary() -> Dict[str, float]:
+def get_account_summary(account: Any | None = None) -> Dict[str, float]:
     """Portfolio value, cash, buying power. Empty dict on failure."""
     try:
+        account = account if account is not None else get_account()
         return {
-            "portfolio_value": float(get_portfolio_value()),
-            "cash": float(get_cash()),
-            "buying_power": float(get_buying_power()),
+            "portfolio_value": _account_value_as_float(account, "portfolio_value"),
+            "cash": _account_value_as_float(account, "cash"),
+            "buying_power": _account_value_as_float(account, "buying_power"),
         }
     except Exception as e:
         log.warning("Could not fetch account summary: %s", e)
         return {}
 
 
-def alpaca_reachable() -> bool:
+def alpaca_reachable(account: Any | None = None) -> bool:
     """Fast liveness check — used by /healthz."""
     try:
-        acct = get_account()
+        acct = account if account is not None else get_account()
         return acct is not None
     except Exception:
         return False

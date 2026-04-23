@@ -68,11 +68,12 @@ class AppEndToEndTests(unittest.TestCase):
         }
         with patch.object(app_module, "get_positions_as_dicts", return_value=fake_positions), \
                 patch.object(app_module, "read_trades", return_value=fake_rows), \
+                patch.object(app_module, "get_account", return_value={"portfolio_value": 100000.0}), \
                 patch.object(app_module, "get_account_summary", return_value=fake_account), \
                 patch.object(app_module, "alpaca_reachable", return_value=True), \
                 patch.object(app_module, "read_latest_health_snapshot",
                              return_value={"ok": True, "path": "/tmp/health.json", "data": fake_snapshot, "error": None}), \
-                patch.object(app_module, "read_recent_log_issues", return_value=[]):
+                patch.object(app_module, "read_recent_log_issues", return_value=[]) as read_recent_log_issues:
             r = self.client.get("/api/state")
         self.assertEqual(r.status_code, 200)
         body = r.json()
@@ -87,6 +88,7 @@ class AppEndToEndTests(unittest.TestCase):
         self.assertEqual(body["positions"][0]["strategy"], "momentum")
         self.assertIn("hold_days", body["positions"][0])
         self.assertEqual(body["health"]["status"], "green")
+        read_recent_log_issues.assert_not_called()
 
     def test_no_mutation_endpoints_exist(self):
         # The app must not expose anything that could place/cancel orders.
@@ -115,6 +117,11 @@ class AppEndToEndTests(unittest.TestCase):
         self.assertIn("text/html", r.headers["content-type"])
         self.assertIn("HawksTrade", r.text)
 
+    def test_static_assets_served_in_local_mode(self):
+        r = self.client.get("/static/app.js")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("javascript", r.headers["content-type"])
+
     def test_docs_endpoints_disabled(self):
         # OpenAPI / Swagger endpoints should not be exposed.
         for path in ("/docs", "/redoc", "/openapi.json"):
@@ -135,7 +142,7 @@ class AppEndToEndTests(unittest.TestCase):
             client = TestClient(create_app())
 
             for path in ("/", "/api/state", "/api/health", "/api/positions",
-                         "/api/pnl/today", "/api/trades/recent",
+                         "/api/pnl/today", "/api/trades/recent", "/static/app.js",
                          "/api/strategies/summary"):
                 with self.subTest(path=path):
                     r = client.get(path)

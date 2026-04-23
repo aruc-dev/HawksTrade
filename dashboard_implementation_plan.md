@@ -312,7 +312,7 @@ In Cloudflare Zero Trust → Access → Applications:
 3. **Session duration:** 24 hours (re-auth daily — reasonable for a personal dashboard on mobile)
 4. **Identity providers:** Google, One-time PIN (email fallback for Google outages)
 5. **Policy — Allow:**
-   - Emails: `arunbabuc.dev@gmail.com` (exact match, no wildcards, no domain-wide rules)
+   - Emails: `you@example.com` (exact match, no wildcards, no domain-wide rules)
 6. **Require** — add at least one:
    - MFA (if Google account has it enforced, this is automatic)
    - Country match (your country only) — optional additional layer

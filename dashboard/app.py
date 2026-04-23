@@ -20,13 +20,14 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from dashboard import __version__
 from dashboard.alpaca_readonly import (
     alpaca_reachable,
+    get_account,
     get_account_summary,
     get_positions_as_dicts,
 )
@@ -61,6 +62,7 @@ REALIZED_WINDOW_DAYS = 7
 
 HERE = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(HERE / "templates"))
+STATIC_FILES = StaticFiles(directory=str(HERE / "static"))
 
 
 def create_app() -> FastAPI:
@@ -75,7 +77,6 @@ def create_app() -> FastAPI:
         openapi_url=None,
     )
     app.add_middleware(AccessLogMiddleware)
-    app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
 
     # ── HTML shell ──────────────────────────────────────────────────────────
     @app.get("/", include_in_schema=False)
@@ -88,6 +89,14 @@ def create_app() -> FastAPI:
                 "mode": cfg().mode,
             },
         )
+
+    @app.get("/static/{path:path}", include_in_schema=False)
+    async def static_assets(
+        request: Request,
+        path: str,
+        _: str = Depends(require_auth),
+    ) -> Response:
+        return await STATIC_FILES.get_response(path, request.scope)
 
     # ── Unauthenticated liveness (for the tunnel's own health check) ────────
     @app.get("/healthz", include_in_schema=False)
@@ -143,7 +152,15 @@ def _build_state_snapshot() -> Dict[str, Any]:
     now = datetime.now(timezone.utc)
     rows = read_trades()
     positions = _get_enriched_positions(rows)
-    account = get_account_summary()
+    try:
+        account_obj = get_account()
+    except Exception:
+        account_obj = None
+        account = {}
+        reachable = False
+    else:
+        account = get_account_summary(account_obj)
+        reachable = alpaca_reachable(account_obj)
 
     pnl_today = realized_pnl_today(rows, ny_date_str=current_ny_date())
     pnl_7d = realized_pnl_window(rows, lookback_days=REALIZED_WINDOW_DAYS, now_utc=now)
@@ -176,7 +193,7 @@ def _build_state_snapshot() -> Dict[str, Any]:
         "strategies": strategies,
         "recent_trades": closed[:10],
         "health": health,
-        "alpaca_reachable": alpaca_reachable(),
+        "alpaca_reachable": reachable,
     }
 
 
@@ -293,7 +310,6 @@ def _public_health_error_message(system_ok: bool, system_error: Any) -> str | No
 def _build_health() -> Dict[str, Any]:
     """Compose the health panel payload from health snapshots and recent logs."""
     snapshot_state = read_latest_health_snapshot()
-    live_log_issues = read_recent_log_issues()
     snapshot_log_issues: List[Dict[str, str]] = []
     live_log_issues: List[Dict[str, str]] = []
     stdout_tail: List[str] = []

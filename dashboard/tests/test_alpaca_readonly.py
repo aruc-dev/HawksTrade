@@ -61,12 +61,30 @@ class AlpacaReadOnlyImportGuardTests(unittest.TestCase):
         self.assertEqual(plain_dict["market_value"], 0.0)
 
     def test_account_summary_returns_empty_dict_on_error(self):
-        with patch.object(alpaca_readonly, "get_portfolio_value", side_effect=RuntimeError("offline")):
+        with patch.object(alpaca_readonly, "get_account", side_effect=RuntimeError("offline")):
             self.assertEqual(alpaca_readonly.get_account_summary(), {})
 
     def test_alpaca_reachable_returns_false_on_exception(self):
         with patch.object(alpaca_readonly, "get_account", side_effect=RuntimeError):
             self.assertFalse(alpaca_readonly.alpaca_reachable())
+
+    def test_account_summary_reuses_supplied_account_object(self):
+        account = {"portfolio_value": "100000", "cash": "50000", "buying_power": "200000"}
+
+        with patch.object(alpaca_readonly, "get_account") as get_account:
+            summary = alpaca_readonly.get_account_summary(account)
+
+        get_account.assert_not_called()
+        self.assertEqual(
+            summary,
+            {"portfolio_value": 100000.0, "cash": 50000.0, "buying_power": 200000.0},
+        )
+
+    def test_alpaca_reachable_reuses_supplied_account_object(self):
+        with patch.object(alpaca_readonly, "get_account") as get_account:
+            self.assertTrue(alpaca_readonly.alpaca_reachable({"portfolio_value": "1"}))
+
+        get_account.assert_not_called()
 
     def test_get_trading_client_uses_dashboard_env_only(self):
         fake_client = MagicMock(name="TradingClient")

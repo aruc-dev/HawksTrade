@@ -25,6 +25,24 @@ from tracking.trade_log import reconcile_open_trades_with_positions
 log = logging.getLogger("reconcile_trade_log")
 
 
+def _best_effort_fetch_orders(fetcher, *, label: str) -> list:
+    try:
+        return list(fetcher())
+    except Exception as exc:
+        info = ac.classify_alpaca_error(exc)
+        log.warning(
+            "Failed to fetch %s; continuing reconciliation without them: %s "
+            "| category=%s retryable=%s status_code=%s",
+            label,
+            exc,
+            info.category,
+            info.retryable,
+            info.status_code or "",
+            exc_info=True,
+        )
+        return []
+
+
 def run(
     positions: Iterable | None = None,
     open_orders: Iterable | None = None,
@@ -34,11 +52,11 @@ def run(
     if positions is None:
         positions = ac.get_all_positions()
     if open_orders is None and fetched_positions:
-        open_orders = ac.get_open_orders()
+        open_orders = _best_effort_fetch_orders(ac.get_open_orders, label="open broker orders")
     elif open_orders is None:
         open_orders = []
     if closed_orders is None and fetched_positions:
-        closed_orders = ac.get_closed_orders()
+        closed_orders = _best_effort_fetch_orders(ac.get_closed_orders, label="closed broker orders")
     elif closed_orders is None:
         closed_orders = []
     positions = list(positions)
