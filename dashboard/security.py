@@ -6,11 +6,13 @@ Two auth modes:
   'local-ssh'. Use DASHBOARD_AUTH_MODE=local ONLY behind a local-binding
   (127.0.0.1) uvicorn server. Never use in production with a public tunnel.
 
-- 'cloudflare' — Phase 2: verifies the Cf-Access-Jwt-Assertion header against
-  Cloudflare's JWKS. Issuer + audience must match the configured values. This
-  is defense-in-depth: Cloudflare Access already enforces identity at the
-  edge, but the app verifies again so that a misconfigured tunnel cannot
-  silently bypass auth.
+- 'cloudflare' — Phase 2: verifies the Cloudflare Access application token
+  against Cloudflare's JWKS. The token is accepted from the
+  Cf-Access-Jwt-Assertion header or, for browser flows, the CF_Authorization
+  cookie. Issuer + audience must match the configured values. This is
+  defense-in-depth: Cloudflare Access already enforces identity at the edge,
+  but the app verifies again so that a misconfigured tunnel cannot silently
+  bypass auth.
 
 Every request (successful or rejected) is logged to
 logs/dashboard_access_YYYYMMDD.log for audit.
@@ -68,7 +70,13 @@ def verify_cloudflare_jwt(token: str) -> str:
     Raises HTTPException(401) on any validation failure.
     """
     if not token:
-        raise HTTPException(status_code=401, detail="missing Cf-Access-Jwt-Assertion")
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "missing Cloudflare Access token "
+                "(Cf-Access-Jwt-Assertion header or CF_Authorization cookie)"
+            ),
+        )
 
     team_domain = get_cf_team_domain()
     audience = get_cf_audience()
@@ -106,6 +114,14 @@ def verify_cloudflare_jwt(token: str) -> str:
     return email
 
 
+def _get_cloudflare_token(request: Request) -> str:
+    """Return the Cloudflare Access token from header or browser cookie."""
+    return (
+        request.headers.get("Cf-Access-Jwt-Assertion", "")
+        or request.cookies.get("CF_Authorization", "")
+    )
+
+
 # ── Dependency that enforces auth on protected routes ────────────────────────
 
 async def require_auth(request: Request) -> str:
@@ -119,7 +135,7 @@ async def require_auth(request: Request) -> str:
         request.state.identity = "local-ssh"
         return "local-ssh"
     if mode == AUTH_MODE_CLOUDFLARE:
-        token = request.headers.get("Cf-Access-Jwt-Assertion", "")
+        token = _get_cloudflare_token(request)
         email = verify_cloudflare_jwt(token)
         # Stash on request.state for access logging.
         request.state.identity = email

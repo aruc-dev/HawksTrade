@@ -43,10 +43,57 @@ class AuthModeTests(unittest.TestCase):
             class FakeReq:
                 state = type("S", (), {})()
                 headers = {}
+                cookies = {}
 
             email = asyncio.run(security.require_auth(FakeReq()))
         self.assertEqual(email, "local-ssh")
         self.assertEqual(FakeReq.state.identity, "local-ssh")
+
+    def test_cloudflare_mode_uses_header_token(self):
+        import asyncio
+
+        class FakeReq:
+            state = type("S", (), {})()
+            headers = {"Cf-Access-Jwt-Assertion": "header-token"}
+            cookies = {}
+
+        env = {
+            "DASHBOARD_AUTH_MODE": "cloudflare",
+            "CF_ACCESS_TEAM_DOMAIN": "test.cloudflareaccess.com",
+            "CF_ACCESS_AUD": "aud-abc",
+            "DASHBOARD_ALLOWED_EMAILS": "arun@example.com",
+        }
+        with patch.dict(os.environ, env, clear=False), \
+                patch.object(
+                    security, "verify_cloudflare_jwt", return_value="arun@example.com"
+                ) as verify:
+            email = asyncio.run(security.require_auth(FakeReq()))
+        verify.assert_called_once_with("header-token")
+        self.assertEqual(email, "arun@example.com")
+        self.assertEqual(FakeReq.state.identity, "arun@example.com")
+
+    def test_cloudflare_mode_falls_back_to_cookie(self):
+        import asyncio
+
+        class FakeReq:
+            state = type("S", (), {})()
+            headers = {}
+            cookies = {"CF_Authorization": "cookie-token"}
+
+        env = {
+            "DASHBOARD_AUTH_MODE": "cloudflare",
+            "CF_ACCESS_TEAM_DOMAIN": "test.cloudflareaccess.com",
+            "CF_ACCESS_AUD": "aud-abc",
+            "DASHBOARD_ALLOWED_EMAILS": "arun@example.com",
+        }
+        with patch.dict(os.environ, env, clear=False), \
+                patch.object(
+                    security, "verify_cloudflare_jwt", return_value="arun@example.com"
+                ) as verify:
+            email = asyncio.run(security.require_auth(FakeReq()))
+        verify.assert_called_once_with("cookie-token")
+        self.assertEqual(email, "arun@example.com")
+        self.assertEqual(FakeReq.state.identity, "arun@example.com")
 
 
 class ProductionAssertionTests(unittest.TestCase):
@@ -154,6 +201,7 @@ class CloudflareJWTVerificationTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as ctx:
                 security.verify_cloudflare_jwt("")
             self.assertEqual(ctx.exception.status_code, 401)
+            self.assertIn("missing Cloudflare Access token", ctx.exception.detail)
 
     def test_wrong_audience_rejected(self):
         import jwt as pyjwt

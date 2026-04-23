@@ -7,3 +7,4 @@ python-multipart==0.0.12
 pydantic==2.9.2
 pyjwt[crypto]==2.9.0
 cryptography==43.0.1
+httpx==0.28.1

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 
@@ -45,13 +46,14 @@ class AppEndToEndTests(unittest.TestCase):
              "strategy": "momentum", "side": "buy", "status": "open"}
         ]
         fake_account = {"portfolio_value": 100000.0, "cash": 50000.0, "buying_power": 50000.0}
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         fake_snapshot = {
-            "generated_at": "2026-04-20T12:00:00+00:00",
+            "generated_at": now,
             "lookback_hours": 4,
             "cron_template": "utc",
             "overall_status": "green",
             "alpaca": {"connected": True, "portfolio_value": 100000.0, "open_position_count": 1},
-            "job_health": [{"label": "Crypto scan", "status": "green", "missed_runs": 0, "last_run_at": "2026-04-20T12:00:00+00:00"}],
+            "job_health": [{"label": "Crypto scan", "status": "green", "missed_runs": 0, "last_run_at": now}],
             "log_errors": [],
             "log_warnings": [],
         }
