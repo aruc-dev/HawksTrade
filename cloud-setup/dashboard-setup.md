@@ -314,6 +314,10 @@ Created tunnel hawkstrade with id <UUID>
 
 Note the `<UUID>` — you'll use it in the next two commands. You can also
 re-print it any time with `sudo cloudflared --origincert /etc/cloudflared/cert.pem tunnel list`.
+Do **not** tighten the generated `/etc/cloudflared/<UUID>.json` to `0400` or
+`0600` after this step. The systemd service runs as the `cloudflared` user, so
+the credentials file must remain readable by group `cloudflared` when you lock
+it down in §2.5.
 
 ```bash
 # 2. Capture the UUID into a shell variable for the rest of this section
@@ -373,6 +377,11 @@ sudo systemctl status hawkstrade-cloudflared.service
 > If `systemctl status` shows `status=217/USER`, it means systemd couldn't
 > find the `cloudflared` user — re-run the `useradd` block above and then
 > `sudo systemctl restart hawkstrade-cloudflared.service`.
+>
+> If the journal shows `couldn't read tunnel credentials ... permission denied`,
+> the `<UUID>.json` file is too restrictive. Re-run the `chown`/`chmod` block
+> above exactly as written. The JSON file must be `root:cloudflared` with mode
+> `0640`; `0400` breaks the systemd service because only root can read it.
 
 Tail the journal to confirm a clean connection:
 
@@ -575,6 +584,22 @@ journalctl -u hawkstrade-cloudflared.service -n 100 --no-pager
 Check `/etc/cloudflared/config.yml` UUID matches the credentials file, and
 confirm the EC2 has outbound TCP 443 to `*.cloudflare.com` (default for any
 EC2 with NAT/IGW).
+
+If the journal contains:
+
+```text
+couldn't read tunnel credentials from /etc/cloudflared/<UUID>.json: ... permission denied
+```
+
+fix the permissions and restart:
+
+```bash
+sudo chown root:cloudflared /etc/cloudflared/*.json /etc/cloudflared/config.yml /etc/cloudflared/cert.pem
+sudo chmod 0750 /etc/cloudflared
+sudo chmod 0640 /etc/cloudflared/*.json /etc/cloudflared/config.yml /etc/cloudflared/cert.pem
+sudo systemctl restart hawkstrade-cloudflared.service
+sudo systemctl status hawkstrade-cloudflared.service --no-pager -l
+```
 
 **Cloudflare Access page shows but dashboard returns 401**
 
