@@ -34,6 +34,33 @@ class MomentumStrategy(BaseStrategy):
     name        = "momentum"
     asset_class = "stocks"
 
+    @staticmethod
+    def _missing_symbol_error(exc: Exception) -> bool:
+        message = str(exc)
+        return isinstance(exc, KeyError) or message.startswith("'No key ") or message.startswith("No key ")
+
+    def _get_symbol_bars(self, bars_data, symbol: str):
+        try:
+            return bars_data[symbol]
+        except Exception as exc:
+            if self._missing_symbol_error(exc):
+                return None
+            raise
+
+    def _load_symbol_bars(self, bars_data, symbol: str):
+        bars = self._get_symbol_bars(bars_data, symbol)
+        if bars is not None:
+            return bars
+        try:
+            fallback = ac.get_stock_bars([symbol], timeframe="1Day", limit=10)
+        except Exception as exc:
+            log.debug(f"[Momentum] Fallback bars fetch failed for {symbol}: {exc}")
+            return None
+        bars = self._get_symbol_bars(fallback, symbol)
+        if bars is None:
+            log.debug(f"[Momentum] Bars still missing for {symbol} after fallback fetch.")
+        return bars
+
     def scan(self, universe: List[str], **kwargs) -> List[Dict]:
         if not SCFG["enabled"]:
             return []
@@ -54,7 +81,7 @@ class MomentumStrategy(BaseStrategy):
 
         for symbol in universe:
             try:
-                bars = bars_data[symbol]
+                bars = self._load_symbol_bars(bars_data, symbol)
                 if bars is None or len(bars) < 6:
                     continue
 

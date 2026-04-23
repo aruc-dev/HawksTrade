@@ -11,6 +11,7 @@ import json
 import logging
 import re
 import subprocess
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -69,7 +70,6 @@ def enrich_positions_with_trade_metadata(
     """
     now_utc = _to_utc(now_utc or datetime.now(timezone.utc))
     latest_open_by_symbol: Dict[str, tuple[datetime, Dict[str, Any]]] = {}
-    fallback_dt = datetime.min.replace(tzinfo=timezone.utc)
 
     for row in trade_rows:
         status = (row.get("status") or "").strip().lower()
@@ -79,7 +79,10 @@ def enrich_positions_with_trade_metadata(
         key = _symbol_key(row.get("symbol"))
         if not key:
             continue
-        entry_dt = _parse_iso(str(row.get("timestamp") or "")) or fallback_dt
+        entry_dt = _parse_iso(str(row.get("timestamp") or ""))
+        if entry_dt is None:
+            log.warning("Skipping trade-log row with invalid timestamp for %s", row.get("symbol"))
+            continue
         entry_dt = _to_utc(entry_dt)
         current = latest_open_by_symbol.get(key)
         if current is None or entry_dt > current[0]:
@@ -182,8 +185,8 @@ def read_recent_log_lines(log_file: Path, max_lines: int = 50) -> List[str]:
         return []
     try:
         with open(log_file, "r", errors="replace") as f:
-            lines = f.readlines()
-        return [ln.rstrip("\n") for ln in lines[-max_lines:]]
+            lines = deque(f, maxlen=max_lines)
+        return [ln.rstrip("\n") for ln in lines]
     except Exception as e:
         log.warning("Could not read log %s: %s", log_file, e)
         return []

@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from contextlib import AbstractContextManager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import get_type_hints
 
 from tracking import order_intents
@@ -68,6 +69,36 @@ class OrderIntentTests(unittest.TestCase):
         hints = get_type_hints(order_intents._locked_intents)
 
         self.assertEqual(hints["return"], AbstractContextManager[Path])
+
+    def test_reconcile_order_intents_updates_status_from_broker_orders(self):
+        intent, _ = order_intents.get_or_create_order_intent(
+            run_id="run-1",
+            symbol="AMD",
+            side="buy",
+            strategy="momentum",
+            asset_class="stock",
+            qty="2",
+        )
+        order_intents.update_order_intent(
+            intent["client_order_id"],
+            status="pending_new",
+            broker_order_id="broker-1",
+        )
+
+        summary = order_intents.reconcile_order_intents(
+            open_orders=[],
+            closed_orders=[
+                SimpleNamespace(
+                    id="broker-1",
+                    client_order_id=intent["client_order_id"],
+                    status="filled",
+                )
+            ],
+        )
+
+        rows = order_intents.read_order_intents()
+        self.assertEqual(summary["updated_rows"], 1)
+        self.assertEqual(rows[0]["status"], "filled")
 
 
 if __name__ == "__main__":

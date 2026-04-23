@@ -18,6 +18,7 @@ from typing import Iterable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core import alpaca_client as ac
+from tracking.order_intents import reconcile_order_intents
 from tracking.trade_log import reconcile_open_trades_with_positions
 
 
@@ -26,21 +27,30 @@ log = logging.getLogger("reconcile_trade_log")
 
 def run(
     positions: Iterable | None = None,
+    open_orders: Iterable | None = None,
     closed_orders: Iterable | None = None,
 ) -> dict:
     fetched_positions = positions is None
     if positions is None:
         positions = ac.get_all_positions()
+    if open_orders is None and fetched_positions:
+        open_orders = ac.get_open_orders()
+    elif open_orders is None:
+        open_orders = []
     if closed_orders is None and fetched_positions:
         closed_orders = ac.get_closed_orders()
     elif closed_orders is None:
         closed_orders = []
     positions = list(positions)
+    open_orders = list(open_orders)
     closed_orders = list(closed_orders)
     summary = reconcile_open_trades_with_positions(positions, closed_orders=closed_orders)
+    intent_summary = reconcile_order_intents(open_orders=open_orders, closed_orders=closed_orders)
+    summary = {**summary, "updated_order_intents": intent_summary["updated_rows"]}
     log.info(
-        "Reconciled trades.csv with %s broker position(s) and %s closed broker order(s): %s",
+        "Reconciled trades.csv with %s broker position(s), %s open broker order(s), and %s closed broker order(s): %s",
         len(positions),
+        len(open_orders),
         len(closed_orders),
         summary,
     )
@@ -50,6 +60,7 @@ def run(
 def safe_reconcile(
     *,
     positions: Iterable | None = None,
+    open_orders: Iterable | None = None,
     closed_orders: Iterable | None = None,
     context: str = "manual",
     logger: logging.Logger | None = None,
@@ -57,7 +68,11 @@ def safe_reconcile(
 ) -> dict | None:
     target_log = logger or log
     try:
-        summary = run(positions=positions, closed_orders=closed_orders)
+        summary = run(
+            positions=positions,
+            open_orders=open_orders,
+            closed_orders=closed_orders,
+        )
     except Exception as exc:
         info = ac.classify_alpaca_error(exc)
         target_log.warning(

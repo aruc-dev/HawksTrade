@@ -79,6 +79,18 @@ class PositionEnrichmentTests(unittest.TestCase):
         self.assertEqual(by_symbol["MSFT"]["strategy"], "unknown")
         self.assertIsNone(by_symbol["MSFT"]["hold_days"])
 
+    def test_skips_rows_with_invalid_timestamps(self):
+        positions = [{"symbol": "AAPL", "qty": 1}]
+        rows = [
+            {"timestamp": "not-a-time", "symbol": "AAPL",
+             "strategy": "momentum", "side": "buy", "status": "open"},
+        ]
+
+        out = data_sources.enrich_positions_with_trade_metadata(positions, rows)
+
+        self.assertEqual(out[0]["strategy"], "unknown")
+        self.assertIsNone(out[0]["hold_days"])
+
 
 class ReadDailyBaselineTests(unittest.TestCase):
     def test_returns_none_when_missing(self):
@@ -163,6 +175,15 @@ class ReadLatestHealthSnapshotTests(unittest.TestCase):
 
 
 class ReadRecentLogIssuesTests(unittest.TestCase):
+    def test_read_recent_log_lines_uses_bounded_tail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "scan.log"
+            path.write_text("".join(f"line-{idx}\n" for idx in range(20)))
+
+            out = data_sources.read_recent_log_lines(path, max_lines=3)
+
+        self.assertEqual(out, ["line-17", "line-18", "line-19"])
+
     def test_reads_recent_runtime_warnings_and_errors(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

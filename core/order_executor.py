@@ -199,6 +199,17 @@ def _exit_log_status(order, requested_qty: float, filled_qty: float) -> str:
     return "submitted"
 
 
+def _submitted_order_is_transient(order) -> bool:
+    return (_order_status(order) or "") in {
+        "accepted",
+        "accepted_for_bidding",
+        "new",
+        "pending_new",
+        "pending_replace",
+        "pending_review",
+    }
+
+
 # ── Entry Logic ─────────────────────────────────────────────────────────────
 
 def enter_position(symbol: str, strategy: str, asset_class: str = "stock", dry_run: bool = False) -> Optional[dict]:
@@ -307,7 +318,8 @@ def enter_position(symbol: str, strategy: str, asset_class: str = "stock", dry_r
                 f"strategy={strategy} | filled_qty={filled_qty} requested_qty={qty}"
             )
         else:
-            log.warning(
+            entry_log = log.info if _submitted_order_is_transient(order) else log.warning
+            entry_log(
                 f"Entry order submitted for {symbol} but not filled yet; "
                 f"trade log status=submitted | strategy={strategy} | requested_qty={qty}"
             )
@@ -481,7 +493,8 @@ def exit_position(symbol: str, reason: str, asset_class: str = "stock", dry_run:
                 f"entry={entry_price} exit={current_price} pnl={pnl_pct:.2%}"
             )
         else:
-            log.warning(
+            exit_log = log.info if _submitted_order_is_transient(order) else log.warning
+            exit_log(
                 f"Exit order submitted for {trade_symbol} but not filled yet; "
                 f"leaving trade log open | reason={reason} | status={_order_status(order)}"
             )

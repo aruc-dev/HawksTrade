@@ -20,7 +20,7 @@ from tracking.trade_log import locked_trade_log
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 ORDER_INTENTS = BASE_DIR / "data" / "order_intents.csv"
-TERMINAL_STATUSES = {"canceled", "cancelled", "expired", "rejected"}
+TERMINAL_STATUSES = {"canceled", "cancelled", "expired", "rejected", "filled"}
 
 COLUMNS = [
     "timestamp",
@@ -159,3 +159,70 @@ def update_order_intent(client_order_id: str, *, status: str, broker_order_id: s
         if updated:
             _write_rows_unlocked(path, rows)
         return updated
+
+
+def reconcile_order_intents(
+    *,
+    open_orders: list | None = None,
+    closed_orders: list | None = None,
+) -> dict:
+    open_orders = list(open_orders or [])
+    closed_orders = list(closed_orders or [])
+    orders = open_orders + closed_orders
+    orders_by_broker_id: dict[str, tuple[str, str]] = {}
+    orders_by_client_id: dict[str, tuple[str, str]] = {}
+
+    def _order_value(order, name: str):
+        if isinstance(order, dict):
+            return order.get(name)
+        return getattr(order, name, None)
+
+    def _order_status(order) -> str:
+        status = _order_value(order, "status")
+        return str(getattr(status, "value", status) or "").lower()
+
+    def _remember(order) -> None:
+        status = _order_status(order)
+        broker_order_id = str(_order_value(order, "id") or _order_value(order, "order_id") or "")
+        client_order_id = str(_order_value(order, "client_order_id") or "")
+        if broker_order_id:
+            orders_by_broker_id[broker_order_id] = (status, client_order_id)
+        if client_order_id:
+            orders_by_client_id[client_order_id] = (status, broker_order_id)
+
+    for order in orders:
+        _remember(order)
+
+    updated = 0
+    with _locked_intents(exclusive=True) as path:
+        _ensure_file_unlocked(path)
+        rows = _read_rows_unlocked(path)
+        now = _utc_now().isoformat()
+        for row in rows:
+            match = None
+            broker_order_id = str(row.get("broker_order_id") or "")
+            client_order_id = str(row.get("client_order_id") or "")
+            if broker_order_id:
+                match = orders_by_broker_id.get(broker_order_id)
+            if match is None and client_order_id:
+                match = orders_by_client_id.get(client_order_id)
+            if match is None:
+                continue
+            status, matched_broker_order_id = match
+            changed = False
+            if status and row.get("status") != status:
+                row["status"] = status
+                changed = True
+            if matched_broker_order_id and row.get("broker_order_id") != matched_broker_order_id:
+                row["broker_order_id"] = matched_broker_order_id
+                changed = True
+            if changed:
+                row["updated_at"] = now
+                updated += 1
+        if updated:
+            _write_rows_unlocked(path, rows)
+    return {
+        "updated_rows": updated,
+        "open_orders": len(open_orders),
+        "closed_orders": len(closed_orders),
+    }

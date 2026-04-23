@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import time
+import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
@@ -165,7 +166,8 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
             duration_ms = int((time.time() - start) * 1000)
             identity = getattr(request.state, "identity", None) or "unauthenticated"
             ip = request.client.host if request.client else "-"
-            _write_access_log(
+            await asyncio.to_thread(
+                _write_access_log,
                 identity=identity,
                 ip=ip,
                 method=request.method,

@@ -284,6 +284,12 @@ def _snapshot_stdout_lines(snapshot: Dict[str, Any], *, age: timedelta, stale_st
     return lines[-40:]
 
 
+def _public_health_error_message(system_ok: bool, system_error: Any) -> str | None:
+    if system_ok or not system_error:
+        return None
+    return "Health snapshot unavailable. Check hawkstrade-health-check.service."
+
+
 def _build_health() -> Dict[str, Any]:
     """Compose the health panel payload from health snapshots and recent logs."""
     snapshot_state = read_latest_health_snapshot()
@@ -292,7 +298,7 @@ def _build_health() -> Dict[str, Any]:
     live_log_issues: List[Dict[str, str]] = []
     stdout_tail: List[str] = []
     stderr_tail: List[str] = []
-    system_error = snapshot_state.get("error")
+    raw_system_error = snapshot_state.get("error")
     system_ok = bool(snapshot_state.get("ok"))
     snapshot_status = "red"
     stale_status: str | None = None
@@ -318,9 +324,11 @@ def _build_health() -> Dict[str, Any]:
         stdout_tail = _snapshot_stdout_lines(snapshot, age=age, stale_status=stale_status)
     else:
         live_log_issues = read_recent_log_issues()
+        if raw_system_error:
+            log.warning("Health snapshot unavailable: %s", raw_system_error)
         stdout_tail = [
             "Health source : snapshot unavailable",
-            str(system_error or "No health snapshot available."),
+            _public_health_error_message(system_ok, raw_system_error) or "No health snapshot available.",
             "Check hawkstrade-health-check.service and hawkstrade-health-check.timer.",
         ]
 
@@ -344,7 +352,7 @@ def _build_health() -> Dict[str, Any]:
             "returncode": 0 if system_ok else None,
             "stdout_tail": stdout_tail,
             "stderr_tail": stderr_tail,
-            "error": system_error,
+            "error": _public_health_error_message(system_ok, raw_system_error),
         },
     }
 

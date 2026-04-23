@@ -15,20 +15,67 @@ SECURITY CONTRACT:
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Dict, List
 
-# Explicitly import ONLY the read functions. Do not `from ... import *`.
-from core.alpaca_client import (
-    get_account,
-    get_all_positions,
-    get_buying_power,
-    get_cash,
-    get_position,
-    get_portfolio_value,
-    normalize_symbol,
-)
+from alpaca.trading.client import TradingClient
+
+from dashboard.config import cfg
 
 log = logging.getLogger("dashboard.alpaca_readonly")
+
+_trading_client: TradingClient | None = None
+
+
+def _mode_prefix() -> str:
+    return "ALPACA_PAPER" if cfg().mode == "paper" else "ALPACA_LIVE"
+
+
+def _get_dashboard_credentials() -> tuple[str, str, bool]:
+    prefix = _mode_prefix()
+    key = os.environ.get(f"{prefix}_API_KEY", "").strip()
+    secret = os.environ.get(f"{prefix}_SECRET_KEY", "").strip()
+    if not key or not secret:
+        raise RuntimeError(
+            f"Missing {prefix}_API_KEY or {prefix}_SECRET_KEY for dashboard mode={cfg().mode}"
+        )
+    return key, secret, cfg().mode == "paper"
+
+
+def _get_trading_client() -> TradingClient:
+    global _trading_client
+    if _trading_client is None:
+        key, secret, paper = _get_dashboard_credentials()
+        _trading_client = TradingClient(key, secret, paper=paper)
+    return _trading_client
+
+
+def normalize_symbol(symbol: str) -> str:
+    return str(symbol or "").replace("/", "").upper()
+
+
+def get_account() -> Any:
+    return _get_trading_client().get_account()
+
+
+def get_all_positions() -> List[Any]:
+    return list(_get_trading_client().get_all_positions())
+
+
+def get_position(symbol: str) -> Any:
+    return _get_trading_client().get_open_position(normalize_symbol(symbol))
+
+
+def get_portfolio_value() -> float:
+    return float(get_account().portfolio_value)
+
+
+def get_cash() -> float:
+    return float(get_account().cash)
+
+
+def get_buying_power() -> float:
+    return float(get_account().buying_power)
 
 _READ_FUNCTIONS = {
     "get_account": get_account,

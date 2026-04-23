@@ -19,11 +19,20 @@ class AppEndToEndTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         _skip_if_fastapi_missing()
-        os.environ["DASHBOARD_AUTH_MODE"] = "local"
+        cls._env_patcher = patch.dict(
+            os.environ,
+            {"DASHBOARD_AUTH_MODE": "local"},
+            clear=False,
+        )
+        cls._env_patcher.start()
         from dashboard.app import create_app
         from fastapi.testclient import TestClient
 
         cls.client = TestClient(create_app())
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._env_patcher.stop()
 
     def test_healthz_always_returns_json(self):
         # Even when Alpaca is unreachable, /healthz must respond with JSON.
@@ -131,6 +140,29 @@ class AppEndToEndTests(unittest.TestCase):
                 with self.subTest(path=path):
                     r = client.get(path)
                     self.assertEqual(r.status_code, 401)
+
+    def test_health_errors_are_sanitized_for_clients(self):
+        from dashboard import app as app_module
+
+        with patch.object(
+            app_module,
+            "read_latest_health_snapshot",
+            return_value={
+                "ok": False,
+                "path": None,
+                "data": None,
+                "error": "Could not read health snapshot at /secret/path: permission denied",
+            },
+        ), patch.object(app_module, "read_recent_log_issues", return_value=[]):
+            r = self.client.get("/api/health")
+
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(
+            body["systemd"]["error"],
+            "Health snapshot unavailable. Check hawkstrade-health-check.service.",
+        )
+        self.assertNotIn("/secret/path", "\n".join(body["systemd"]["stdout_tail"]))
 
 
 if __name__ == "__main__":

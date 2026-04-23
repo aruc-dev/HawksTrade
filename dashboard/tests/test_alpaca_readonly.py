@@ -1,8 +1,9 @@
 """Enforce that the read-only Alpaca wrapper never imports mutating functions."""
 from __future__ import annotations
 
+import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from dashboard import alpaca_readonly
 
@@ -66,6 +67,32 @@ class AlpacaReadOnlyImportGuardTests(unittest.TestCase):
     def test_alpaca_reachable_returns_false_on_exception(self):
         with patch.object(alpaca_readonly, "get_account", side_effect=RuntimeError):
             self.assertFalse(alpaca_readonly.alpaca_reachable())
+
+    def test_get_trading_client_uses_dashboard_env_only(self):
+        fake_client = MagicMock(name="TradingClient")
+        with patch.dict(
+            os.environ,
+            {
+                "ALPACA_PAPER_API_KEY": "paper-key",
+                "ALPACA_PAPER_SECRET_KEY": "paper-secret",
+            },
+            clear=False,
+        ), patch.object(alpaca_readonly, "_trading_client", None), \
+                patch.object(alpaca_readonly, "cfg") as mock_cfg, \
+                patch.object(alpaca_readonly, "TradingClient", return_value=fake_client) as mock_client:
+            mock_cfg.return_value.mode = "paper"
+            client = alpaca_readonly._get_trading_client()
+
+        self.assertIs(client, fake_client)
+        mock_client.assert_called_once_with("paper-key", "paper-secret", paper=True)
+
+    def test_missing_dashboard_credentials_raise_clear_error(self):
+        with patch.dict(os.environ, {}, clear=True), \
+                patch.object(alpaca_readonly, "_trading_client", None), \
+                patch.object(alpaca_readonly, "cfg") as mock_cfg:
+            mock_cfg.return_value.mode = "paper"
+            with self.assertRaises(RuntimeError):
+                alpaca_readonly._get_trading_client()
 
 
 if __name__ == "__main__":
