@@ -5,6 +5,8 @@ The risk manager still owns hard stop-loss and take-profit exits. This module
 only decides whether a strategy-specific hold period should force an exit.
 """
 
+from __future__ import annotations
+
 VALID_MOMENTUM_EXIT_POLICIES = {
     "fixed_hold",
     "profit_trailing",

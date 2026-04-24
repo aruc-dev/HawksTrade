@@ -9,6 +9,8 @@ Run directly:
   python scheduler/run_risk_check.py [--dry-run]
 """
 
+from __future__ import annotations
+
 import sys
 import logging
 import argparse
@@ -103,7 +105,27 @@ def _reconcile_trade_log_after_run(
     if dry_run:
         log.info("Trade-log reconciliation skipped during dry run.")
         return
-    summary = safe_reconcile(positions=positions, context=context, logger=log)
+    closed_orders = None
+    if positions is not None:
+        try:
+            closed_orders = ac.get_closed_orders()
+        except Exception as exc:
+            info = ac.classify_alpaca_error(exc)
+            log.warning(
+                "Could not fetch closed broker orders for reconciliation: %s "
+                "| category=%s retryable=%s status_code=%s",
+                exc,
+                info.category,
+                info.retryable,
+                info.status_code or "",
+                exc_info=True,
+            )
+    summary = safe_reconcile(
+        positions=positions,
+        closed_orders=closed_orders,
+        context=context,
+        logger=log,
+    )
     if summary is None and marker is not None:
         marker.mark_error(
             stage="trade_log_reconciliation",

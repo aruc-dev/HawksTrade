@@ -5,6 +5,8 @@ Backtests the current strategies and risk management settings
 over a specified period with a custom starting fund.
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import logging

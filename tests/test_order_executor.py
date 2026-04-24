@@ -60,18 +60,21 @@ class OrderExecutorTests(unittest.TestCase):
 
     def test_exit_position_keeps_trade_open_when_exit_order_not_filled(self):
         position = SimpleNamespace(qty="2", avg_entry_price="100")
-        order = SimpleNamespace(id="exit-1", status="new", filled_qty="0")
+        order = SimpleNamespace(id="exit-1", status="pending_new", filled_qty="0")
 
         with (
             patch.object(order_executor.ac, "get_position", return_value=position),
             patch.object(order_executor.ac, "get_stock_latest_price", return_value=110),
             patch.object(order_executor.ac, "get_open_orders", return_value=[]),
             patch.object(order_executor.ac, "place_limit_order", return_value=order),
+            self.assertLogs("core.order_executor", level="INFO") as logs,
         ):
             result = order_executor.exit_position("AAPL", "take profit", dry_run=False)
 
         self.assertIsNotNone(result)
         self.assertEqual(result["status"], "submitted")
+        self.assertTrue(any("Exit order submitted for AAPL" in message for message in logs.output))
+        self.assertFalse(any("WARNING:core.order_executor:Exit order submitted for AAPL" in message for message in logs.output))
 
         with open(trade_log.TRADE_LOG, "r") as f:
             rows = list(csv.DictReader(f))
@@ -177,19 +180,22 @@ class OrderExecutorTests(unittest.TestCase):
         self.assertTrue(any("non-long position" in message for message in logs.output))
 
     def test_enter_position_logs_submitted_buy_without_open_exposure(self):
-        order = SimpleNamespace(id="entry-submitted", status="new", filled_qty="0")
+        order = SimpleNamespace(id="entry-submitted", status="pending_new", filled_qty="0")
 
         with (
             patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
             patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 2}),
             patch.object(order_executor.rm, "cap_position_qty", return_value=2),
             patch.object(order_executor.ac, "place_limit_order", return_value=order),
+            self.assertLogs("core.order_executor", level="INFO") as logs,
         ):
             result = order_executor.enter_position("MSFT", "gap_up", dry_run=False)
 
         self.assertIsNotNone(result)
         self.assertEqual(result["status"], "submitted")
         self.assertEqual(result["qty"], 2)
+        self.assertTrue(any("Entry order submitted for MSFT" in message for message in logs.output))
+        self.assertFalse(any("WARNING:core.order_executor:Entry order submitted for MSFT" in message for message in logs.output))
 
         rows = [row for row in trade_log.read_trade_rows() if row["symbol"] == "MSFT"]
         self.assertEqual(len(rows), 1)

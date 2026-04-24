@@ -8,6 +8,8 @@ NOTE: Intraday exit is controlled by config intraday.enabled.
       When intraday is disabled, gap-up entries are held as swing trades.
 """
 
+from __future__ import annotations
+
 import logging
 from datetime import datetime
 from typing import List, Dict

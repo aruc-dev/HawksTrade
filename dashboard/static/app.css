@@ -1,0 +1,6 @@
+/* Minimal overrides; Tailwind CDN handles almost everything. */
+body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+tbody tr { border-bottom: 1px solid rgb(30 41 59); }
+tbody tr:last-child { border-bottom: none; }
+tbody td { padding: 4px 6px; }

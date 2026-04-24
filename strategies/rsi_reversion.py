@@ -7,6 +7,8 @@ Sells when RSI rises above overbought_threshold (default 60).
 Strategy: Swing trade (NOT intraday).
 """
 
+from __future__ import annotations
+
 import logging
 from typing import List, Dict
 from pathlib import Path

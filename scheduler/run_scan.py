@@ -17,6 +17,8 @@ Run directly:
 See scheduler/README.md for launchd, cron, and Windows Task Scheduler setup.
 """
 
+from __future__ import annotations
+
 import sys
 import logging
 import argparse

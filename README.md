@@ -112,6 +112,40 @@ Operational schedules are documented in [scheduler/README.md](scheduler/README.m
 
 For running HawksTrade on AWS EC2 with IAM-based secrets management (no keys on disk), see [cloud-setup/aws-setup.md](cloud-setup/aws-setup.md).
 
+### Optional Read-Only Dashboard
+
+HawksTrade can optionally expose a **read-only** operational dashboard for:
+
+- account value, cash, buying power, and open positions
+- realized/unrealized P&L snapshots
+- recent closed trades and strategy summaries
+- Linux health status, cron/systemd execution health, and recent log issues
+
+This dashboard is intentionally separate from trading execution:
+
+- it does **not** place trades, cancel orders, or change config
+- it uses a dedicated dashboard service and separate pinned dependencies in
+  [requirements-dashboard.txt](requirements-dashboard.txt)
+- it is designed to run on the EC2 host only, with loopback binding and
+  authentication in front of it
+
+Supported optional deployment modes:
+
+1. **Local-only over SSH tunnel**
+   Use `DASHBOARD_AUTH_MODE=local` and access it only through an SSH tunnel to
+   `127.0.0.1:8080`.
+2. **Cloudflare Tunnel + Cloudflare Access**
+   Use `DASHBOARD_AUTH_MODE=cloudflare` for authenticated remote/mobile access
+   without opening an inbound port on the EC2 instance.
+
+The dashboard setup is documented separately because it is optional operational
+infrastructure, not required for the trading bot itself:
+
+- [cloud-setup/dashboard-setup.md](cloud-setup/dashboard-setup.md)
+
+If you are using the systemd-based EC2 deployment, install the core bot first,
+then add the dashboard on top as an optional extra.
+
 ---
 
 ## Project Structure

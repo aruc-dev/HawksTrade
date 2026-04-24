@@ -5,6 +5,8 @@ Central wrapper for all Alpaca REST API calls (stocks + crypto).
 Reads mode (paper/live) from config and picks the correct keys from .env.
 """
 
+from __future__ import annotations
+
 import os
 import logging
 import time
@@ -374,6 +376,11 @@ def cancel_order(order_id: str):
 def get_open_orders():
     req = GetOrdersRequest(status=QueryOrderStatus.OPEN)
     return call_alpaca("trading.get_open_orders", lambda: get_trading_client().get_orders(filter=req))
+
+
+def get_closed_orders(limit: int = 200):
+    req = GetOrdersRequest(status=QueryOrderStatus.CLOSED, limit=limit, nested=True)
+    return call_alpaca("trading.get_closed_orders", lambda: get_trading_client().get_orders(filter=req))
 
 
 def normalize_symbol(symbol: str) -> str:
