@@ -66,6 +66,17 @@ stocks:
     - SOFI
     - PLTR
     - COIN
+    - ORCL
+    - CRM
+    - SOUN
+    - AI
+    - IONQ
+    - SMCI
+    - ARM
+    - AVGO
+    - INTC
+    - TSM
+    - IBM
 
 # --- DYNAMIC UNIVERSE SCREENER ---
 screener:
