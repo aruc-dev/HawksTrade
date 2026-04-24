@@ -1,6 +1,6 @@
 # HawksTrade
 
-![HawksTrade - The Digital Sentinel](assets/hawkstrade_sentinel.webp)
+![HawksTrade Brand](assets/brand/hawkstrade-brand.png)
 
 **Automated swing trading bot for US stocks and crypto, powered by Alpaca Markets.**
 
