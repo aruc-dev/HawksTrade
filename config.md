@@ -130,6 +130,17 @@ stocks:
     - SOFI
     - PLTR
     - COIN
+    - ORCL
+    - CRM
+    - SOUN
+    - AI
+    - IONQ
+    - SMCI
+    - ARM
+    - AVGO
+    - INTC
+    - TSM
+    - IBM
 ```
 
 This fixed universe is always merged into the dynamic screener output. It is also the complete stock universe when running with `--no-screener`.
