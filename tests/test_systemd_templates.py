@@ -139,6 +139,7 @@ class SystemdTemplateTests(unittest.TestCase):
         self.assertIn("/home/ec2-user/HawksTrade/logs/dashboard_access_*.log", text)
         self.assertIn("daily", text)
         self.assertIn("rotate 30", text)
+        self.assertIn("su hawkstrade-dash hawkstrade-dash", text)
         self.assertIn("copytruncate", text)
 
 

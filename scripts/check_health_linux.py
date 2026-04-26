@@ -53,6 +53,7 @@ DEFAULT_SNAPSHOT_DIR = REPORTS_DIR / "health_snapshots"
 DEFAULT_SNAPSHOT_RETENTION_DAYS = 14.0
 DEFAULT_PRICE_FAILURE_STATE_FILE = BASE_DIR / "data" / "price_fetch_failures.json"
 DEFAULT_PRICE_FAILURE_ALERT_THRESHOLD = 3
+EXPECTED_RUN_GRACE = timedelta(minutes=5)
 DEFAULT_CRON_FILES = {
     "eastern": BASE_DIR / "scheduler" / "cron" / "hawkstrade-eastern.cron",
     "pacific": BASE_DIR / "scheduler" / "cron" / "hawkstrade-pacific.cron",
@@ -910,6 +911,10 @@ def _expected_runs_for_jobs(jobs: list[CronJob], start: datetime, end: datetime)
     return sorted(set(expected))
 
 
+def _expected_run_cutoff(now: datetime) -> datetime:
+    return now - EXPECTED_RUN_GRACE
+
+
 def _match_expected_runs(expected: list[datetime], actual: list[datetime], tolerance_minutes: int) -> tuple[int, list[datetime]]:
     missed = 0
     used: set[int] = set()
@@ -997,8 +1002,9 @@ def _combined_scan_health(
     now: datetime,
     lookback_hours: float,
 ) -> dict[str, JobHealth] | None:
-    full_expected = _expected_runs_for_jobs(full_jobs, window_start, now)
-    crypto_expected = _expected_runs_for_jobs(crypto_jobs, window_start, now)
+    expected_end = _expected_run_cutoff(now)
+    full_expected = _expected_runs_for_jobs(full_jobs, window_start, expected_end)
+    crypto_expected = _expected_runs_for_jobs(crypto_jobs, window_start, expected_end)
     if not full_expected or not crypto_expected:
         return None
 
@@ -1077,7 +1083,7 @@ def evaluate_job_health(
 
         all_expected: list[datetime] = []
         for job in jobs_for_key:
-            all_expected.extend(_generate_expected_times(job.pattern, window_start, now))
+            all_expected.extend(_generate_expected_times(job.pattern, window_start, _expected_run_cutoff(now)))
         all_expected = sorted(set(all_expected))
         key_records = sorted(by_key.get(key, []), key=lambda item: item.start_time)
         recent_records = [record for record in key_records if record.start_time >= window_start]
@@ -1590,7 +1596,10 @@ def format_terminal_report(report: HealthReport, *, use_color: bool = False) -> 
             f"{missed:<15} {status}"
         )
     lines.append("")
-    lines.append("Missed counts reflect gaps detected between observed runs and the cron template.")
+    lines.append(
+        "Missed counts reflect gaps detected between observed runs and the cron template; "
+        f"runs scheduled in the last {int(EXPECTED_RUN_GRACE.total_seconds() // 60)} minutes are treated as pending."
+    )
     lines.append("Full scan and Crypto scan are evaluated together as one hourly cycle when both are scheduled.")
     lines.append("")
 
@@ -2172,7 +2181,7 @@ def render_html_report(report: HealthReport) -> str:
           </table>
         </div>
       </div>
-      <div class="footnote">The dashboard is generated from cron templates, runtime logs, and the current Alpaca snapshot when available. Full scan and Crypto scan are evaluated together as one hourly cycle when both are scheduled.</div>
+      <div class="footnote">The dashboard is generated from cron templates, runtime logs, and the current Alpaca snapshot when available. Runs scheduled in the last {int(EXPECTED_RUN_GRACE.total_seconds() // 60)} minutes are treated as pending. Full scan and Crypto scan are evaluated together as one hourly cycle when both are scheduled.</div>
     </section>
   </div>
 </body>
