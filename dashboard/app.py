@@ -40,8 +40,10 @@ from dashboard.data_sources import (
     read_trades,
 )
 from dashboard.pnl import (
+    active_days_since_first_trade,
     current_ny_date,
     daily_loss_headroom,
+    realized_pnl_all_time,
     realized_pnl_window,
     realized_pnl_today,
     strategy_summary,
@@ -164,12 +166,18 @@ def _build_state_snapshot() -> Dict[str, Any]:
 
     pnl_today = realized_pnl_today(rows, ny_date_str=current_ny_date())
     pnl_7d = realized_pnl_window(rows, lookback_days=REALIZED_WINDOW_DAYS, now_utc=now)
+    pnl_all_time = realized_pnl_all_time(rows)
+    active_days = active_days_since_first_trade(rows, now_utc=now)
     unrealized = unrealized_pnl_summary(positions)
     baseline = read_daily_baseline()
     headroom = daily_loss_headroom(
         baseline=baseline,
         current_portfolio_value=account.get("portfolio_value", 0.0),
         daily_loss_limit_pct=cfg().daily_loss_limit_pct,
+    )
+    # Active capital: maximum capital that could be deployed given current risk settings.
+    active_capital = round(
+        account.get("portfolio_value", 0.0) * cfg().max_positions * cfg().max_position_pct, 2
     )
     strategies = strategy_summary(rows, lookback_days=30)
     health = _build_health()
@@ -185,10 +193,13 @@ def _build_state_snapshot() -> Dict[str, Any]:
         "server_time_utc": now.isoformat(timespec="seconds"),
         "ny_date": current_ny_date(),
         "account": account,
+        "active_capital": active_capital,
         "positions": positions,
         "position_summary": unrealized,
         "realized_today": pnl_today,
         "realized_7d": pnl_7d,
+        "total_realized": pnl_all_time,
+        "active_days": active_days,
         "daily_loss_headroom": headroom,
         "strategies": strategies,
         "recent_trades": closed[:10],
@@ -318,6 +329,7 @@ def _build_health() -> Dict[str, Any]:
     system_ok = bool(snapshot_state.get("ok"))
     snapshot_status = "red"
     stale_status: str | None = None
+    job_health: List[Dict[str, Any]] = []
 
     if system_ok and isinstance(snapshot_state.get("data"), dict):
         snapshot = snapshot_state["data"]
@@ -338,6 +350,16 @@ def _build_health() -> Dict[str, Any]:
             snapshot_status = _merge_status(snapshot_status, stale_status)
         snapshot_log_issues = _format_snapshot_log_issues(snapshot)
         stdout_tail = _snapshot_stdout_lines(snapshot, age=age, stale_status=stale_status)
+        job_health = [
+            {
+                "label": j.get("label") or j.get("key") or "job",
+                "status": str(j.get("status") or "red"),
+                "missed_runs": int(j.get("missed_runs") or 0),
+                "last_run_at": str(j.get("last_run_at") or ""),
+                "latest_note": str(j.get("latest_note") or ""),
+            }
+            for j in (snapshot.get("job_health") or [])
+        ]
     else:
         live_log_issues = read_recent_log_issues()
         if raw_system_error:
@@ -359,6 +381,7 @@ def _build_health() -> Dict[str, Any]:
 
     return {
         "status": status,
+        "job_health": job_health,
         "log_issue_count": len(log_issues),
         "log_issues": log_issues,
         "systemd": {

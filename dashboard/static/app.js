@@ -66,6 +66,11 @@
     $("acct-portfolio").textContent = money(acct.portfolio_value);
     $("acct-cash").textContent = money(acct.cash);
     $("acct-bp").textContent = money(acct.buying_power);
+    const maxPos = s.active_capital != null ? s.active_capital : null;
+    const acEl = $("acct-active-capital");
+    acEl.textContent = maxPos != null ? money(maxPos) : "—";
+    $("acct-active-capital-detail").textContent =
+      maxPos != null ? "max_positions × max_position_pct × portfolio" : "—";
 
     // Headroom
     const h = s.daily_loss_headroom || {};
@@ -91,7 +96,6 @@
     // P&L snapshot
     const r = s.realized_7d || s.realized_today || {};
     const u = s.position_summary || {};
-    $("pnl-window-label").textContent = "(" + String(r.window_days || 7) + "d realized)";
     const rEl = $("pnl-realized");
     rEl.textContent = money(r.total_usd, true);
     rEl.className = "text-2xl font-mono " + colorFor(r.total_usd);
@@ -103,6 +107,40 @@
     $("pnl-unrealized-detail").textContent =
       "stocks " + money(u.stock_usd, true) + " (" + (u.stock_count || 0) + ") • " +
       "crypto " + money(u.crypto_usd, true) + " (" + (u.crypto_count || 0) + ")";
+
+    // Active days + total realized (all time)
+    const activeDays = s.active_days;
+    $("pnl-active-days").textContent = activeDays != null ? activeDays + "d" : "—";
+    const tr = s.total_realized || {};
+    const trEl = $("pnl-total-realized");
+    trEl.textContent = tr.total_usd != null ? money(tr.total_usd, true) : "—";
+    trEl.className = "text-xl font-mono " + colorFor(tr.total_usd);
+    $("pnl-total-realized-detail").textContent = tr.trade_count != null
+      ? (tr.trade_count || 0) + " trades • " + (tr.wins || 0) + "W / " + (tr.losses || 0) + "L"
+      : "—";
+
+    // Services (per-job health with colored dots)
+    const jobs = (s.health && s.health.job_health) || [];
+    const servicesDiv = $("services-list");
+    if (jobs.length === 0) {
+      servicesDiv.innerHTML = "<div class=\"text-sm text-slate-500\">No service data available</div>";
+    } else {
+      servicesDiv.innerHTML = jobs.map((j) => {
+        const dotColor = {
+          green: "bg-emerald-400",
+          yellow: "bg-amber-400",
+          red: "bg-rose-500",
+        }[j.status] || "bg-slate-600";
+        const lastRun = j.last_run_at ? j.last_run_at.replace("T", " ").slice(0, 19) : "never";
+        const note = j.latest_note ? " — " + escape(j.latest_note) : "";
+        return "<div class=\"flex items-center gap-2 py-1 border-b border-slate-800 last:border-0\">" +
+          "<span class=\"w-2.5 h-2.5 rounded-full flex-shrink-0 " + dotColor + "\"></span>" +
+          "<span class=\"text-sm text-slate-200 flex-1\">" + escape(j.label) + "</span>" +
+          (j.missed_runs ? "<span class=\"text-xs text-rose-400\">" + j.missed_runs + " missed</span>" : "") +
+          "<span class=\"text-xs text-slate-500 ml-auto\">" + escape(lastRun) + escape(note) + "</span>" +
+          "</div>";
+      }).join("");
+    }
 
     // Positions
     const posBody = $("positions-tbody");

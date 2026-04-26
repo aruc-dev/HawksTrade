@@ -52,6 +52,10 @@ class DashboardConfig:
         return int(self._load().get("trading", {}).get("max_positions", 10))
 
     @property
+    def max_position_pct(self) -> float:
+        return float(self._load().get("trading", {}).get("max_position_pct", 0.05))
+
+    @property
     def max_crypto_positions(self) -> int:
         return int(self._load().get("trading", {}).get("max_crypto_positions", 0))
 
