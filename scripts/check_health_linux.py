@@ -939,15 +939,15 @@ def _match_expected_runs(expected: list[datetime], actual: list[datetime], toler
 
 
 def _job_status(latest_recent: RunRecord | None, missed_runs: int, expected_runs: int) -> str:
+    if latest_recent is not None and not latest_recent.success:
+        return "red"
+    if latest_recent is not None and any("error in run" in note for note in latest_recent.notes):
+        return "red"
     if expected_runs == 0:
         return "green"
     if latest_recent is None:
         return "red"
     if missed_runs > 0:
-        return "red"
-    if not latest_recent.success:
-        return "red"
-    if any("error in run" in note for note in latest_recent.notes):
         return "red"
     return "green"
 
