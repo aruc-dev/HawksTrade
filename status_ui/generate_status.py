@@ -2,9 +2,13 @@
 """
 HawksTrade Status Dashboard Generator
 ======================================
-Reads config/config.yaml, data/trades.csv, and logs/scan_YYYYMMDD.log
-to produce a self-contained status.html. Run independently on a cron/loop.
-Never imports or modifies any HawksTrade trading code.
+Reads config/config.yaml (or config/config.local.yaml when present),
+data/trades.csv, and logs/scan_YYYYMMDD.log to produce a self-contained
+status.html. Run independently on a cron/loop.
+
+Config resolution follows the same local-override rules as the rest of the
+bot: if config/config.local.yaml exists it takes precedence over
+config/config.yaml (via core.config_loader.get_config_path).
 
 Usage:
   python status_ui/generate_status.py
@@ -19,6 +23,8 @@ import csv
 import html
 from datetime import datetime, timezone
 from pathlib import Path
+
+from core.config_loader import get_config_path
 
 try:
     import fcntl
@@ -72,8 +78,7 @@ def resolve_paths(project_dir_arg, output_arg, script_path):
     else:
         project_dir = script_dir.parent
 
-    local_config = project_dir / "config" / "config.local.yaml"
-    config_path = local_config if local_config.exists() else project_dir / "config" / "config.yaml"
+    config_path = get_config_path(base_dir=project_dir)
     trades_path = project_dir / "data" / "trades.csv"
     logs_dir    = project_dir / "logs"
     output_path = Path(output_arg).resolve() if output_arg else script_dir / "status.html"

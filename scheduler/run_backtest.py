@@ -12,7 +12,6 @@ import sys
 import logging
 import argparse
 import tempfile
-import yaml
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -28,7 +27,7 @@ sys.path.insert(0, str(BASE_DIR))
 from core import alpaca_client as ac
 from core import risk_manager as rm
 from core import order_executor as oe
-from core.config_loader import get_config_path
+from core.config_loader import get_config
 from core.exit_policy import (
     VALID_MOMENTUM_EXIT_POLICIES,
     normalize_momentum_exit_policy,
@@ -410,7 +409,7 @@ def run_backtest(
     enabled_strategies=None,
     config_overrides=None,
 ):
-    with open(get_config_path()) as f: cfg = yaml.safe_load(f)
+    cfg = get_config()
 
     if config_overrides:
         for assignment in config_overrides:

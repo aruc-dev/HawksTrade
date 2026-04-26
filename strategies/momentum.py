@@ -13,18 +13,16 @@ import logging
 from datetime import datetime, timedelta
 from typing import List, Dict
 
-import yaml
 import pandas as pd
 from pathlib import Path
 
 from strategies.base_strategy import BaseStrategy
 from core import alpaca_client as ac
 from core import risk_manager as rm
-from core.config_loader import get_config_path
+from core.config_loader import get_config
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-with open(get_config_path()) as f:
-    CFG = yaml.safe_load(f)
+CFG = get_config()
 
 SCFG = CFG["strategies"]["momentum"]
 log = logging.getLogger("strategy.momentum")

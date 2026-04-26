@@ -14,19 +14,17 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict
 from pathlib import Path
 
-import yaml
 
 from core import alpaca_client as ac
 from core import risk_manager as rm
-from core.config_loader import get_config_path
+from core.config_loader import get_config
 from tracking import order_intents
 from tracking.trade_log import log_trade, mark_trade_closed, get_trade_age_days
 
 # ── Setup ───────────────────────────────────────────────────────────────────
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-with open(get_config_path()) as f:
-    CFG = yaml.safe_load(f)
+CFG = get_config()
 
 MODE        = CFG["mode"]
 ORDER_TYPE  = CFG["trading"]["order_type"]

@@ -31,7 +31,6 @@ from pathlib import Path
 from typing import Iterable
 
 import pandas as pd
-import yaml
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 if str(BASE_DIR) not in sys.path:
@@ -40,11 +39,9 @@ if str(BASE_DIR) not in sys.path:
 from tracking.performance import compute_summary, load_closed_trades
 from tracking.trade_log import get_open_trades
 from scheduler.reconcile_trade_log import safe_reconcile
-from core.config_loader import get_config_path
+from core.config_loader import get_config
 
-CONFIG_PATH = get_config_path()
-with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-    CFG = yaml.safe_load(f)
+CFG = get_config()
 
 LOG_DIR = BASE_DIR / CFG["reporting"]["logs_dir"]
 REPORTS_DIR = BASE_DIR / CFG["reporting"]["reports_dir"]
