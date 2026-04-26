@@ -1,7 +1,8 @@
 """Dashboard configuration loader.
 
 Reads from:
-- config/config.yaml (shared with the bot; read-only)
+- config/config.local.yaml if present, otherwise config/config.yaml
+  (same local-override resolution used by the bot; read-only)
 - Environment variables (for auth mode, Cloudflare Access settings)
 
 Never reads /dev/shm/.hawkstrade.env — the dashboard runs as an isolated user
