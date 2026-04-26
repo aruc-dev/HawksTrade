@@ -4,10 +4,18 @@
    ───────────────────────────────────────────────────────────────── */
 
 /* Fonts */
+* {
+  box-sizing: border-box;
+}
+html {
+  background: #020617;
+}
 body {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   background: #020617; /* slate-950 */
   color: #f1f5f9;      /* slate-100 */
+  margin: 0;
+  min-width: 320px;
 }
 .mono, .font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
 
@@ -16,6 +24,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 1rem;
   padding: 0 1.25rem;
   height: 3rem;
   background: #0f172a;        /* slate-900 */
@@ -23,6 +32,39 @@ body {
   position: sticky;
   top: 0;
   z-index: 50;
+}
+
+.ht-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+.ht-brand-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+}
+.ht-brand-title {
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.ht-header-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1rem;
+  min-width: 0;
+  color: #94a3b8;
+  font-size: 0.75rem;
+}
+#refresh-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ht-main {
@@ -94,6 +136,7 @@ body {
   flex: 1;
   padding: 0.85rem 1.1rem;
   min-width: 0;
+  overflow: hidden;
 }
 .ht-kpi-sep {
   width: 1px;
@@ -115,6 +158,8 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   letter-spacing: -0.02em;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ht-kpi-sub {
   font-size: 0.65rem;
@@ -167,12 +212,22 @@ body {
 
 /* ── Progress bar ──────────────────────────────────────────────── */
 .ht-headroom-card { padding: 0.85rem 1.25rem; }
+.ht-headroom-header {
+  margin-bottom: 0.5rem;
+}
 .ht-progress-track {
   width: 100%;
   height: 4px;
   background: #1e293b;
   border-radius: 2px;
   overflow: hidden;
+}
+.ht-headroom-text {
+  margin-top: 0.45rem;
+  color: #94a3b8;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 .ht-progress-bar {
   height: 4px;
@@ -266,6 +321,7 @@ body {
   padding: 0.35rem 0;
   border-bottom: 1px solid #1e293b;
   font-size: 0.75rem;
+  min-width: 0;
 }
 .ht-service-row:last-child { border-bottom: none; }
 .ht-service-dot {
@@ -277,10 +333,135 @@ body {
 }
 .ht-service-label { color: #cbd5e1; flex: 1; }
 .ht-service-missed { font-size: 0.65rem; color: #f87171; font-weight: 600; }
-.ht-service-time { font-size: 0.65rem; color: #475569; font-variant-numeric: tabular-nums; }
+.ht-service-time {
+  font-size: 0.65rem;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ht-services-list {
+  display: flex;
+  flex-direction: column;
+}
+.ht-muted {
+  color: #64748b;
+  font-size: 0.875rem;
+}
+.ht-section-suffix {
+  color: #475569;
+  font-size: 0.75rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.ht-empty-cell {
+  color: #64748b;
+  padding: 0.75rem 0.5rem !important;
+  text-align: center;
+}
 
 /* ── Color utilities ───────────────────────────────────────────── */
+.text-left        { text-align: left; }
+.text-right       { text-align: right; }
+.text-center      { text-align: center; }
+.overflow-x-auto  { overflow-x: auto; }
+.mb-2             { margin-bottom: 0.5rem; }
+.mb-3             { margin-bottom: 0.75rem; }
+.mt-1             { margin-top: 0.25rem; }
+.text-white       { color: #ffffff; }
 .text-emerald-400 { color: #34d399; }
 .text-rose-400    { color: #f87171; }
 .text-amber-400   { color: #fbbf24; }
 .text-slate-300   { color: #cbd5e1; }
+.text-slate-400   { color: #94a3b8; }
+.text-slate-500   { color: #64748b; }
+.text-slate-600   { color: #475569; }
+.bg-emerald-400   { background-color: #34d399; }
+.bg-emerald-500   { background-color: #10b981; }
+.bg-amber-400     { background-color: #fbbf24; }
+.bg-rose-400      { background-color: #f87171; }
+.bg-rose-500      { background-color: #f43f5e; }
+.bg-rose-700      { background-color: #be123c; }
+.bg-slate-600     { background-color: #475569; }
+.bg-slate-950     { background-color: #020617; }
+
+@media (max-width: 900px) {
+  .ht-main {
+    padding: 1rem;
+  }
+  .ht-kpi-strip {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ht-kpi {
+    border-bottom: 1px solid #1e293b;
+    padding: 0.85rem 1rem;
+  }
+  .ht-kpi:nth-last-child(-n + 3) {
+    border-bottom: 0;
+  }
+  .ht-kpi-sep {
+    display: none;
+  }
+  .ht-kpi-value {
+    font-size: 1.05rem;
+  }
+  .ht-service-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    row-gap: 0.2rem;
+  }
+  .ht-service-time {
+    grid-column: 2 / 4;
+    text-align: left;
+    white-space: normal;
+  }
+}
+
+@media (max-width: 520px) {
+  .ht-header {
+    padding: 0 0.875rem;
+  }
+  .ht-brand {
+    gap: 0.5rem;
+  }
+  .ht-brand-title {
+    font-size: 0.95rem;
+  }
+  .ht-header-meta {
+    gap: 0.5rem;
+    font-size: 0.7rem;
+  }
+  .ht-version {
+    display: none;
+  }
+  .ht-main {
+    padding: 0.875rem;
+    gap: 0.875rem;
+  }
+  .ht-card {
+    padding: 0.95rem;
+  }
+  .ht-kpi-strip {
+    grid-template-columns: 1fr;
+  }
+  .ht-kpi {
+    border-bottom: 1px solid #1e293b;
+  }
+  .ht-kpi:last-child {
+    border-bottom: 0;
+  }
+  .ht-headroom-header {
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+  .ht-status-text {
+    text-align: right;
+    max-width: 55%;
+  }
+}

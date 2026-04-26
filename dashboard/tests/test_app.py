@@ -122,6 +122,10 @@ class AppEndToEndTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn("javascript", r.headers["content-type"])
 
+    def test_favicon_does_not_generate_404_noise(self):
+        r = self.client.get("/favicon.ico")
+        self.assertEqual(r.status_code, 204)
+
     def test_docs_endpoints_disabled(self):
         # OpenAPI / Swagger endpoints should not be exposed.
         for path in ("/docs", "/redoc", "/openapi.json"):

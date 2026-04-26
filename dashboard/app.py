@@ -67,6 +67,13 @@ TEMPLATES = Jinja2Templates(directory=str(HERE / "templates"))
 STATIC_FILES = StaticFiles(directory=str(HERE / "static"))
 
 
+def _asset_version() -> str:
+    """Return a cache key that changes when dashboard static assets change."""
+    asset_paths = [HERE / "static" / "app.css", HERE / "static" / "app.js"]
+    latest_mtime = max((path.stat().st_mtime for path in asset_paths if path.exists()), default=0)
+    return f"{__version__}-{int(latest_mtime)}"
+
+
 def create_app() -> FastAPI:
     # Fail fast if auth configuration is unsafe for production.
     assert_production_auth_safe()
@@ -88,6 +95,7 @@ def create_app() -> FastAPI:
             "dashboard.html",
             {
                 "version": __version__,
+                "asset_version": _asset_version(),
                 "mode": cfg().mode,
             },
         )
@@ -99,6 +107,10 @@ def create_app() -> FastAPI:
         _: str = Depends(require_auth),
     ) -> Response:
         return await STATIC_FILES.get_response(path, request.scope)
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon() -> Response:
+        return Response(status_code=204)
 
     # ── Unauthenticated liveness (for the tunnel's own health check) ────────
     @app.get("/healthz", include_in_schema=False)

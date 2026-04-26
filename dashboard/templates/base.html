@@ -6,13 +6,9 @@
   <meta name="referrer" content="no-referrer">
   <meta name="robots" content="noindex, nofollow">
   <title>{% block title %}HawksTrade Dashboard{% endblock %}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = { darkMode: 'class' };
-  </script>
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/app.css?v={{ asset_version | default(version) }}">
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen font-sans">
+<body>
   {% block body %}{% endblock %}
 </body>
 </html>

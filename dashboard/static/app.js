@@ -79,7 +79,7 @@
     const used = limit > 0 ? Math.min(100, Math.round((loss / limit) * 100)) : 0;
     const bar = $("headroom-bar");
     bar.style.width = used + "%";
-    bar.className = "h-2 rounded " + ({
+    bar.className = "ht-progress-bar " + ({
       ok: "bg-emerald-500",
       warn: "bg-amber-400",
       critical: "bg-rose-500",
@@ -87,6 +87,7 @@
       unknown: "bg-slate-600",
     }[h.status] || "bg-slate-600");
     $("headroom-status").textContent = (h.status || "unknown");
+    $("headroom-status").dataset.status = h.status || "unknown";
     $("headroom-text").innerHTML =
       "baseline " + money(h.baseline_value) +
       " → current <span class=\"" + colorFor(h.delta_usd) + "\">" + money(h.delta_usd, true) +
@@ -98,12 +99,12 @@
     const u = s.position_summary || {};
     const rEl = $("pnl-realized");
     rEl.textContent = money(r.total_usd, true);
-    rEl.className = "text-2xl font-mono " + colorFor(r.total_usd);
+    rEl.className = "ht-kpi-value " + colorFor(r.total_usd);
     $("pnl-realized-detail").textContent =
       (r.trade_count || 0) + " trades • " + (r.wins || 0) + "W / " + (r.losses || 0) + "L";
     const uEl = $("pnl-unrealized");
     uEl.textContent = money(u.total_usd, true);
-    uEl.className = "text-2xl font-mono " + colorFor(u.total_usd);
+    uEl.className = "ht-kpi-value " + colorFor(u.total_usd);
     $("pnl-unrealized-detail").textContent =
       "stocks " + money(u.stock_usd, true) + " (" + (u.stock_count || 0) + ") • " +
       "crypto " + money(u.crypto_usd, true) + " (" + (u.crypto_count || 0) + ")";
@@ -114,7 +115,7 @@
     const tr = s.total_realized || {};
     const trEl = $("pnl-total-realized");
     trEl.textContent = tr.total_usd != null ? money(tr.total_usd, true) : "—";
-    trEl.className = "text-xl font-mono " + colorFor(tr.total_usd);
+    trEl.className = "ht-kpi-value " + colorFor(tr.total_usd);
     $("pnl-total-realized-detail").textContent = tr.trade_count != null
       ? (tr.trade_count || 0) + " trades • " + (tr.wins || 0) + "W / " + (tr.losses || 0) + "L"
       : "—";
@@ -133,11 +134,11 @@
         }[j.status] || "bg-slate-600";
         const lastRun = j.last_run_at ? j.last_run_at.replace("T", " ").slice(0, 19) : "never";
         const note = j.latest_note ? " — " + j.latest_note : "";
-        return "<div class=\"flex items-center gap-2 py-1 border-b border-slate-800 last:border-0\">" +
-          "<span class=\"w-2.5 h-2.5 rounded-full flex-shrink-0 " + dotColor + "\"></span>" +
-          "<span class=\"text-sm text-slate-200 flex-1\">" + escape(j.label) + "</span>" +
-          (j.missed_runs ? "<span class=\"text-xs text-rose-400\">" + j.missed_runs + " missed</span>" : "") +
-          "<span class=\"text-xs text-slate-500 ml-auto\">" + escape(lastRun + note) + "</span>" +
+        return "<div class=\"ht-service-row\">" +
+          "<span class=\"ht-service-dot " + dotColor + "\"></span>" +
+          "<span class=\"ht-service-label\">" + escape(j.label) + "</span>" +
+          (j.missed_runs ? "<span class=\"ht-service-missed\">" + j.missed_runs + " missed</span>" : "") +
+          "<span class=\"ht-service-time\">" + escape(lastRun + note) + "</span>" +
           "</div>";
       }).join("");
     }
@@ -158,7 +159,7 @@
         "<td class=\"text-right mono " + cls + "\">" + money(p.unrealized_pl, true) + "</td>" +
         "<td class=\"text-right mono " + cls + "\">" + pct(p.unrealized_plpc) + "</td>" +
       "</tr>";
-    }).join("") || "<tr><td colspan=\"8\" class=\"text-center text-slate-500 py-2\">No open positions</td></tr>";
+    }).join("") || "<tr><td colspan=\"8\" class=\"ht-empty-cell\">No open positions</td></tr>";
 
     // Strategies
     const stratBody = $("strategies-tbody");
@@ -169,7 +170,7 @@
         "<td class=\"text-right mono\">" + pct(st.win_rate) + "</td>" +
         "<td class=\"text-right mono " + colorFor(st.total_usd) + "\">" + money(st.total_usd, true) + "</td>" +
       "</tr>";
-    }).join("") || "<tr><td colspan=\"4\" class=\"text-center text-slate-500 py-2\">No trades in window</td></tr>";
+    }).join("") || "<tr><td colspan=\"4\" class=\"ht-empty-cell\">No trades in window</td></tr>";
 
     // Trades
     const trBody = $("trades-tbody");
@@ -185,7 +186,7 @@
         "<td class=\"text-right mono " + colorFor(pnl) + "\">" + pct(pnl) + "</td>" +
         "<td class=\"text-left\">" + escape(t.exit_reason || "") + "</td>" +
       "</tr>";
-    }).join("") || "<tr><td colspan=\"8\" class=\"text-center text-slate-500 py-2\">No closed trades</td></tr>";
+    }).join("") || "<tr><td colspan=\"8\" class=\"ht-empty-cell\">No closed trades</td></tr>";
 
     // Health details
     $("health-status").textContent =
