@@ -148,6 +148,43 @@ PATH=/usr/local/bin:/usr/bin:/bin
             self.assertEqual(crypto.missed_runs, 0)
             self.assertEqual(crypto.status, "green")
 
+    def test_evaluate_job_health_marks_failed_recent_run_unhealthy_inside_grace_window(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cron_file = Path(tmp) / "hawkstrade-pacific.cron"
+            self._write(
+                cron_file,
+                """
+30 20 * * 1-5 cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_report.py >> logs/cron.log 2>&1
+""".strip()
+                + "\n",
+            )
+
+            jobs = health.load_cron_jobs(cron_file)
+            records = [
+                health.RunRecord(
+                    job_key="daily_report",
+                    label="Daily report",
+                    start_time=datetime(2026, 4, 17, 20, 30, 0),
+                    end_time=datetime(2026, 4, 17, 20, 30, 5),
+                    success=False,
+                    source_file=cron_file,
+                    lines=["report failed"],
+                    notes=["marker status=error"],
+                ),
+            ]
+            report = health.evaluate_job_health(
+                jobs,
+                records,
+                now=datetime(2026, 4, 17, 20, 31, 0),
+                lookback_hours=4.0,
+            )
+
+            daily = report[0]
+            self.assertEqual(daily.expected_runs, 0)
+            self.assertEqual(daily.missed_runs, 0)
+            self.assertEqual(daily.status, "red")
+            self.assertEqual(daily.latest_note, "Last run did not complete cleanly")
+
     def test_evaluate_job_health_combines_overlapping_scan_cycles(self):
         with tempfile.TemporaryDirectory() as tmp:
             cron_file = Path(tmp) / "hawkstrade-utc.cron"
