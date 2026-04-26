@@ -1,6 +1,286 @@
-/* Minimal overrides; Tailwind CDN handles almost everything. */
-body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
-tbody tr { border-bottom: 1px solid rgb(30 41 59); }
-tbody tr:last-child { border-bottom: none; }
-tbody td { padding: 4px 6px; }
+/* ─────────────────────────────────────────────────────────────────
+   HawksTrade Dashboard — design system
+   Dark theme: slate-950 base · slate-900 cards · emerald/rose accents
+   ───────────────────────────────────────────────────────────────── */
+
+/* Fonts */
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: #020617; /* slate-950 */
+  color: #f1f5f9;      /* slate-100 */
+}
+.mono, .font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+
+/* ── Layout shells ─────────────────────────────────────────────── */
+.ht-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1.25rem;
+  height: 3rem;
+  background: #0f172a;        /* slate-900 */
+  border-bottom: 1px solid #1e293b; /* slate-800 */
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.ht-main {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 1.25rem 1.25rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.ht-footer {
+  text-align: center;
+  padding: 1rem;
+  font-size: 0.7rem;
+  color: #475569; /* slate-600 */
+  border-top: 1px solid #1e293b;
+  letter-spacing: 0.03em;
+}
+
+/* ── Header elements ───────────────────────────────────────────── */
+.ht-badge {
+  padding: 0.15rem 0.55rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border-radius: 4px;
+  background: #1e293b;
+  color: #94a3b8;
+  border: 1px solid #334155;
+}
+.ht-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px currentColor;
+}
+.ht-version {
+  font-size: 0.65rem;
+  color: #475569;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Cards ─────────────────────────────────────────────────────── */
+.ht-card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 0.75rem;
+  padding: 1rem 1.25rem;
+}
+.ht-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* ── KPI strip ─────────────────────────────────────────────────── */
+.ht-kpi-strip {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 0.75rem;
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+}
+.ht-kpi {
+  flex: 1;
+  padding: 0.85rem 1.1rem;
+  min-width: 0;
+}
+.ht-kpi-sep {
+  width: 1px;
+  background: #1e293b;
+  flex-shrink: 0;
+}
+.ht-kpi-label {
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #64748b;
+  margin-bottom: 0.3rem;
+  white-space: nowrap;
+}
+.ht-kpi-value {
+  font-size: 1.2rem;
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+.ht-kpi-sub {
+  font-size: 0.65rem;
+  color: #64748b;
+  margin-top: 0.2rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Section labels ────────────────────────────────────────────── */
+.ht-section-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+/* ── Pills ─────────────────────────────────────────────────────── */
+.ht-pill {
+  font-size: 0.65rem;
+  padding: 0.1rem 0.5rem;
+  background: #1e293b;
+  color: #94a3b8;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+.ht-status-pill {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+}
+.ht-status-pill[data-status="ok"]       { background:#052e16; color:#4ade80; border:1px solid #166534; }
+.ht-status-pill[data-status="warn"]     { background:#451a03; color:#fbbf24; border:1px solid #92400e; }
+.ht-status-pill[data-status="critical"],
+.ht-status-pill[data-status="tripped"]  { background:#450a0a; color:#f87171; border:1px solid #991b1b; }
+.ht-status-pill[data-status="unknown"]  { background:#1e293b; color:#64748b; border:1px solid #334155; }
+
+.ht-status-text {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+/* ── Progress bar ──────────────────────────────────────────────── */
+.ht-headroom-card { padding: 0.85rem 1.25rem; }
+.ht-progress-track {
+  width: 100%;
+  height: 4px;
+  background: #1e293b;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.ht-progress-bar {
+  height: 4px;
+  border-radius: 2px;
+  transition: width 0.6s ease, background-color 0.4s ease;
+}
+
+/* ── 2-column row ──────────────────────────────────────────────── */
+.ht-row-2 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+@media (min-width: 1024px) {
+  .ht-row-2 { grid-template-columns: 3fr 2fr; }
+}
+.ht-positions-card { overflow: hidden; }
+.ht-right-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* ── Tables ────────────────────────────────────────────────────── */
+.ht-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+.ht-table thead tr {
+  border-bottom: 1px solid #1e293b;
+}
+.ht-table thead th {
+  padding: 0.4rem 0.5rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #475569;
+  white-space: nowrap;
+}
+.ht-table tbody tr {
+  border-bottom: 1px solid #0f172a;
+  transition: background 0.1s;
+}
+.ht-table tbody tr:last-child { border-bottom: none; }
+.ht-table tbody tr:hover { background: #1e293b44; }
+.ht-table tbody td {
+  padding: 0.45rem 0.5rem;
+  color: #cbd5e1;
+  white-space: nowrap;
+}
+.ht-table .font-mono, .ht-table .mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+/* ── Details / collapsible ─────────────────────────────────────── */
+.ht-details {
+  font-size: 0.7rem;
+  color: #64748b;
+}
+.ht-details summary {
+  cursor: pointer;
+  user-select: none;
+  padding: 0.25rem 0;
+  color: #475569;
+  letter-spacing: 0.03em;
+  list-style: none;
+}
+.ht-details summary::-webkit-details-marker { display: none; }
+.ht-details[open] summary { color: #94a3b8; }
+.ht-pre {
+  margin-top: 0.5rem;
+  background: #020617;
+  padding: 0.65rem 0.75rem;
+  border-radius: 0.4rem;
+  overflow: auto;
+  max-height: 11rem;
+  color: #94a3b8;
+  white-space: pre-wrap;
+  font-size: 0.7rem;
+  line-height: 1.5;
+  border: 1px solid #1e293b;
+}
+
+/* ── Services list ─────────────────────────────────────────────── */
+.ht-service-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid #1e293b;
+  font-size: 0.75rem;
+}
+.ht-service-row:last-child { border-bottom: none; }
+.ht-service-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 5px currentColor;
+}
+.ht-service-label { color: #cbd5e1; flex: 1; }
+.ht-service-missed { font-size: 0.65rem; color: #f87171; font-weight: 600; }
+.ht-service-time { font-size: 0.65rem; color: #475569; font-variant-numeric: tabular-nums; }
+
+/* ── Color utilities ───────────────────────────────────────────── */
+.text-emerald-400 { color: #34d399; }
+.text-rose-400    { color: #f87171; }
+.text-amber-400   { color: #fbbf24; }
+.text-slate-300   { color: #cbd5e1; }
