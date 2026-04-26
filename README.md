@@ -100,7 +100,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
 
 All settings are in `config/config.yaml`. See [config.md](config.md) for the available configuration options and the recommended backtest-backed profile. Toggle strategies, adjust risk, or switch between `paper` and `live` modes only when you intend to revalidate those changes.
 
-For machine-local overrides (e.g. switching to `live` on a specific host without touching the committed file), create `config/config.local.yaml`. When present it takes precedence over `config/config.yaml`. This file is gitignored and never committed.
+For machine-local configuration (e.g. switching to `live` on a specific host without touching the committed file), create `config/config.local.yaml`. When present it is used **in full** in place of `config/config.yaml` — it must contain the complete configuration. This file is gitignored and never committed.
 
 ---
 
