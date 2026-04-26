@@ -30,8 +30,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from typing import List
 
-import yaml
 from core import alpaca_client as ac
+from core.config_loader import get_config
 from core import order_executor as oe
 from core import risk_manager as rm
 from core.exit_policy import should_exit_for_hold
@@ -65,8 +65,7 @@ log = logging.getLogger("run_scan")
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-with open(BASE_DIR / "config" / "config.yaml") as f:
-    CFG = yaml.safe_load(f)
+CFG = get_config()
 
 _screener = None
 

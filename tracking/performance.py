@@ -14,14 +14,13 @@ from datetime import datetime, date, timezone
 from pathlib import Path
 from typing import Dict
 
-import yaml
 import pandas as pd
 
 from tracking.trade_log import locked_trade_log
+from core.config_loader import get_config
 
 BASE_DIR  = Path(__file__).resolve().parent.parent
-with open(BASE_DIR / "config" / "config.yaml") as f:
-    CFG = yaml.safe_load(f)
+CFG = get_config()
 
 TRADE_LOG = BASE_DIR / CFG["reporting"]["trade_log_file"]
 PERF_FILE = BASE_DIR / CFG["reporting"]["performance_file"]

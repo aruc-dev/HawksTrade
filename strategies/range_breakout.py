@@ -14,16 +14,15 @@ from datetime import datetime
 from typing import List, Dict
 from pathlib import Path
 
-import yaml
 import pandas as pd
 
 from strategies.base_strategy import BaseStrategy
 from core import alpaca_client as ac
 from core import risk_manager as rm
+from core.config_loader import get_config
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-with open(BASE_DIR / "config" / "config.yaml") as f:
-    CFG = yaml.safe_load(f)
+CFG = get_config()
 
 SCFG = CFG["strategies"]["range_breakout"]
 log  = logging.getLogger("strategy.range_breakout")

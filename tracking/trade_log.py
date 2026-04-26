@@ -21,11 +21,11 @@ except ImportError:  # pragma: no cover - Windows fallback
     fcntl = None
     import msvcrt
 
-import yaml
+
+from core.config_loader import get_config
 
 BASE_DIR  = Path(__file__).resolve().parent.parent
-with open(BASE_DIR / "config" / "config.yaml") as f:
-    CFG = yaml.safe_load(f)
+CFG = get_config()
 
 TRADE_LOG = BASE_DIR / CFG["reporting"]["trade_log_file"]
 log = logging.getLogger("trade_log")

@@ -13,17 +13,16 @@ import logging
 from typing import List, Dict
 from pathlib import Path
 
-import yaml
 import pandas as pd
 
 from strategies.base_strategy import BaseStrategy
 from strategies.rsi_reversion import _calc_rsi
 from core import alpaca_client as ac
 from core import risk_manager as rm
+from core.config_loader import get_config
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-with open(BASE_DIR / "config" / "config.yaml") as f:
-    CFG = yaml.safe_load(f)
+CFG = get_config()
 
 SCFG = CFG["strategies"]["ma_crossover"]
 log  = logging.getLogger("strategy.ma_crossover")

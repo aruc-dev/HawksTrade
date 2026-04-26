@@ -10,15 +10,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict
 
-import yaml
 import pandas as pd
 
 from core import alpaca_client as ac
+from core.config_loader import get_config
 from tracking.trade_log import locked_trade_log
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-with open(BASE_DIR / "config" / "config.yaml") as f:
-    CFG = yaml.safe_load(f)
+CFG = get_config()
 
 TRADE_LOG = BASE_DIR / CFG["reporting"]["trade_log_file"]
 log = logging.getLogger("portfolio")

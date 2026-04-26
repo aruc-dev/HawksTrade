@@ -22,8 +22,8 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import yaml
 from core import alpaca_client as ac
+from core.config_loader import get_config
 from core import risk_manager as rm
 from core import order_executor as oe
 from core.run_markers import RunScope, run_scope
@@ -51,8 +51,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("run_risk_check")
 
-with open(BASE_DIR / "config" / "config.yaml") as f:
-    CFG = yaml.safe_load(f)
+CFG = get_config()
 
 
 def _position_asset_class(pos) -> str:

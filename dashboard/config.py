@@ -1,7 +1,8 @@
 """Dashboard configuration loader.
 
 Reads from:
-- config/config.yaml (shared with the bot; read-only)
+- config/config.local.yaml if present, otherwise config/config.yaml
+  (same local-override resolution used by the bot; read-only)
 - Environment variables (for auth mode, Cloudflare Access settings)
 
 Never reads /dev/shm/.hawkstrade.env — the dashboard runs as an isolated user
@@ -15,8 +16,10 @@ from typing import Any, Dict
 
 import yaml
 
+from core.config_loader import get_config_path
+
 BASE_DIR = Path(__file__).resolve().parent.parent
-CONFIG_PATH = BASE_DIR / "config" / "config.yaml"
+CONFIG_PATH = get_config_path()
 
 AUTH_MODE_LOCAL = "local"
 AUTH_MODE_CLOUDFLARE = "cloudflare"

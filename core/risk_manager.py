@@ -16,15 +16,14 @@ from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-import yaml
 import numpy as np
 import pandas as pd
 
 from core import alpaca_client as ac
+from core.config_loader import get_config
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-with open(BASE_DIR / "config" / "config.yaml") as f:
-    CFG = yaml.safe_load(f)
+CFG = get_config()
 
 T = CFG["trading"]
 INTRADAY_ENABLED = CFG["intraday"]["enabled"]
