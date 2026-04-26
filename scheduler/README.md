@@ -216,6 +216,9 @@ with unique `run_id` values. The health checker uses those markers first and
 falls back to the older log-text parser for historical logs. The hourly full
 scan and crypto scan are still evaluated as one combined cycle when both are
 scheduled, which avoids false missed-run alerts from overlapping cron slots.
+Runs scheduled in the last 5 minutes are treated as pending so a health check
+that starts at the same minute as a scheduled scan does not mark that scan as
+missed before it has time to write its runtime logs.
 
 ## Windows Task Scheduler
 

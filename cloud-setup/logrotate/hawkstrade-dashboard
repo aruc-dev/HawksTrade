@@ -1,4 +1,5 @@
 /home/ec2-user/HawksTrade/logs/dashboard_access_*.log {
+    su hawkstrade-dash hawkstrade-dash
     daily
     rotate 30
     missingok

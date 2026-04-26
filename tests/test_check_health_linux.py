@@ -113,6 +113,41 @@ PATH=/usr/local/bin:/usr/bin:/bin
             self.assertEqual(crypto.status, "red")
             self.assertEqual(crypto.last_run_at, datetime(2026, 4, 17, 10, 0, 0, 100000))
 
+    def test_evaluate_job_health_treats_recent_expected_run_as_pending(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cron_file = Path(tmp) / "hawkstrade-pacific.cron"
+            self._write(
+                cron_file,
+                """
+0 * * * * cd "$HAWKSTRADE_DIR" && mkdir -p logs && python3 scheduler/run_scan.py --crypto-only >> logs/cron.log 2>&1
+""".strip()
+                + "\n",
+            )
+
+            jobs = health.load_cron_jobs(cron_file)
+            records = [
+                health.RunRecord(
+                    job_key="crypto_scan",
+                    label="Crypto scan",
+                    start_time=datetime(2026, 4, 17, 11, 0, 0),
+                    end_time=datetime(2026, 4, 17, 11, 0, 5),
+                    success=True,
+                    source_file=cron_file,
+                    lines=["crypto"],
+                ),
+            ]
+            report = health.evaluate_job_health(
+                jobs,
+                records,
+                now=datetime(2026, 4, 17, 12, 0, 29),
+                lookback_hours=1.1,
+            )
+
+            crypto = report[0]
+            self.assertEqual(crypto.expected_runs, 1)
+            self.assertEqual(crypto.missed_runs, 0)
+            self.assertEqual(crypto.status, "green")
+
     def test_evaluate_job_health_combines_overlapping_scan_cycles(self):
         with tempfile.TemporaryDirectory() as tmp:
             cron_file = Path(tmp) / "hawkstrade-utc.cron"
