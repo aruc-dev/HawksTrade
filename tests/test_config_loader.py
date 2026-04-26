@@ -1,8 +1,7 @@
 import unittest
 from pathlib import Path
-from unittest.mock import patch, mock_open
+from unittest.mock import patch
 import tempfile
-import os
 
 from core.config_loader import get_config_path, get_config, _deep_merge, BASE_DIR
 
