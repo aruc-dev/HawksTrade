@@ -132,12 +132,12 @@
           red: "bg-rose-500",
         }[j.status] || "bg-slate-600";
         const lastRun = j.last_run_at ? j.last_run_at.replace("T", " ").slice(0, 19) : "never";
-        const note = j.latest_note ? " — " + escape(j.latest_note) : "";
+        const note = j.latest_note ? " — " + j.latest_note : "";
         return "<div class=\"flex items-center gap-2 py-1 border-b border-slate-800 last:border-0\">" +
           "<span class=\"w-2.5 h-2.5 rounded-full flex-shrink-0 " + dotColor + "\"></span>" +
           "<span class=\"text-sm text-slate-200 flex-1\">" + escape(j.label) + "</span>" +
           (j.missed_runs ? "<span class=\"text-xs text-rose-400\">" + j.missed_runs + " missed</span>" : "") +
-          "<span class=\"text-xs text-slate-500 ml-auto\">" + escape(lastRun) + escape(note) + "</span>" +
+          "<span class=\"text-xs text-slate-500 ml-auto\">" + escape(lastRun + note) + "</span>" +
           "</div>";
       }).join("");
     }

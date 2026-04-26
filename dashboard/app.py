@@ -176,8 +176,12 @@ def _build_state_snapshot() -> Dict[str, Any]:
         daily_loss_limit_pct=cfg().daily_loss_limit_pct,
     )
     # Active capital: maximum capital that could be deployed given current risk settings.
-    active_capital = round(
-        account.get("portfolio_value", 0.0) * cfg().max_positions * cfg().max_position_pct, 2
+    # None when Alpaca is unreachable so the UI shows a placeholder rather than $0.00.
+    portfolio_value = account.get("portfolio_value")
+    active_capital = (
+        round(portfolio_value * cfg().max_positions * cfg().max_position_pct, 2)
+        if portfolio_value
+        else None
     )
     strategies = strategy_summary(rows, lookback_days=30)
     health = _build_health()
