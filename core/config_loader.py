@@ -10,6 +10,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 def get_config_path() -> Path:
     local = BASE_DIR / "config" / "config.local.yaml"
-    if local.exists():
+    if local.is_file():
         return local
     return BASE_DIR / "config" / "config.yaml"
