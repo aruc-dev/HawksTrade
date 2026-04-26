@@ -40,7 +40,14 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-CONFIG_FILE="${PROJECT_ROOT}/config/config.yaml"
+CONFIG_BASE="${PROJECT_ROOT}/config/config.yaml"
+CONFIG_LOCAL="${PROJECT_ROOT}/config/config.local.yaml"
+# Effective config mirrors core/config_loader.py: local override takes precedence when present.
+if [[ -f "${CONFIG_LOCAL}" ]]; then
+    CONFIG_FILE="${CONFIG_LOCAL}"
+else
+    CONFIG_FILE="${CONFIG_BASE}"
+fi
 SHM_FILE="${HAWKSTRADE_SHM_SECRET_FILE:-/dev/shm/.hawkstrade.env}"
 
 # ── Colors (only when stdout is a TTY) ────────────────────────────────────────
@@ -86,21 +93,52 @@ if ! command -v systemctl &>/dev/null; then
 fi
 note_ok "systemctl available"
 
-if [[ ! -f "${CONFIG_FILE}" ]]; then
-    note_fail "config file not found: ${CONFIG_FILE}"
+if [[ ! -f "${CONFIG_BASE}" ]]; then
+    note_fail "base config not found: ${CONFIG_BASE}"
     exit 2
 fi
-note_ok "config file found: ${CONFIG_FILE}"
 
-# ── Parse mode from config.yaml ───────────────────────────────────────────────
+# Show which config file(s) are in play and which is active.
+# Mirrors the resolution logic in core/config_loader.py.
+_resolve() {
+    # Print the real path if the file is a symlink, otherwise print nothing.
+    local target
+    target="$(readlink -f "$1" 2>/dev/null || true)"
+    [[ "${target}" != "$1" ]] && echo "${target}" || true
+}
+
+_BASE_RESOLVED="$(_resolve "${CONFIG_BASE}")"
+if [[ -f "${CONFIG_LOCAL}" ]]; then
+    _LOCAL_RESOLVED="$(_resolve "${CONFIG_LOCAL}")"
+    note_ok "config (base):            ${CONFIG_BASE}${_BASE_RESOLVED:+  → ${_BASE_RESOLVED}}"
+    note_ok "config (local override):  ${CONFIG_LOCAL}${_LOCAL_RESOLVED:+  → ${_LOCAL_RESOLVED}}  ${C_BOLD}← ACTIVE${C_RESET}"
+else
+    note_ok "config (active):          ${CONFIG_BASE}${_BASE_RESOLVED:+  → ${_BASE_RESOLVED}}"
+    note_info "no local override (${CONFIG_LOCAL} not found)"
+fi
+
+# ── Parse mode from config.yaml / config.local.yaml ──────────────────────────
 # We intentionally avoid requiring PyYAML / jq for config parsing so this
 # script works even when the venv is broken. Simple grep is fine for
 # `mode: paper` / `mode: live`.
+# When a local override is present its value wins, mirroring get_config().
 
-MODE="$(grep -E '^[[:space:]]*mode:[[:space:]]*' "${CONFIG_FILE}" \
+_yaml_value() {
+    # Usage: _yaml_value <key> <file>
+    # Returns the first matching scalar value for `key: value` in <file>.
+    grep -E "^[[:space:]]*${1}:[[:space:]]*" "$2" 2>/dev/null \
         | head -n1 \
-        | sed -E 's/^[[:space:]]*mode:[[:space:]]*"?([a-zA-Z]+)"?.*/\1/' \
-        | tr -d '[:space:]' || true)"
+        | sed -E "s/^[[:space:]]*${1}:[[:space:]]*\"?([a-zA-Z_]+)\"?.*/\1/" \
+        | tr -d '[:space:]' || true
+}
+
+MODE=""
+if [[ -f "${CONFIG_LOCAL}" ]]; then
+    MODE="$(_yaml_value mode "${CONFIG_LOCAL}")"
+fi
+if [[ -z "${MODE}" ]]; then
+    MODE="$(_yaml_value mode "${CONFIG_BASE}")"
+fi
 
 if [[ -z "${MODE}" ]]; then
     note_fail "Could not parse 'mode:' from ${CONFIG_FILE}"
@@ -109,10 +147,13 @@ else
     note_ok "Trading mode from config: ${C_BOLD}${MODE}${C_RESET}"
 fi
 
-SECRETS_SOURCE="$(grep -E '^[[:space:]]*secrets_source:[[:space:]]*' "${CONFIG_FILE}" \
-        | head -n1 \
-        | sed -E 's/^[[:space:]]*secrets_source:[[:space:]]*"?([a-zA-Z]+)"?.*/\1/' \
-        | tr -d '[:space:]' || true)"
+SECRETS_SOURCE=""
+if [[ -f "${CONFIG_LOCAL}" ]]; then
+    SECRETS_SOURCE="$(_yaml_value secrets_source "${CONFIG_LOCAL}")"
+fi
+if [[ -z "${SECRETS_SOURCE}" ]]; then
+    SECRETS_SOURCE="$(_yaml_value secrets_source "${CONFIG_BASE}")"
+fi
 SECRETS_SOURCE="${SECRETS_SOURCE:-dotenv}"
 note_info "secrets_source: ${SECRETS_SOURCE}"
 
