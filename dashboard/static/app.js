@@ -66,11 +66,11 @@
     $("acct-portfolio").textContent = money(acct.portfolio_value);
     $("acct-cash").textContent = money(acct.cash);
     $("acct-bp").textContent = money(acct.buying_power);
-    const maxPos = s.active_capital != null ? s.active_capital : null;
+    const activeCapital = s.active_capital != null ? s.active_capital : null;
     const acEl = $("acct-active-capital");
-    acEl.textContent = maxPos != null ? money(maxPos) : "—";
+    acEl.textContent = activeCapital != null ? money(activeCapital) : "—";
     $("acct-active-capital-detail").textContent =
-      maxPos != null ? "max_positions × max_position_pct × portfolio" : "—";
+      activeCapital != null ? "max_positions × max_position_pct × portfolio" : "—";
 
     // Headroom
     const h = s.daily_loss_headroom || {};
