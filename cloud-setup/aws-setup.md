@@ -125,6 +125,13 @@ secrets_source: shm      # tells the bot to read from /dev/shm (RAM), not .env f
 
 Do **not** create a `config/.env` or `.env` file on EC2 — secrets come from Secrets Manager.
 
+> **Tip — local overrides without touching the committed file:**
+> Instead of editing `config/config.yaml` directly on EC2, you can create
+> `config/config.local.yaml` with only the keys you want to override (e.g. `mode: live`
+> or `secrets_source: shm`). When present, this file takes precedence over
+> `config/config.yaml`. It is gitignored, so it will never be accidentally committed or
+> overwritten by a `git pull`.
+
 The Linux cron templates set `HAWKSTRADE_REQUIRE_SHM=1`. With that guard enabled,
 HawksTrade refuses to fall back to local dotenv files when `secrets_source: shm`
 is configured and `/dev/shm/.hawkstrade.env` is missing, unreadable, or rejected
@@ -272,7 +279,7 @@ Only do this after:
 
 Steps:
 1. Ensure `ALPACA_LIVE_API_KEY` and `ALPACA_LIVE_SECRET_KEY` are filled in your Secrets Manager secret
-2. Edit `config/config.yaml` → `mode: live`
+2. Set `mode: live` — either edit `config/config.yaml` directly, or (preferred on EC2) create `config/config.local.yaml` containing just `mode: live` so the change is not overwritten by a `git pull`
 3. Reboot the instance (so secrets re-fetch) or run `sudo systemctl restart hawkstrade-secrets`
 4. Verify connection: `python3 -c "from core.alpaca_client import get_account; print(get_account().portfolio_value)"`
 

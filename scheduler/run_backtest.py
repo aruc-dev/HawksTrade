@@ -28,6 +28,7 @@ sys.path.insert(0, str(BASE_DIR))
 from core import alpaca_client as ac
 from core import risk_manager as rm
 from core import order_executor as oe
+from core.config_loader import get_config_path
 from core.exit_policy import (
     VALID_MOMENTUM_EXIT_POLICIES,
     normalize_momentum_exit_policy,
@@ -409,7 +410,7 @@ def run_backtest(
     enabled_strategies=None,
     config_overrides=None,
 ):
-    with open(BASE_DIR / "config" / "config.yaml") as f: cfg = yaml.safe_load(f)
+    with open(get_config_path()) as f: cfg = yaml.safe_load(f)
 
     if config_overrides:
         for assignment in config_overrides:

@@ -15,8 +15,10 @@ from typing import Any, Dict
 
 import yaml
 
+from core.config_loader import get_config_path
+
 BASE_DIR = Path(__file__).resolve().parent.parent
-CONFIG_PATH = BASE_DIR / "config" / "config.yaml"
+CONFIG_PATH = get_config_path()
 
 AUTH_MODE_LOCAL = "local"
 AUTH_MODE_CLOUDFLARE = "cloudflare"

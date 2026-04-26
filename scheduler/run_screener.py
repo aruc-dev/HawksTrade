@@ -19,12 +19,13 @@ sys.path.insert(0, str(BASE_DIR))
 import yaml
 from screener.universe_builder import UniverseBuilder
 import core.alpaca_client as ac
+from core.config_loader import get_config_path
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 log = logging.getLogger("run_screener")
 
 def main(dry_run=False):
-    with open(BASE_DIR / "config" / "config.yaml") as f:
+    with open(get_config_path()) as f:
         cfg = yaml.safe_load(f)
 
     if not cfg.get("screener", {}).get("enabled", False):

@@ -40,8 +40,9 @@ if str(BASE_DIR) not in sys.path:
 from tracking.performance import compute_summary, load_closed_trades
 from tracking.trade_log import get_open_trades
 from scheduler.reconcile_trade_log import safe_reconcile
+from core.config_loader import get_config_path
 
-CONFIG_PATH = BASE_DIR / "config" / "config.yaml"
+CONFIG_PATH = get_config_path()
 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
     CFG = yaml.safe_load(f)
 

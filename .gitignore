@@ -2,6 +2,9 @@
 .env
 config/.env
 
+# Local config override
+config/config.local.yaml
+
 # Python
 __pycache__/
 *.py[cod]

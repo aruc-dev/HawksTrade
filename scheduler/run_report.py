@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import yaml
 from core import alpaca_client as ac
+from core.config_loader import get_config_path
 from core.logging_config import runtime_log_handlers
 from core.portfolio import get_snapshot, print_snapshot
 from core.run_markers import run_scope
@@ -43,7 +44,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("run_report")
 
-with open(BASE_DIR / "config" / "config.yaml") as f:
+with open(get_config_path()) as f:
     CFG = yaml.safe_load(f)
 
 

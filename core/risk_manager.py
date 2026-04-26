@@ -21,9 +21,10 @@ import numpy as np
 import pandas as pd
 
 from core import alpaca_client as ac
+from core.config_loader import get_config_path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-with open(BASE_DIR / "config" / "config.yaml") as f:
+with open(get_config_path()) as f:
     CFG = yaml.safe_load(f)
 
 T = CFG["trading"]

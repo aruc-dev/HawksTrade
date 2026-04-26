@@ -36,12 +36,13 @@ from core.alpaca_errors import (
     exception_text,
     is_not_found_error,
 )
+from core.config_loader import get_config_path
 
 # ── Setup ───────────────────────────────────────────────────────────────────
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-with open(BASE_DIR / "config" / "config.yaml") as f:
+with open(get_config_path()) as f:
     CFG = yaml.safe_load(f)
 
 MODE = CFG["mode"].strip().lower()  # "paper" or "live"

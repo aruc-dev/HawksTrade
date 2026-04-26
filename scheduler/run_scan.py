@@ -32,6 +32,7 @@ from typing import List
 
 import yaml
 from core import alpaca_client as ac
+from core.config_loader import get_config_path
 from core import order_executor as oe
 from core import risk_manager as rm
 from core.exit_policy import should_exit_for_hold
@@ -65,7 +66,7 @@ log = logging.getLogger("run_scan")
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-with open(BASE_DIR / "config" / "config.yaml") as f:
+with open(get_config_path()) as f:
     CFG = yaml.safe_load(f)
 
 _screener = None

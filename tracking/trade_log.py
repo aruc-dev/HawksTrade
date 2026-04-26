@@ -23,8 +23,10 @@ except ImportError:  # pragma: no cover - Windows fallback
 
 import yaml
 
+from core.config_loader import get_config_path
+
 BASE_DIR  = Path(__file__).resolve().parent.parent
-with open(BASE_DIR / "config" / "config.yaml") as f:
+with open(get_config_path()) as f:
     CFG = yaml.safe_load(f)
 
 TRADE_LOG = BASE_DIR / CFG["reporting"]["trade_log_file"]

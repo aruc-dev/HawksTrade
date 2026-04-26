@@ -72,7 +72,8 @@ def resolve_paths(project_dir_arg, output_arg, script_path):
     else:
         project_dir = script_dir.parent
 
-    config_path = project_dir / "config" / "config.yaml"
+    local_config = project_dir / "config" / "config.local.yaml"
+    config_path = local_config if local_config.exists() else project_dir / "config" / "config.yaml"
     trades_path = project_dir / "data" / "trades.csv"
     logs_dir    = project_dir / "logs"
     output_path = Path(output_arg).resolve() if output_arg else script_dir / "status.html"

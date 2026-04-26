@@ -139,6 +139,13 @@ Secrets Manager via the secrets service. With `HAWKSTRADE_REQUIRE_SHM=1` set in
 the environment file (Step 7), HawksTrade refuses to fall back to disk dotenv
 files if the RAM secret is missing or unreadable.
 
+> **Tip — local overrides without touching the committed file:**
+> Instead of editing `config/config.yaml` directly on EC2, you can create
+> `config/config.local.yaml` with only the keys you want to override (e.g. `mode: live`
+> or `secrets_source: shm`). When present, this file takes precedence over
+> `config/config.yaml`. It is gitignored, so it will never be accidentally committed or
+> overwritten by a `git pull`.
+
 ---
 
 ## Step 7 — Create the systemd Environment File
@@ -581,7 +588,7 @@ Steps:
 1. Ensure `ALPACA_LIVE_API_KEY` and `ALPACA_LIVE_SECRET_KEY` are filled in
    `/etc/hawkstrade/hawkstrade.secrets` (or in Secrets Manager if using
    `fetch_secrets.sh`)
-2. Edit `config/config.yaml` → `mode: live`
+2. Set `mode: live` — either edit `config/config.yaml` directly, or (preferred on EC2) create `config/config.local.yaml` containing just `mode: live` so the change is not overwritten by a `git pull`
 3. Re-fetch secrets: `sudo systemctl restart hawkstrade-secrets.service`
 4. Verify connection:
 
