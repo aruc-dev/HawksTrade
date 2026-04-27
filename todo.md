@@ -28,8 +28,9 @@ This document outlines the technical requirements for upgrading the HawksTrade M
 
 - [x] **Calculate Participation Rate**: `rm.market_breadth_pct(universe, bars_data)` in `core/risk_manager.py` counts the fraction of the scan universe trading above their own SMA50.
 - [x] **Tiered Entry Logic** (in `strategies/momentum.py`):
-    - **Green Light**: `SPY > SMA50` AND `Breadth >= 40%` → Full deployment (`top_n` positions).
-    - **Yellow Light**: `SPY > SMA50` AND `Breadth < 40%` → Reduced deployment (`yellow_max_positions: 3`).
+    - **Green Light**: `SPY > SMA50` AND `Breadth >= 50%` → Full deployment (`top_n` positions), "Green" label.
+    - **Yellow Light**: `SPY > SMA50` AND `40% ≤ Breadth < 50%` → Full deployment, "Yellow" label.
+    - **Yellow Light (reduced)**: `SPY > SMA50` AND `Breadth < 40%` → Reduced deployment (`yellow_max_positions: 3`).
     - **Red Light**: `SPY < SMA50` OR `Breadth < 25%` → No new entries; scan returns `[]`.
 
 ## Phase 4: Validation & Backtesting

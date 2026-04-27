@@ -20,11 +20,10 @@ Regime filters (both must pass):
                      Falls back gracefully; backtest regime_bars (60 bars)
                      are too short for this filter → always passes through.
 
-ATR stop price is stored in each signal dict as "atr_stop_price" so
-backtests/simulated positions can use it instead of the global fixed
-percentage stop. Live/paper execution currently relies on the global
-fixed-percentage stop unless this field is explicitly propagated through
-order execution/trade logging.
+ATR stop price is stored in each signal dict as "atr_stop_price". In both
+backtest and live/paper modes it flows through order_executor.enter_position
+into the trade log stop_loss column, and is picked up by run_risk_check as
+the effective stop whenever it widens beyond the global fixed-percentage stop.
 """
 
 from __future__ import annotations

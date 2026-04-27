@@ -91,10 +91,11 @@ room while the global 3.5% stop remains the absolute floor.
 4. Last close > prior close — 1-bar recovery; freefall has paused.
 5. Price > SMA200 × 0.85 — not a structurally broken stock (within 15% of 200-day MA).
 
-**Stop:** 2 × ATR(14) below entry (volatility-adjusted). The ATR stop is stored
-as `atr_stop_price` in each signal for use in backtests/simulations. Live/paper
-execution currently uses the global 3.5% fixed-percentage stop; the global stop
-remains the absolute floor in all modes.
+**Stop:** 2 × ATR(14) below entry (volatility-adjusted). The ATR stop flows
+through `order_executor.enter_position` into the trade log and is picked up by
+`run_risk_check` in both backtest and live/paper modes. It widens the stop only
+when it falls further below entry than the global 3.5% stop; the global stop
+governs whenever the ATR stop is tighter or absent.
 
 **Exit:** Whichever fires first:
 - Price ≥ SMA(`bb_period`) — mean-reversion target reached (default: SMA20).

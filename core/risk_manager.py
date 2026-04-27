@@ -318,9 +318,10 @@ def should_exit_position(
     Returns (should_exit: bool, reason: str).
 
     custom_stop_price: when provided (e.g. a 2×ATR stop computed at entry),
-    the effective stop is min(global_stop, custom_stop_price) — whichever is
-    further below entry gives the trade more breathing room.  The global stop
-    remains the absolute floor; the custom stop can only widen it.
+    the effective stop is min(global_stop, custom_stop_price). Both are absolute
+    price levels below entry; min() selects whichever is further below entry,
+    widening the trade's breathing room. The global stop governs whenever the
+    custom stop is tighter (higher price) or absent.
     """
     global_sl = stop_loss_price(entry_price)
     if custom_stop_price is not None and not math.isfinite(custom_stop_price):

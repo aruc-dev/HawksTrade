@@ -465,8 +465,11 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
 
         _clear_price_failure(symbol)
 
-        # Use the stop price recorded at entry (may be ATR-based for rsi_reversion);
-        # falls back to None so should_exit_position uses the global percentage stop.
+        # Use the ATR/custom stop recorded at entry only when it actually differs
+        # from what the global stop would have been — i.e. the strategy widened
+        # the stop below the global floor.  If the trade log just holds the global
+        # stop (no ATR override was applied), pass None so should_exit_position
+        # uses the live global percentage and avoids mislabelling exits.
         custom_stop: float | None = None
         if trade:
             try:
@@ -474,7 +477,9 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
                 if raw_sl not in (None, "", "nan"):
                     parsed = float(raw_sl)
                     if math.isfinite(parsed):
-                        custom_stop = parsed
+                        global_sl_at_entry = rm.stop_loss_price(entry_price)
+                        if abs(parsed - global_sl_at_entry) > 0.0001:
+                            custom_stop = parsed
             except (ValueError, TypeError):
                 pass
         should_exit, reason = rm.should_exit_position(symbol, entry_price, current_price, custom_stop_price=custom_stop)
