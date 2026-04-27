@@ -20,9 +20,11 @@ Regime filters (both must pass):
                      Falls back gracefully; backtest regime_bars (60 bars)
                      are too short for this filter → always passes through.
 
-ATR stop price is stored in each signal dict as "atr_stop_price" so the
-backtest and live risk-check layers can use it instead of the global fixed
-percentage stop.
+ATR stop price is stored in each signal dict as "atr_stop_price" so
+backtests/simulated positions can use it instead of the global fixed
+percentage stop. Live/paper execution currently relies on the global
+fixed-percentage stop unless this field is explicitly propagated through
+order execution/trade logging.
 """
 
 from __future__ import annotations
@@ -225,7 +227,7 @@ class RSIReversionStrategy(BaseStrategy):
             return []
 
         if _in_high_volatility_regime(bars_data=regime_bars, multiplier=vix_mult):
-            log.info("[RSI] Elevated volatility regime (HV20 > HV_MA×1.2) — skipping scan.")
+            log.info(f"[RSI] Elevated volatility regime (HV20 > HV_MA×{vix_mult}) — skipping scan.")
             return []
 
         signals = []
@@ -304,30 +306,31 @@ class RSIReversionStrategy(BaseStrategy):
     def should_exit(self, symbol: str, entry_price: float) -> tuple:
         """
         Exit when the mean-reversion edge is gone:
-          (a) price reaches the 20-day SMA  — target achieved
-          (b) RSI(14) > 50                  — momentum neutral, edge evaporated
-        The 10-day hold cap is enforced externally by the hold_days mechanism.
+          (a) price reaches the SMA(bb_period) — mean reversion target achieved
+          (b) RSI(14) > overbought_threshold   — momentum neutral, edge evaporated
+        The hold cap is enforced externally by the hold_days mechanism.
         """
-        period    = SCFG["rsi_period"]
-        bb_period = SCFG.get("bb_period", 20)
+        period     = SCFG["rsi_period"]
+        bb_period  = SCFG.get("bb_period", 20)
+        overbought = SCFG.get("overbought_threshold", 50)
 
         limit = max(period + 10, bb_period + 5)
         try:
-            bars_data = ac.get_stock_bars([symbol], timeframe="1Day", limit=limit)
-            bars      = bars_data[symbol]
+            bars_data  = ac.get_stock_bars([symbol], timeframe="1Day", limit=limit)
+            bars       = bars_data[symbol]
             if bars is None or len(bars) < period + 1:
                 return False, ""
 
-            closes    = pd.Series([b.close for b in bars])
-            price     = float(closes.iloc[-1])
-            rsi       = _calc_rsi(closes, period)
-            sma20     = float(closes.rolling(bb_period).mean().iloc[-1])
+            closes     = pd.Series([b.close for b in bars])
+            price      = float(closes.iloc[-1])
+            rsi        = _calc_rsi(closes, period)
+            sma_target = float(closes.rolling(bb_period).mean().iloc[-1])
 
-            if price >= sma20:
-                return True, f"Mean target reached: {price:.2f} >= SMA20={sma20:.2f}"
+            if price >= sma_target:
+                return True, f"Mean target reached: {price:.2f} >= SMA{bb_period}={sma_target:.2f}"
 
-            if rsi > 50:
-                return True, f"RSI neutral: {rsi:.1f} > 50 — edge evaporated"
+            if rsi > overbought:
+                return True, f"RSI neutral: {rsi:.1f} > {overbought} — edge evaporated"
 
         except Exception as e:
             log.warning(f"[RSI] Exit check error for {symbol}: {e}")

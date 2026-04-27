@@ -11,6 +11,7 @@ Enforces all risk rules before any order is placed:
 
 import json
 import logging
+import math
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -322,11 +323,13 @@ def should_exit_position(
     remains the absolute floor; the custom stop can only widen it.
     """
     global_sl = stop_loss_price(entry_price)
+    if custom_stop_price is not None and not math.isfinite(custom_stop_price):
+        custom_stop_price = None
     sl = min(global_sl, custom_stop_price) if custom_stop_price is not None else global_sl
     tp = take_profit_price(entry_price)
 
     if current_price <= sl:
-        label = "ATR stop-loss" if custom_stop_price is not None and sl == custom_stop_price else "Stop-loss"
+        label = "Custom stop-loss" if custom_stop_price is not None and sl == custom_stop_price else "Stop-loss"
         return True, f"{label} hit: {current_price:.4f} <= {sl:.4f}"
     if current_price >= tp:
         return True, f"Take-profit hit: {current_price:.4f} >= {tp:.4f}"

@@ -203,7 +203,7 @@ class MomentumStrategy(BaseStrategy):
             regime_tier = "Yellow"
             effective_top_n = min(int(SCFG["top_n"]), yellow_max)
         else:
-            regime_tier = "Green" if breadth >= green_thresh else "Yellow-Green"
+            regime_tier = "Green" if breadth >= green_thresh else "Yellow"
             effective_top_n = int(SCFG["top_n"])
 
         log.info(

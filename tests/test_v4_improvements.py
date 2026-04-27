@@ -276,7 +276,7 @@ class V4ImprovementsTests(unittest.TestCase):
             "TEST", entry, current, custom_stop_price=90.0
         )
         self.assertTrue(should_exit)
-        self.assertIn("ATR stop-loss", reason)
+        self.assertIn("Custom stop-loss", reason)
 
     def test_global_stop_still_fires_when_tighter_than_atr(self):
         # If ATR stop (99.0) is tighter than global stop (96.5), global governs

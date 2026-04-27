@@ -41,7 +41,8 @@ filtering:
    the scan universe trades above its own SMA50 (`rm.market_breadth_pct`):
    - **Red** (SPY < SMA50 OR breadth < 25%): no new entries.
    - **Yellow** (breadth < 40%): reduced deployment, up to `yellow_max_positions: 3`.
-   - **Green** (breadth ≥ 40%): full `top_n: 3` deployment.
+   - **Green** (breadth ≥ 50%): full `top_n: 3` deployment.
+   - **Yellow** label also applies when breadth is in [40%, 50%) — full deployment still active.
 
 **Exit:** Three-layer policy:
 - After the minimum 4-day hold, flat or losing trades exit immediately.

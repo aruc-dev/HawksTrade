@@ -15,6 +15,7 @@ import sys
 import logging
 import argparse
 import json
+import math
 import os
 import tempfile
 from pathlib import Path
@@ -471,7 +472,9 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
             try:
                 raw_sl = trade.get("stop_loss")
                 if raw_sl not in (None, "", "nan"):
-                    custom_stop = float(raw_sl)
+                    parsed = float(raw_sl)
+                    if math.isfinite(parsed):
+                        custom_stop = parsed
             except (ValueError, TypeError):
                 pass
         should_exit, reason = rm.should_exit_position(symbol, entry_price, current_price, custom_stop_price=custom_stop)
