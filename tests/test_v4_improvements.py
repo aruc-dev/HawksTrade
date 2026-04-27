@@ -6,6 +6,7 @@ from core import risk_manager as rm
 from strategies.rsi_reversion import (
     RSIReversionStrategy,
     _calc_rsi,
+    _calc_atr,
     _bollinger_lower,
     _bollinger_pct_b,
     _in_severe_crash,
@@ -234,6 +235,68 @@ class V4ImprovementsTests(unittest.TestCase):
 
         self.assertEqual(rsi, 100.0)
         self.assertEqual(caught, [])
+
+    # ── ATR helper ────────────────────────────────────────────────────────────
+
+    def test_atr_is_positive_for_normal_bars(self):
+        bars = [
+            MagicMock(high=105.0, low=95.0, close=100.0)
+            for _ in range(20)
+        ]
+        atr = _calc_atr(bars, period=14)
+        self.assertGreater(atr, 0)
+
+    def test_atr_reflects_range_size(self):
+        # Wide bars → larger ATR than narrow bars
+        wide_bars   = [MagicMock(high=110.0, low=90.0,  close=100.0) for _ in range(20)]
+        narrow_bars = [MagicMock(high=101.0, low=99.0,  close=100.0) for _ in range(20)]
+        self.assertGreater(_calc_atr(wide_bars, 14), _calc_atr(narrow_bars, 14))
+
+    def test_atr_stop_is_below_entry(self):
+        bars = [MagicMock(high=105.0, low=95.0, close=100.0) for _ in range(20)]
+        atr  = _calc_atr(bars, 14)
+        entry = 100.0
+        stop  = entry - 2.0 * atr
+        self.assertLess(stop, entry)
+
+    # ── should_exit_position with custom_stop_price ───────────────────────────
+
+    def test_custom_stop_widens_stop_for_volatile_stock(self):
+        # Entry=100, global stop=96.5 (3.5%), ATR stop=90 (10%) — ATR stop governs
+        entry, current = 100.0, 92.0  # 8% below — below ATR stop, above global
+        should_exit, reason = rm.should_exit_position(
+            "TEST", entry, current, custom_stop_price=90.0
+        )
+        # 92 > 90 (ATR stop) — should NOT exit
+        self.assertFalse(should_exit)
+
+    def test_custom_stop_triggers_when_breached(self):
+        entry, current = 100.0, 89.0  # below ATR stop of 90
+        should_exit, reason = rm.should_exit_position(
+            "TEST", entry, current, custom_stop_price=90.0
+        )
+        self.assertTrue(should_exit)
+        self.assertIn("ATR stop-loss", reason)
+
+    def test_global_stop_still_fires_when_tighter_than_atr(self):
+        # If ATR stop (99.0) is tighter than global stop (96.5), global governs
+        entry, current = 100.0, 96.0  # between ATR stop 99 and global 96.5
+        should_exit, _ = rm.should_exit_position(
+            "TEST", entry, current, custom_stop_price=99.0
+        )
+        # 96 < min(99, 96.5) = 96.5 → exit triggered
+        self.assertTrue(should_exit)
+
+    def test_no_custom_stop_uses_global_stop(self):
+        entry, current = 100.0, 97.0  # 3% drop, above global 3.5% stop
+        should_exit, _ = rm.should_exit_position("TEST", entry, current)
+        self.assertFalse(should_exit)
+
+    def test_no_custom_stop_global_stop_fires(self):
+        entry, current = 100.0, 95.0  # 5% drop, below global 3.5% stop
+        should_exit, reason = rm.should_exit_position("TEST", entry, current)
+        self.assertTrue(should_exit)
+        self.assertIn("Stop-loss", reason)
 
 if __name__ == "__main__":
     unittest.main()

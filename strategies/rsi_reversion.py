@@ -1,20 +1,28 @@
 """
 HawksTrade - RSI Mean Reversion Strategy (Stocks) — Conservative
 =================================================================
-Entry: RSI(14) < 30 (deeply oversold), price at/below lower Bollinger Band
-       (20-period, 2σ), volume ≥ 1.5× 20-day average, 1-bar price recovery,
+Entry: RSI(14) < 30 (deeply oversold), %B < 20% (near lower Bollinger Band,
+       20-period 2σ), volume ≥ 1.5× 20-day average, 1-bar price recovery,
        stock within 15% of SMA200.
-Exit:  RSI(14) > 70 (overbought) OR hold_days cap (10 business days).
+
+Stop:  2 × ATR(14) below entry — volatility-adjusted, gives the trade room
+       to breathe during capitulation. Global 3.5% stop remains as absolute
+       floor; whichever is further below entry governs.
+
+Exit:  FIRST of:
+         (a) Price reaches the 20-day SMA  — mean reversion target achieved.
+         (b) RSI(14) > 50                  — momentum neutralised, edge gone.
+         (c) 10-day hold_days cap          — time exit.
 
 Regime filters (both must pass):
   1. Crash filter  — skip if SPY >20% below its 252-day peak.
-  2. VIX proxy     — skip if SPY realised HV(20) > its 200-day MA × 1.2,
-                     indicating an elevated-volatility regime. Falls back
-                     gracefully when SPY history is insufficient (backtest
-                     warmup uses regime_bars which only contains 60 bars;
-                     filter returns False / allow in that case).
+  2. VIX proxy     — skip if SPY realised HV(20) > its 200-day MA × 1.2.
+                     Falls back gracefully; backtest regime_bars (60 bars)
+                     are too short for this filter → always passes through.
 
-Strategy: Swing trade (NOT intraday). Hard exit enforced by hold_days.
+ATR stop price is stored in each signal dict as "atr_stop_price" so the
+backtest and live risk-check layers can use it instead of the global fixed
+percentage stop.
 """
 
 from __future__ import annotations
@@ -40,16 +48,13 @@ log  = logging.getLogger("strategy.rsi_reversion")
 def _in_severe_crash(bars_data=None) -> bool:
     """
     Returns True if SPY is more than 20% below its 252-day peak.
-
-    Blocks entries only during genuine market crashes, not routine corrections.
-    Backtest warmup (< 20 bars) returns False (allow). Live errors return True
-    (fail closed).
+    Backtest warmup (< 20 bars) returns False. Live errors return True (fail closed).
     """
     try:
         if bars_data is not None:
             spy_bars = bars_data.get("SPY")
             if spy_bars is None or len(spy_bars) < 20:
-                return False  # backtest warmup — allow trading
+                return False
             closes = pd.Series([
                 float(b.close) if hasattr(b, "close") else float(b["close"])
                 for b in spy_bars
@@ -83,20 +88,16 @@ def _in_high_volatility_regime(
     multiplier: float = 1.2,
 ) -> bool:
     """
-    Returns True if SPY realised volatility HV(hv_period) exceeds its
-    ma_period-day moving average × multiplier — an elevated-volatility regime.
-
-    Uses SPY daily returns as a VIX proxy. Backtest regime_bars typically
-    contain only 60 bars, which is insufficient for a 200-day MA; in that
-    case the filter returns False (allow trading) so backtest warmup is
-    unaffected. Live mode fetches its own SPY history and fails closed.
+    Returns True if SPY realised HV(hv_period) exceeds its ma_period-day MA × multiplier.
+    Backtest regime_bars (60 bars) are insufficient for a 200-day MA → returns False.
+    Live mode fetches SPY history directly; errors return True (fail closed).
     """
     required = hv_period + ma_period
     try:
         if bars_data is not None:
             spy_bars = bars_data.get("SPY")
             if spy_bars is None or len(spy_bars) < required:
-                return False  # insufficient history — allow (backtest warmup)
+                return False
             closes = pd.Series([
                 float(b.close) if hasattr(b, "close") else float(b["close"])
                 for b in spy_bars
@@ -115,7 +116,7 @@ def _in_high_volatility_regime(
         hv_ma     = float(hv_series.rolling(ma_period).mean().iloc[-1])
 
         if np.isnan(hv_now) or np.isnan(hv_ma) or hv_ma == 0:
-            return False  # insufficient history — allow
+            return False
 
         threshold   = hv_ma * multiplier
         in_high_vol = hv_now > threshold
@@ -140,6 +141,27 @@ def _calc_rsi(closes: pd.Series, period: int = 14) -> float:
         rs  = avg_g / avg_l
         rsi = 100 - (100 / (1 + rs))
     return float(rsi.iloc[-1])
+
+
+def _calc_atr(bars, period: int = 14) -> float:
+    """
+    Compute ATR(period) from a bar list.
+    True Range = max(high-low, |high-prev_close|, |low-prev_close|).
+    Returns ATR as an absolute price value.
+    """
+    highs  = pd.Series([float(b.high)  if hasattr(b, "high")  else float(b["high"])  for b in bars])
+    lows   = pd.Series([float(b.low)   if hasattr(b, "low")   else float(b["low"])   for b in bars])
+    closes = pd.Series([float(b.close) if hasattr(b, "close") else float(b["close"]) for b in bars])
+
+    prev_close = closes.shift(1)
+    tr = pd.concat([
+        highs - lows,
+        (highs - prev_close).abs(),
+        (lows  - prev_close).abs(),
+    ], axis=1).max(axis=1)
+
+    atr = tr.ewm(span=period, min_periods=period).mean()
+    return float(atr.iloc[-1])
 
 
 def _bollinger_lower(closes: pd.Series, period: int = 20, n_std: float = 2.0) -> float:
@@ -176,15 +198,18 @@ class RSIReversionStrategy(BaseStrategy):
         if not SCFG["enabled"]:
             return []
 
-        period     = SCFG["rsi_period"]
-        oversold   = SCFG["oversold_threshold"]
-        bb_period  = SCFG.get("bb_period", 20)
-        bb_std     = SCFG.get("bb_std", 2.0)
-        vix_mult   = SCFG.get("vix_multiplier", 1.2)
+        period       = SCFG["rsi_period"]
+        oversold     = SCFG["oversold_threshold"]
+        bb_period    = SCFG.get("bb_period", 20)
+        bb_std       = SCFG.get("bb_std", 2.0)
+        vix_mult     = SCFG.get("vix_multiplier", 1.2)
+        atr_period   = SCFG.get("atr_period", 14)
+        atr_mult     = SCFG.get("atr_multiplier", 2.0)
 
         log.info(
             f"[RSI] Scanning {len(universe)} symbols "
-            f"(RSI<{oversold}, lower-BB, vol>1.5×, 1-bar recovery, SMA200±15%, crash+VIX filter)..."
+            f"(RSI<{oversold}, %B<20%, vol>1.5×, 1-bar recovery, SMA200±15%, "
+            f"2×ATR stop, exit@SMA20 or RSI>50)..."
         )
 
         try:
@@ -216,21 +241,15 @@ class RSIReversionStrategy(BaseStrategy):
                 sma200 = closes.rolling(window=200).mean().iloc[-1]
                 price  = float(bars[-1].close)
 
-                # Volume filter: today ≥ 1.5× 20-day average
                 avg_vol_20 = pd.Series([b.volume for b in bars]).iloc[-21:-1].mean()
                 today_vol  = float(bars[-1].volume)
                 vol_ratio  = today_vol / avg_vol_20 if avg_vol_20 > 0 else 0.0
 
-                # SMA200 trend filter: not more than 15% below 200-day MA
                 not_broken_down = price > sma200 * 0.85
 
                 if not (rsi < oversold and not_broken_down and vol_ratio >= 1.5):
                     continue
 
-                # Bollinger Band filter: price must be in the lower 20% of the
-                # BB range (%B < 0.2). Using %B rather than a strict lower-band
-                # breach because during volatile selloffs the band widens faster
-                # than price falls — "near the lower band" is the correct signal.
                 if len(closes) >= bb_period:
                     pct_b = _bollinger_pct_b(closes, bb_period, bb_std)
                     near_lower_bb = pct_b < 0.20
@@ -243,7 +262,6 @@ class RSIReversionStrategy(BaseStrategy):
                     )
                     continue
 
-                # 1-bar recovery: last close must exceed the prior close
                 if len(bars) >= 2:
                     c_prev = float(bars[-2].close) if hasattr(bars[-2], "close") else float(bars[-2]["close"])
                     c_last = float(bars[-1].close) if hasattr(bars[-1], "close") else float(bars[-1]["close"])
@@ -255,21 +273,26 @@ class RSIReversionStrategy(BaseStrategy):
                     log.debug(f"[RSI] {symbol} skipped — no 1-bar recovery (last close not above prior)")
                     continue
 
-                lower_band = _bollinger_lower(closes, bb_period, bb_std)
+                # ATR-based stop: gives the trade room to breathe in high-vol conditions
+                atr           = _calc_atr(bars, atr_period)
+                atr_stop      = round(price - atr_mult * atr, 4)
+                lower_band    = _bollinger_lower(closes, bb_period, bb_std)
+
                 signals.append({
-                    "symbol":      symbol,
-                    "action":      "buy",
-                    "strategy":    self.name,
-                    "asset_class": self.asset_class,
-                    "confidence":  round((oversold - rsi) / oversold, 3),
+                    "symbol":         symbol,
+                    "action":         "buy",
+                    "strategy":       self.name,
+                    "asset_class":    self.asset_class,
+                    "confidence":     round((oversold - rsi) / oversold, 3),
+                    "atr_stop_price": atr_stop,
                     "reason": (
                         f"RSI={rsi:.1f}<{oversold}, %B={pct_b:.2%} (lower-BB={lower_band:.2f}), "
-                        f"vol={vol_ratio:.1f}×, SMA200={sma200:.2f}, 1-bar recovery"
+                        f"vol={vol_ratio:.1f}×, ATR={atr:.2f} stop@{atr_stop:.2f}"
                     ),
                 })
                 log.info(
                     f"[RSI] Signal: BUY {symbol} | RSI={rsi:.1f} | "
-                    f"%B={pct_b:.2%} lower-BB={lower_band:.2f} | vol={vol_ratio:.1f}× | SMA200={sma200:.2f}"
+                    f"%B={pct_b:.2%} | vol={vol_ratio:.1f}× | ATR={atr:.2f} | stop@{atr_stop:.2f}"
                 )
 
             except Exception as e:
@@ -279,21 +302,32 @@ class RSIReversionStrategy(BaseStrategy):
         return signals
 
     def should_exit(self, symbol: str, entry_price: float) -> tuple:
-        """Exit when RSI rises above the overbought threshold (conservative: 70)."""
-        overbought = SCFG["overbought_threshold"]
-        period     = SCFG["rsi_period"]
+        """
+        Exit when the mean-reversion edge is gone:
+          (a) price reaches the 20-day SMA  — target achieved
+          (b) RSI(14) > 50                  — momentum neutral, edge evaporated
+        The 10-day hold cap is enforced externally by the hold_days mechanism.
+        """
+        period    = SCFG["rsi_period"]
+        bb_period = SCFG.get("bb_period", 20)
 
+        limit = max(period + 10, bb_period + 5)
         try:
-            bars_data = ac.get_stock_bars([symbol], timeframe="1Day", limit=period + 10)
+            bars_data = ac.get_stock_bars([symbol], timeframe="1Day", limit=limit)
             bars      = bars_data[symbol]
             if bars is None or len(bars) < period + 1:
                 return False, ""
 
-            closes = pd.Series([b.close for b in bars])
-            rsi    = _calc_rsi(closes, period)
+            closes    = pd.Series([b.close for b in bars])
+            price     = float(closes.iloc[-1])
+            rsi       = _calc_rsi(closes, period)
+            sma20     = float(closes.rolling(bb_period).mean().iloc[-1])
 
-            if rsi > overbought:
-                return True, f"RSI overbought: {rsi:.1f} > {overbought}"
+            if price >= sma20:
+                return True, f"Mean target reached: {price:.2f} >= SMA20={sma20:.2f}"
+
+            if rsi > 50:
+                return True, f"RSI neutral: {rsi:.1f} > 50 — edge evaporated"
 
         except Exception as e:
             log.warning(f"[RSI] Exit check error for {symbol}: {e}")

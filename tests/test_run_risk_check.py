@@ -136,7 +136,7 @@ class RunRiskCheckTests(unittest.TestCase):
         ):
             run_risk_check.run(dry_run=True)
 
-        should_exit.assert_called_once_with("AAPL", 100.0, 80)
+        should_exit.assert_called_once_with("AAPL", 100.0, 80, custom_stop_price=None)
         exit_position.assert_called_once()
 
     def test_risk_check_uses_trade_log_entry_when_broker_entry_is_decimal_zero(self):
@@ -158,7 +158,7 @@ class RunRiskCheckTests(unittest.TestCase):
         ):
             run_risk_check.run(dry_run=True)
 
-        should_exit.assert_called_once_with("AAPL", 100.0, 80)
+        should_exit.assert_called_once_with("AAPL", 100.0, 80, custom_stop_price=None)
         exit_position.assert_called_once()
 
     def test_risk_check_skips_non_positive_entry_price(self):

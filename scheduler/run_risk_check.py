@@ -464,7 +464,17 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
 
         _clear_price_failure(symbol)
 
-        should_exit, reason = rm.should_exit_position(symbol, entry_price, current_price)
+        # Use the stop price recorded at entry (may be ATR-based for rsi_reversion);
+        # falls back to None so should_exit_position uses the global percentage stop.
+        custom_stop: float | None = None
+        if trade:
+            try:
+                raw_sl = trade.get("stop_loss")
+                if raw_sl not in (None, "", "nan"):
+                    custom_stop = float(raw_sl)
+            except (ValueError, TypeError):
+                pass
+        should_exit, reason = rm.should_exit_position(symbol, entry_price, current_price, custom_stop_price=custom_stop)
         if should_exit:
             log.info(f"EXIT triggered for {symbol}: {reason}")
             exit_symbol = price_symbol if asset_class == "crypto" else symbol

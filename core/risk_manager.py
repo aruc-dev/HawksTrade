@@ -307,15 +307,27 @@ def pre_trade_check(price: float, symbol: str, asset_class: Optional[str] = None
 
 # ── Exit Check (stop-loss / take-profit) ─────────────────────────────────────
 
-def should_exit_position(symbol: str, entry_price: float, current_price: float) -> tuple:
+def should_exit_position(
+    symbol: str,
+    entry_price: float,
+    current_price: float,
+    custom_stop_price: float | None = None,
+) -> tuple:
     """
     Returns (should_exit: bool, reason: str).
+
+    custom_stop_price: when provided (e.g. a 2×ATR stop computed at entry),
+    the effective stop is min(global_stop, custom_stop_price) — whichever is
+    further below entry gives the trade more breathing room.  The global stop
+    remains the absolute floor; the custom stop can only widen it.
     """
-    sl = stop_loss_price(entry_price)
+    global_sl = stop_loss_price(entry_price)
+    sl = min(global_sl, custom_stop_price) if custom_stop_price is not None else global_sl
     tp = take_profit_price(entry_price)
 
     if current_price <= sl:
-        return True, f"Stop-loss hit: {current_price:.4f} <= {sl:.4f}"
+        label = "ATR stop-loss" if custom_stop_price is not None and sl == custom_stop_price else "Stop-loss"
+        return True, f"{label} hit: {current_price:.4f} <= {sl:.4f}"
     if current_price >= tp:
         return True, f"Take-profit hit: {current_price:.4f} >= {tp:.4f}"
     return False, ""
