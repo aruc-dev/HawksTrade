@@ -90,6 +90,25 @@ class AppEndToEndTests(unittest.TestCase):
         self.assertEqual(body["health"]["status"], "green")
         read_recent_log_issues.assert_not_called()
 
+        # New KPI fields added in this PR.
+        self.assertIn("total_realized", body)
+        tr = body["total_realized"]
+        self.assertIn("total_usd", tr)
+        self.assertIn("trade_count", tr)
+        self.assertIn("wins", tr)
+        self.assertIn("losses", tr)
+        self.assertIsInstance(tr["total_usd"], float)
+        self.assertIsInstance(tr["trade_count"], int)
+
+        self.assertIn("active_days", body)
+        # active_days is an int (≥ 0) or None when the trade log is empty.
+        if body["active_days"] is not None:
+            self.assertIsInstance(body["active_days"], int)
+
+        self.assertIn("active_capital", body)
+        # active_capital is a float when Alpaca is reachable and portfolio_value is not None.
+        self.assertIsInstance(body["active_capital"], float)
+
     def test_no_mutation_endpoints_exist(self):
         # The app must not expose anything that could place/cancel orders.
         from dashboard.app import create_app
