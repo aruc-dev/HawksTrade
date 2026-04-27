@@ -91,13 +91,15 @@ room while the global 3.5% stop remains the absolute floor.
 4. Last close > prior close — 1-bar recovery; freefall has paused.
 5. Price > SMA200 × 0.85 — not a structurally broken stock (within 15% of 200-day MA).
 
-**Stop:** 2 × ATR(14) below entry (volatility-adjusted). Wider than the global 3.5%
-stop in high-vol conditions; global stop remains the absolute floor.
+**Stop:** 2 × ATR(14) below entry (volatility-adjusted). The ATR stop is stored
+as `atr_stop_price` in each signal for use in backtests/simulations. Live/paper
+execution currently uses the global 3.5% fixed-percentage stop; the global stop
+remains the absolute floor in all modes.
 
 **Exit:** Whichever fires first:
-- Price ≥ SMA20 — mean-reversion target reached.
-- RSI(14) > 50 — momentum neutral; edge evaporated.
-- 10-business-day hard cap.
+- Price ≥ SMA(`bb_period`) — mean-reversion target reached (default: SMA20).
+- RSI(14) > `overbought_threshold` — momentum neutral; edge evaporated (default: 50).
+- 10-business-day hard cap (`hold_days`).
 
 **Key parameters:**
 
@@ -115,7 +117,7 @@ stop in high-vol conditions; global stop remains the absolute floor.
 
 **Regime filters:**
 - Crash filter: skip if SPY is >20% below its 252-day peak.
-- VIX proxy: skip if SPY realised HV(20) > 200-day HV MA × 1.2.
+- VIX proxy: skip if SPY realised HV(20) > 200-day HV MA × `vix_multiplier` (default: 1.2).
 
 ---
 
