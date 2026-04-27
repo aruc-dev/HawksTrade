@@ -90,6 +90,25 @@ class AppEndToEndTests(unittest.TestCase):
         self.assertEqual(body["health"]["status"], "green")
         read_recent_log_issues.assert_not_called()
 
+        # New KPI fields added in this PR.
+        self.assertIn("total_realized", body)
+        tr = body["total_realized"]
+        self.assertIn("total_usd", tr)
+        self.assertIn("trade_count", tr)
+        self.assertIn("wins", tr)
+        self.assertIn("losses", tr)
+        self.assertIsInstance(tr["total_usd"], float)
+        self.assertIsInstance(tr["trade_count"], int)
+
+        self.assertIn("active_days", body)
+        # active_days is an int (≥ 0) or None when the trade log is empty.
+        if body["active_days"] is not None:
+            self.assertIsInstance(body["active_days"], int)
+
+        self.assertIn("active_capital", body)
+        # active_capital is a float when Alpaca is reachable and portfolio_value is not None.
+        self.assertIsInstance(body["active_capital"], float)
+
     def test_no_mutation_endpoints_exist(self):
         # The app must not expose anything that could place/cancel orders.
         from dashboard.app import create_app
@@ -121,6 +140,21 @@ class AppEndToEndTests(unittest.TestCase):
         r = self.client.get("/static/app.js")
         self.assertEqual(r.status_code, 200)
         self.assertIn("javascript", r.headers["content-type"])
+
+    def test_dashboard_colors_profit_loss_and_health_status(self):
+        css = self.client.get("/static/app.css").text
+        js = self.client.get("/static/app.js").text
+
+        self.assertIn(".ht-table tbody td.text-emerald-400", css)
+        self.assertIn(".ht-table tbody td.text-rose-400", css)
+        self.assertIn('.ht-status-text[data-status="green"]', css)
+        self.assertIn('.ht-status-text[data-status="yellow"]', css)
+        self.assertIn('.ht-status-text[data-status="red"]', css)
+        self.assertIn("healthEl.dataset.status = healthStatus", js)
+
+    def test_favicon_does_not_generate_404_noise(self):
+        r = self.client.get("/favicon.ico")
+        self.assertEqual(r.status_code, 204)
 
     def test_docs_endpoints_disabled(self):
         # OpenAPI / Swagger endpoints should not be exposed.

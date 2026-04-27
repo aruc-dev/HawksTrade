@@ -202,5 +202,76 @@ class StrategySummaryTests(unittest.TestCase):
         self.assertEqual(out[0]["strategy"], "unknown")
 
 
+class RealizedAllTimeTests(unittest.TestCase):
+    def test_empty_rows_returns_zero(self):
+        out = pnl.realized_pnl_all_time([])
+        self.assertEqual(out["total_usd"], 0.0)
+        self.assertEqual(out["trade_count"], 0)
+        self.assertEqual(out["wins"], 0)
+        self.assertEqual(out["losses"], 0)
+
+    def test_sums_all_closed_sells_regardless_of_date(self):
+        rows = [
+            _closed_sell("AAPL", "momentum", 100, 110, 10, 0.10, "2020-01-10T14:00:00+00:00"),
+            _closed_sell("MSFT", "momentum", 100, 80, 5, -0.20, "2023-06-15T14:00:00+00:00"),
+            _closed_sell("TSLA", "momentum", 200, 220, 2, 0.10, "2026-04-20T14:00:00+00:00"),
+        ]
+        out = pnl.realized_pnl_all_time(rows)
+        # (110-100)*10 + (80-100)*5 + (220-200)*2 = 100 - 100 + 40 = 40
+        self.assertEqual(out["total_usd"], 40.0)
+        self.assertEqual(out["trade_count"], 3)
+        self.assertEqual(out["wins"], 2)
+        self.assertEqual(out["losses"], 1)
+
+    def test_ignores_non_closed_and_buy_rows(self):
+        rows = [
+            _closed_sell("AAPL", "momentum", 100, 110, 10, 0.10, "2026-04-20T14:00:00+00:00"),
+            {**_closed_sell("MSFT", "momentum", 100, 110, 10, 0.10, "2026-04-20T14:00:00+00:00"),
+             "side": "buy"},
+            {**_closed_sell("GOOG", "momentum", 100, 110, 10, 0.10, "2026-04-20T14:00:00+00:00"),
+             "status": "open"},
+        ]
+        out = pnl.realized_pnl_all_time(rows)
+        self.assertEqual(out["trade_count"], 1)
+        self.assertEqual(out["total_usd"], 100.0)
+
+
+class ActiveDaysTests(unittest.TestCase):
+    def test_empty_rows_returns_none(self):
+        result = pnl.active_days_since_first_trade([])
+        self.assertIsNone(result)
+
+    def test_rows_with_invalid_timestamps_only_returns_none(self):
+        rows = [{"timestamp": "not-a-date"}, {"timestamp": ""}, {"timestamp": None}]
+        result = pnl.active_days_since_first_trade(rows)
+        self.assertIsNone(result)
+
+    def test_counts_from_earliest_trade_regardless_of_status(self):
+        now = datetime(2026, 4, 26, 12, 0, tzinfo=timezone.utc)
+        rows = [
+            _closed_sell("AAPL", "momentum", 100, 110, 10, 0.10, "2026-04-20T12:00:00+00:00"),
+            _closed_sell("MSFT", "momentum", 100, 90, 5, -0.10, "2026-04-01T12:00:00+00:00"),
+        ]
+        result = pnl.active_days_since_first_trade(rows, now_utc=now)
+        self.assertEqual(result, 25)  # 2026-04-26 minus 2026-04-01
+
+    def test_same_day_returns_zero(self):
+        now = datetime(2026, 4, 26, 18, 0, tzinfo=timezone.utc)
+        rows = [_closed_sell("AAPL", "momentum", 100, 110, 10, 0.10, "2026-04-26T10:00:00+00:00")]
+        result = pnl.active_days_since_first_trade(rows, now_utc=now)
+        self.assertEqual(result, 0)
+
+    def test_includes_buy_rows_for_earliest_date(self):
+        now = datetime(2026, 4, 26, 12, 0, tzinfo=timezone.utc)
+        rows = [
+            {"timestamp": "2026-03-01T10:00:00+00:00", "strategy": "momentum",
+             "side": "buy", "status": "open", "symbol": "AAPL"},
+            _closed_sell("AAPL", "momentum", 100, 110, 10, 0.10, "2026-04-20T12:00:00+00:00"),
+        ]
+        # Earliest row is the buy on 2026-03-01
+        result = pnl.active_days_since_first_trade(rows, now_utc=now)
+        self.assertEqual(result, 56)  # 2026-04-26 minus 2026-03-01
+
+
 if __name__ == "__main__":
     unittest.main()

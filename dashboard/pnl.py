@@ -203,6 +203,38 @@ def daily_loss_headroom(
     return out
 
 
+def realized_pnl_all_time(all_rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
+    """Sum realized P&L across all recorded trades (no time window)."""
+    closed_rows = [
+        r for r in all_rows
+        if (r.get("status") or "").strip().lower() == "closed"
+        and (r.get("side") or "").strip().lower() == "sell"
+    ]
+    return _summarize_realized_rows(closed_rows)
+
+
+def active_days_since_first_trade(
+    all_rows: Iterable[Dict[str, Any]],
+    now_utc: Optional[datetime] = None,
+) -> Optional[int]:
+    """Return number of calendar days since the first trade in the log.
+
+    Returns None when the trade log is empty.
+    """
+    now_utc = _to_utc(now_utc or datetime.now(timezone.utc))
+    earliest: Optional[datetime] = None
+    for row in all_rows:
+        dt = _parse_iso(row.get("timestamp", ""))
+        if dt is None:
+            continue
+        dt_utc = _to_utc(dt)
+        if earliest is None or dt_utc < earliest:
+            earliest = dt_utc
+    if earliest is None:
+        return None
+    return max(0, (now_utc - earliest).days)
+
+
 def strategy_summary(
     closed_rows: Iterable[Dict[str, Any]],
     lookback_days: int = 30,
