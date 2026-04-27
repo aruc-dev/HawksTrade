@@ -342,41 +342,46 @@ def should_exit_position(
 def market_regime_ok(bars_data=None) -> bool:
     """
     Returns True if SPY is above its 50-day SMA — indicates bull market regime.
-    When bars_data is provided (backtest), uses pre-fetched SPY bars dict.
+    If SPY is below SMA50 but QQQ is above SMA50, it also returns True (Bifurcation Detection).
+    
+    When bars_data is provided (backtest), uses pre-fetched bars dict.
     In live trading, fetches from Alpaca directly.
 
-    Backtest mode: insufficient bars (early warmup) returns True so the
-    simulation can begin trading before the full 50-bar window is available.
-
+    Backtest mode: insufficient bars (early warmup) returns True.
     Live mode: any exception or insufficient bars returns False (fail closed).
-    A regime filter is a safety control — when we cannot confirm conditions are
-    favourable, we should block new entries rather than assume they are.
     """
     try:
-        if bars_data is not None:
-            # backtest mode: bars_data is a dict symbol->list of bar mocks
-            spy_bars = bars_data.get("SPY")
-            if spy_bars is None or len(spy_bars) < 51:
-                # Early in the simulation — not enough history yet; allow trading.
-                return True
-            closes = pd.Series([float(b.close) if hasattr(b, 'close') else float(b['close']) for b in spy_bars])
-        else:
-            # live mode — fail closed if data is unavailable or insufficient
-            raw = ac.get_stock_bars(["SPY"], timeframe="1Day", limit=55)
-            spy_bars = raw["SPY"]
-            if spy_bars is None or len(spy_bars) < 51:
-                log.warning(
-                    "[RegimeFilter] Insufficient SPY bars for SMA50 (%s bars); "
-                    "blocking new entries (fail closed).",
-                    len(spy_bars) if spy_bars is not None else 0,
-                )
-                return False
-            closes = pd.Series([b.close for b in spy_bars])
-        sma50 = closes.rolling(50).mean().iloc[-1]
-        current = float(closes.iloc[-1])
-        is_bull = current > sma50
-        log.debug(f"[RegimeFilter] SPY={current:.2f} SMA50={sma50:.2f} bull={is_bull}")
-        return is_bull
+        def _is_above_sma50(symbol: str) -> bool:
+            if bars_data is not None:
+                bars = bars_data.get(symbol)
+                if bars is None or len(bars) < 51:
+                    return True
+                closes = pd.Series([float(b.close) if hasattr(b, 'close') else float(b['close']) for b in bars])
+            else:
+                raw = ac.get_stock_bars([symbol], timeframe="1Day", limit=55)
+                bars = raw[symbol]
+                if bars is None or len(bars) < 51:
+                    log.warning(f"[RegimeFilter] Insufficient {symbol} bars for SMA50; fail closed.")
+                    return False
+                closes = pd.Series([b.close for b in bars])
+            
+            sma50 = closes.rolling(50).mean().iloc[-1]
+            current = float(closes.iloc[-1])
+            return current > sma50
+
+        spy_bull = _is_above_sma50("SPY")
+        if spy_bull:
+            log.debug("[RegimeFilter] SPY above SMA50 - Bull regime confirmed.")
+            return True
+            
+        qqq_bull = _is_above_sma50("QQQ")
+        if qqq_bull:
+            log.info("[RegimeFilter] SPY below SMA50 but QQQ above SMA50 - Bifurcation detected, allowing entries.")
+            return True
+
+        log.debug("[RegimeFilter] Both SPY and QQQ below SMA50 - Bear regime confirmed.")
+        return False
+
     except Exception as e:
         log.warning(
             "[RegimeFilter] Could not determine market regime: %s — "

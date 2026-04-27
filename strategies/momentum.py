@@ -23,82 +23,12 @@ from strategies.base_strategy import BaseStrategy
 from core import alpaca_client as ac
 from core import risk_manager as rm
 from core.config_loader import get_config
+from core.sector_lookup import get_sector
 
 CFG = get_config()
 
 SCFG = CFG["strategies"]["momentum"]
 log = logging.getLogger("strategy.momentum")
-
-# Static GICS sector mapping — covers configured universe + extended backtest pool.
-# Symbols not in this map are assigned a unique pseudo-sector so they never
-# conflict with each other or with known sectors.
-_SECTOR_MAP: Dict[str, str] = {
-    # Technology
-    "AAPL": "Technology", "MSFT": "Technology", "GOOGL": "Technology",
-    "NVDA": "Technology", "META": "Technology", "AMD": "Technology",
-    "ORCL": "Technology", "CRM": "Technology", "INTC": "Technology",
-    "IBM": "Technology", "ARM": "Technology", "AVGO": "Technology",
-    "TSM": "Technology", "SMCI": "Technology", "QCOM": "Technology",
-    "TXN": "Technology", "AMAT": "Technology", "LRCX": "Technology",
-    "MU": "Technology", "NOW": "Technology", "ADBE": "Technology",
-    "SNOW": "Technology", "PANW": "Technology", "CRWD": "Technology",
-    "ZS": "Technology", "NET": "Technology", "DDOG": "Technology",
-    "MDB": "Technology", "ANET": "Technology", "MRVL": "Technology",
-    "ASML": "Technology", "SAP": "Technology",
-    "PLTR": "Technology", "AI": "Technology", "SOUN": "Technology",
-    "IONQ": "Technology", "MSTR": "Technology",
-    # Consumer Discretionary
-    "AMZN": "Consumer Discretionary", "TSLA": "Consumer Discretionary",
-    "NFLX": "Consumer Discretionary", "HD": "Consumer Discretionary",
-    "TGT": "Consumer Discretionary", "NKE": "Consumer Discretionary",
-    "SBUX": "Consumer Discretionary", "MCD": "Consumer Discretionary",
-    "DIS": "Consumer Discretionary", "CMCSA": "Consumer Discretionary",
-    "ABNB": "Consumer Discretionary", "DASH": "Consumer Discretionary",
-    "RBLX": "Consumer Discretionary", "SHOP": "Consumer Discretionary",
-    "SNAP": "Consumer Discretionary", "PINS": "Consumer Discretionary",
-    "UBER": "Consumer Discretionary", "BABA": "Consumer Discretionary",
-    "JD": "Consumer Discretionary", "PDD": "Consumer Discretionary",
-    "TM": "Consumer Discretionary",
-    # Financials
-    "JPM": "Financials", "BAC": "Financials", "GS": "Financials",
-    "MS": "Financials", "WFC": "Financials", "C": "Financials",
-    "BLK": "Financials", "SCHW": "Financials", "AXP": "Financials",
-    "V": "Financials", "MA": "Financials", "PYPL": "Financials",
-    "SQ": "Financials", "COIN": "Financials", "HOOD": "Financials",
-    "SOFI": "Financials",
-    # Energy
-    "XOM": "Energy", "CVX": "Energy", "COP": "Energy",
-    "SLB": "Energy", "HAL": "Energy", "OXY": "Energy",
-    # Health Care
-    "JNJ": "Health Care", "UNH": "Health Care", "PFE": "Health Care",
-    "ABBV": "Health Care", "MRK": "Health Care", "BMY": "Health Care",
-    "GILD": "Health Care", "AMGN": "Health Care", "REGN": "Health Care",
-    "MDT": "Health Care", "ISRG": "Health Care", "ELV": "Health Care",
-    "LLY": "Health Care",
-    # Industrials (incl. Defence)
-    "CAT": "Industrials", "DE": "Industrials", "HON": "Industrials",
-    "GE": "Industrials", "UPS": "Industrials", "FDX": "Industrials",
-    "LMT": "Industrials", "RTX": "Industrials", "NOC": "Industrials",
-    "GD": "Industrials", "BA": "Industrials",
-    # Consumer Staples
-    "PG": "Consumer Staples", "KO": "Consumer Staples",
-    "PEP": "Consumer Staples", "WMT": "Consumer Staples",
-    "COST": "Consumer Staples",
-    # Communication Services
-    "T": "Communication Services", "VZ": "Communication Services",
-    "TMUS": "Communication Services", "SPOT": "Communication Services",
-    # Real Estate
-    "AMT": "Real Estate", "PLD": "Real Estate", "CCI": "Real Estate",
-    # Utilities
-    "NEE": "Utilities", "DUK": "Utilities", "SO": "Utilities",
-    # ETFs (treated as unique sectors so they never block each other)
-    "SPY": "ETF_SPY", "QQQ": "ETF_QQQ", "ARKK": "ETF_ARKK",
-}
-
-
-def _get_sector(symbol: str) -> str:
-    """Return GICS sector for symbol; unknown symbols get a unique pseudo-sector."""
-    return _SECTOR_MAP.get(symbol, f"Unknown_{symbol}")
 
 
 def _calc_atr(bars, period: int = 14) -> float:
@@ -127,7 +57,7 @@ def _sector_filtered_top_n(scores: list, top_n: int, max_per_sector: int) -> lis
     selected: list = []
     sector_counts: Dict[str, int] = {}
     for candidate in scores:
-        sector = _get_sector(candidate["symbol"])
+        sector = get_sector(candidate["symbol"])
         if sector_counts.get(sector, 0) < max_per_sector:
             selected.append(candidate)
             sector_counts[sector] = sector_counts.get(sector, 0) + 1
@@ -300,7 +230,7 @@ class MomentumStrategy(BaseStrategy):
 
             log.info(
                 f"[Momentum] Signal: BUY {s['symbol']} | momentum={s['momentum']:.2%} "
-                f"| sector={_get_sector(s['symbol'])} "
+                f"| sector={get_sector(s['symbol'])} "
                 f"| atr_stop={atr_stop} | risk_qty={atr_risk_qty}"
             )
             signals.append(sig)

@@ -324,9 +324,16 @@ class RSIReversionStrategy(BaseStrategy):
             price      = float(closes.iloc[-1])
             rsi        = _calc_rsi(closes, period)
             sma_target = float(closes.rolling(bb_period).mean().iloc[-1])
+            
+            # Profit Floor: ensure we cover slippage/commissions before hitting SMA target
+            profit_floor_mult = 1.015 # 1.5% minimum gain
+            effective_target = max(sma_target, entry_price * profit_floor_mult)
 
-            if price >= sma_target:
-                return True, f"Mean target reached: {price:.2f} >= SMA{bb_period}={sma_target:.2f}"
+            if price >= effective_target:
+                reason = f"Mean target reached: {price:.2f} >= {effective_target:.2f}"
+                if effective_target > sma_target:
+                    reason += f" (SMA{bb_period}={sma_target:.2f}, boosted by 1.5% floor)"
+                return True, reason
 
             if rsi > overbought:
                 return True, f"RSI neutral: {rsi:.1f} > {overbought} — edge evaporated"

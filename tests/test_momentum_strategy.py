@@ -5,9 +5,9 @@ from unittest.mock import patch
 from strategies.momentum import (
     MomentumStrategy,
     _calc_atr,
-    _get_sector,
     _sector_filtered_top_n,
 )
+from core.sector_lookup import get_sector
 
 
 def _bar(close, high=None, low=None, volume=1000):
@@ -153,12 +153,12 @@ class MomentumStrategyTests(unittest.TestCase):
     # ── Phase 2: Sector-neutral helpers ──────────────────────────────────────
 
     def test_get_sector_known_symbol(self):
-        self.assertEqual(_get_sector("AAPL"), "Technology")
-        self.assertEqual(_get_sector("JPM"), "Financials")
-        self.assertEqual(_get_sector("XOM"), "Energy")
+        self.assertEqual(get_sector("AAPL"), "Technology")
+        self.assertEqual(get_sector("JPM"), "Financials")
+        self.assertEqual(get_sector("XOM"), "Energy")
 
     def test_get_sector_unknown_returns_unique_pseudo_sector(self):
-        sector = _get_sector("UNKNOWN_XYZ")
+        sector = get_sector("UNKNOWN_XYZ")
         self.assertIn("UNKNOWN_XYZ", sector)
 
     def test_sector_filter_blocks_second_tech_stock(self):
