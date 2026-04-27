@@ -257,6 +257,7 @@ class MomentumStrategy(BaseStrategy):
 
         # --- Phase 1: ATR-based risk sizing ---
         risk_pct = float(SCFG.get("risk_per_trade_pct", 0.01))
+        min_trade_value = float(CFG["trading"].get("min_trade_value_usd", 100))
         try:
             portfolio_equity = ac.get_portfolio_value()
         except Exception:
@@ -274,6 +275,15 @@ class MomentumStrategy(BaseStrategy):
                 risk_per_share = price - atr_stop
                 if risk_per_share > 0:
                     atr_risk_qty = round(risk_dollars / risk_per_share, 6)
+
+                    # Notional minimum check: prevent micro-trades
+                    if atr_risk_qty * price < min_trade_value:
+                        log.info(
+                            f"[Momentum] {s['symbol']} ATR-risk quantity {atr_risk_qty} "
+                            f"(${atr_risk_qty * price:.2f}) is below min ${min_trade_value}. "
+                            "Skipping signal."
+                        )
+                        continue
 
             sig: Dict = {
                 "symbol":     s["symbol"],
