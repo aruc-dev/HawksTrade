@@ -568,7 +568,13 @@ def run_backtest(
                 signals = strat.scan(universe, current_time=dt, regime_bars=regime_bars)
                 for sig in signals:
                     if sig["symbol"] not in sim.positions:
-                        order = oe.enter_position(sig["symbol"], strat.name, strat.asset_class)
+                        order = oe.enter_position(
+                            sig["symbol"],
+                            strat.name,
+                            strat.asset_class,
+                            suggested_qty=sig.get("atr_risk_qty"),
+                            atr_stop_price=sig.get("atr_stop_price"),
+                        )
                         # enter_position returns status="open" (not "filled") — update strategy name on any non-None return
                         if order and sig["symbol"] in sim.positions:
                             sim.positions[sig["symbol"]]["strategy"] = strat.name

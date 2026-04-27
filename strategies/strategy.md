@@ -19,23 +19,39 @@
 All strategies share a common global risk layer (3.5% stop-loss, 12% take-profit,
 max 10 open positions, 5% daily-loss halt) enforced by `core/risk_manager.py` and
 `scheduler/run_risk_check.py`. Individual strategies may override the stop via
-`custom_stop_price` on their signals (see RSI Reversion).
+`custom_stop_price` on their signals (see Momentum and RSI Reversion).
 
 ---
 
-## 1. Momentum *(Stocks — Enabled)*
+## 1. Momentum *(Stocks — Enabled, Adaptive v2.0)*
 
 **Type:** Trend-following, swing trade.
 
-**Entry:** Ranks every stock in the scan universe by its 5-day price return and
-buys the top 3 that have gained at least 6% over that window. A bull-regime guard
-(SPY > SMA50) blocks all entries during downturns.
+**Entry:** Ranks every stock in the scan universe by its 5-day price return. Buys
+the top 3 that have gained at least 6%, subject to three layers of adaptive
+filtering:
+
+1. **Phase 1 — ATR Stop + 1% Risk Sizing**: Each signal carries an ATR-based stop
+   (`entry - 2 × ATR_14`). Position size is computed as `(equity × 1%) / (entry - atr_stop)`
+   so that every trade risks exactly 1% of capital, capped at 5% per-position max.
+2. **Phase 2 — Sector-Neutral Ranking**: Enforces `max_positions_per_sector: 1`
+   using a static GICS sector map. If the top two ranked stocks share a sector,
+   the lower-ranked one is skipped in favour of the next stock in a different sector.
+3. **Phase 3 — Market Breadth Tiered Regime Guard**: Computes what fraction of
+   the scan universe trades above its own SMA50 (`rm.market_breadth_pct`):
+   - **Red** (SPY < SMA50 OR breadth < 25%): no new entries.
+   - **Yellow** (breadth < 40%): reduced deployment, up to `yellow_max_positions: 3`.
+   - **Green** (breadth ≥ 40%): full `top_n: 3` deployment.
 
 **Exit:** Three-layer policy:
 - After the minimum 4-day hold, flat or losing trades exit immediately.
 - Profitable trades run under a trailing stop that activates once the peak gain
   reaches 6%; price must then not fall more than 4% from that peak.
 - A hard 20-day cap closes any position that never pulled back to trigger the trail.
+
+**Stop:** The ATR-based stop is written to the trade log as `stop_loss` and used by
+the live risk check as `custom_stop_price`, giving volatile stocks more breathing
+room while the global 3.5% stop remains the absolute floor.
 
 **Key parameters (`config/config.yaml`):**
 
@@ -48,8 +64,18 @@ buys the top 3 that have gained at least 6% over that window. A bull-regime guar
 | `trail_activation_pct` | 6% peak gain |
 | `trailing_stop_pct` | 4% from peak |
 | `exit_policy` | `profit_trailing` |
+| `atr_period` | 14 |
+| `atr_multiplier` | 2.0 |
+| `risk_per_trade_pct` | 1% of equity |
+| `max_positions_per_sector` | 1 |
+| `breadth_green_threshold` | 50% |
+| `breadth_yellow_threshold` | 40% |
+| `breadth_red_threshold` | 25% |
+| `yellow_max_positions` | 3 |
 
-**Regime filter:** SPY > SMA50 (bull market required).
+**Regime filters:**
+- SPY > SMA50 (hard requirement; Red if fails).
+- Market breadth ≥ 25% of universe above SMA50 (Red if fails).
 
 ---
 

@@ -298,5 +298,53 @@ class V4ImprovementsTests(unittest.TestCase):
         self.assertTrue(should_exit)
         self.assertIn("Stop-loss", reason)
 
+    # ── market_breadth_pct ────────────────────────────────────────────────────
+
+    def test_breadth_all_above_sma50_returns_one(self):
+        # All closes trending up → all above SMA50
+        closes = list(range(50, 102))  # 52 bars, last > SMA50
+        bars = [MagicMock(close=float(c)) for c in closes]
+        breadth = rm.market_breadth_pct(["SPY"], bars_data={"SPY": bars})
+        self.assertAlmostEqual(breadth, 1.0)
+
+    def test_breadth_all_below_sma50_returns_zero(self):
+        # All closes trending down → all below SMA50
+        closes = list(range(102, 50, -1))  # declining from 102 to 51 (52 bars)
+        bars = [MagicMock(close=float(c)) for c in closes]
+        breadth = rm.market_breadth_pct(["SPY"], bars_data={"SPY": bars})
+        self.assertAlmostEqual(breadth, 0.0)
+
+    def test_breadth_half_symbols_above_returns_point_five(self):
+        # Two symbols: one above SMA50, one below
+        rising  = [MagicMock(close=float(c)) for c in range(50, 102)]
+        falling = [MagicMock(close=float(c)) for c in range(102, 50, -1)]
+        bars_data = {"A": rising, "B": falling}
+        breadth = rm.market_breadth_pct(["A", "B"], bars_data=bars_data)
+        self.assertAlmostEqual(breadth, 0.5)
+
+    def test_breadth_insufficient_bars_skips_symbol(self):
+        # Symbol with fewer than 51 bars is skipped; only eligible symbols counted
+        rising = [MagicMock(close=float(c)) for c in range(50, 102)]  # 52 bars, above
+        short  = [MagicMock(close=100.0) for _ in range(10)]           # 10 bars, skipped
+        bars_data = {"A": rising, "B": short}
+        breadth = rm.market_breadth_pct(["A", "B"], bars_data=bars_data)
+        # Only A is eligible; A is above → 1.0
+        self.assertAlmostEqual(breadth, 1.0)
+
+    def test_breadth_no_eligible_symbols_returns_neutral(self):
+        # No symbol has >= 51 bars → returns 0.5 (neutral)
+        bars_data = {"A": [MagicMock(close=100.0) for _ in range(10)]}
+        breadth = rm.market_breadth_pct(["A"], bars_data=bars_data)
+        self.assertAlmostEqual(breadth, 0.5)
+
+    def test_breadth_missing_symbol_skips_gracefully(self):
+        # Symbol not in bars_data is silently skipped
+        rising = [MagicMock(close=float(c)) for c in range(50, 102)]
+        bars_data = {"A": rising}
+        breadth = rm.market_breadth_pct(["A", "MISSING"], bars_data=bars_data)
+        # Only A is eligible and above → 1.0
+        self.assertAlmostEqual(breadth, 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()

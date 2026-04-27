@@ -411,7 +411,14 @@ def run(
                     if _max_positions_planned(planned_symbols):
                         break
                     if sig["action"] == "buy":
-                        result = oe.enter_position(sym, strategy=strategy.name, asset_class="stock", dry_run=dry_run)
+                        result = oe.enter_position(
+                            sym,
+                            strategy=strategy.name,
+                            asset_class="stock",
+                            dry_run=dry_run,
+                            suggested_qty=sig.get("atr_risk_qty"),
+                            atr_stop_price=sig.get("atr_stop_price"),
+                        )
                         _register_entry_result(result, sym, open_symbols, planned_symbols, new_entry_symbols)
             except Exception as e:
                 log.error(f"Strategy {strategy.name} failed: {e}", exc_info=True)

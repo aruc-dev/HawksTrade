@@ -114,7 +114,7 @@ strategies:
   momentum:
     enabled: true
     asset_class: stocks          # stocks | crypto | both
-    description: "Buy top N stocks by 5-day price momentum; let profitable trades run with trailing protection"
+    description: "Adaptive momentum: ATR-adjusted stops, 1% risk sizing, sector-neutral ranking, breadth-tiered regime"
     top_n: 3                     # Pick top 3 stocks by momentum
     hold_days: 4                 # Minimum hold before profit-aware exit checks
     exit_policy: "profit_trailing" # fixed_hold | profit_trailing | risk_only_baseline
@@ -124,6 +124,17 @@ strategies:
     max_hold_days: 20            # Cap stale momentum positions even if still green
     min_momentum_pct: 0.06       # Minimum 6% 5-day gain to qualify
     weight: 1.0                  # Signal weight (relative to other strategies)
+    # Phase 1: Volatility-adjusted risk management
+    atr_period: 14               # ATR lookback for dynamic stop computation
+    atr_multiplier: 2.0          # Stop = entry - atr_multiplier * ATR(14)
+    risk_per_trade_pct: 0.01     # Risk 1% of total equity per trade (position sizing)
+    # Phase 2: Sector-neutral ranking
+    max_positions_per_sector: 1  # Max concurrent positions in any single GICS sector
+    # Phase 3: Market breadth tiered regime guard
+    breadth_green_threshold: 0.50  # >= 50% above SMA50 → full deployment
+    breadth_yellow_threshold: 0.40 # < 40% above SMA50 → reduced deployment
+    breadth_red_threshold: 0.25    # < 25% above SMA50 → no new entries
+    yellow_max_positions: 3        # Max new positions entered in Yellow regime
 
   rsi_reversion:
     enabled: false

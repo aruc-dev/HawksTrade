@@ -381,6 +381,53 @@ def market_regime_ok(bars_data=None) -> bool:
         return False
 
 
+def market_breadth_pct(universe: list, bars_data: dict | None = None) -> float:
+    """
+    Returns the fraction (0.0–1.0) of universe symbols trading above their own
+    50-day SMA. When bars_data is provided (scan already fetched), reuses it;
+    otherwise fetches from Alpaca live.
+
+    Returns 0.5 (neutral) when data is unavailable or insufficient, so callers
+    can treat an unknown breadth as neither triggering Yellow nor Red thresholds.
+    """
+    try:
+        source = ac.get_stock_bars(universe, timeframe="1Day", limit=55) if bars_data is None else bars_data
+        # Normalize to a plain dict so both live BarSet objects and dicts work.
+        fetched: dict = {}
+        for sym in universe:
+            try:
+                b = source[sym]
+                if b is not None:
+                    fetched[sym] = b
+            except Exception:
+                pass
+
+        above = 0
+        eligible = 0
+        for sym in universe:
+            bars = fetched.get(sym)
+            if bars is None or len(bars) < 51:
+                continue
+            closes = pd.Series([
+                float(b.close) if hasattr(b, "close") else float(b["close"])
+                for b in bars
+            ])
+            sma50 = closes.rolling(50).mean().iloc[-1]
+            eligible += 1
+            if float(closes.iloc[-1]) > sma50:
+                above += 1
+
+        if eligible == 0:
+            log.debug("[Breadth] Insufficient bars for breadth calculation — returning neutral 0.5")
+            return 0.5
+        breadth = above / eligible
+        log.debug(f"[Breadth] {above}/{eligible} symbols above SMA50 = {breadth:.1%}")
+        return breadth
+    except Exception as e:
+        log.warning(f"[Breadth] Could not compute market breadth: {e} — returning neutral 0.5")
+        return 0.5
+
+
 def crypto_regime_ok(bars_data=None) -> bool:
     """
     Returns True if BTC/USD is above its 20-day EMA — indicates crypto bull regime.
