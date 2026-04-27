@@ -315,7 +315,11 @@ moving to a new system are:
 For every modification to the codebase:
 1. **Unit Tests**: You MUST implement or update relevant unit tests in the `tests/` directory.
 2. **Validation**: Always run the full test suite (`python3 -m unittest discover`) before pushing.
-3. **Documentation**: If strategy parameters, risk rules, or core logic change, you MUST update `README.md` and `backtests.md` to reflect the new system state.
+3. **Documentation**: If strategy parameters, risk rules, or core logic change, you MUST update the following files to reflect the new system state:
+   - `strategies/strategy.md` — **always** update when any strategy's entry conditions, exit conditions, filters, parameters, or enabled state change. This is the canonical human-readable reference for all strategies.
+   - `README.md` — update when overall system behaviour or strategy roster changes.
+   - `backtests.md` — update when backtest results change due to strategy modifications.
+   - `config/config.yaml` description fields — keep the inline `description:` of each strategy in sync with its actual implementation.
 
 ---
 
