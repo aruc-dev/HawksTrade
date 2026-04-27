@@ -86,6 +86,7 @@ HOLD_DAYS = {
     "momentum":       CFG["strategies"]["momentum"]["hold_days"],
     "gap_up":         CFG["strategies"]["gap_up"]["hold_days"],
     "range_breakout": CFG["strategies"]["range_breakout"]["hold_days"],
+    "rsi_reversion":  CFG["strategies"]["rsi_reversion"]["hold_days"],
 }
 
 # ── Strategy Registry ─────────────────────────────────────────────────────────

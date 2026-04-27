@@ -3,7 +3,14 @@ import warnings
 from unittest.mock import MagicMock, patch
 import pandas as pd
 from core import risk_manager as rm
-from strategies.rsi_reversion import RSIReversionStrategy, _calc_rsi
+from strategies.rsi_reversion import (
+    RSIReversionStrategy,
+    _calc_rsi,
+    _bollinger_lower,
+    _bollinger_pct_b,
+    _in_severe_crash,
+    _in_high_volatility_regime,
+)
 
 class V4ImprovementsTests(unittest.TestCase):
     # ── crypto_regime_ok (backtest path) ─────────────────────────────────────
@@ -92,40 +99,131 @@ class V4ImprovementsTests(unittest.TestCase):
             # 5% of 10000 = 500 USD -> 5 shares
             self.assertEqual(qty, 5.0)
 
-    def test_rsi_2bar_recovery_allows_rising(self):
-        _strat = RSIReversionStrategy()  # noqa: F841
-        # RSI oversold, within 15% of SMA200, vol spike
-        # And 2 consecutive higher closes
-        mock_bars = []
-        for i in range(210):
-            # close at 100, volume 1000
-            mock_bars.append(MagicMock(close=100.0, volume=1000.0, open=100.0, high=100.0, low=100.0))
-        
-        # Setup recovery: bars[-3]=90, bars[-2]=95, bars[-1]=100
-        mock_bars[-3].close = 90.0
+    def test_rsi_1bar_recovery_allows_rising(self):
+        # 1-bar confirmation: last close higher than prior close → recovering
+        mock_bars = [MagicMock(close=100.0) for _ in range(2)]
         mock_bars[-2].close = 95.0
         mock_bars[-1].close = 100.0
-        
-        # This is a bit of a hack to test the logic branch without full TA calculation
-        # In the actual strategy, if recovering is True, it proceeds.
-        # We'll just verify the logic we added in the strategy file is correct.
-        close_prev2 = float(mock_bars[-3].close)
-        close_prev1 = float(mock_bars[-2].close)
-        close_last  = float(mock_bars[-1].close)
-        recovering = close_prev1 > close_prev2 and close_last > close_prev1
+        close_prev = float(mock_bars[-2].close)
+        close_last = float(mock_bars[-1].close)
+        recovering = close_last > close_prev
         self.assertTrue(recovering)
 
-    def test_rsi_2bar_recovery_blocks_falling(self):
-        mock_bars = [MagicMock(close=100.0) for _ in range(3)]
-        mock_bars[-3].close = 100.0
-        mock_bars[-2].close = 95.0
-        mock_bars[-1].close = 90.0
-        
-        close_prev2 = float(mock_bars[-3].close)
-        close_prev1 = float(mock_bars[-2].close)
-        close_last  = float(mock_bars[-1].close)
-        recovering = close_prev1 > close_prev2 and close_last > close_prev1
+    def test_rsi_1bar_recovery_blocks_falling(self):
+        # 1-bar confirmation: last close lower than prior close → still falling
+        mock_bars = [MagicMock(close=100.0) for _ in range(2)]
+        mock_bars[-2].close = 100.0
+        mock_bars[-1].close = 95.0
+        close_prev = float(mock_bars[-2].close)
+        close_last = float(mock_bars[-1].close)
+        recovering = close_last > close_prev
         self.assertFalse(recovering)
+
+    def test_rsi_1bar_recovery_blocks_flat(self):
+        # Flat close (equal) is not a recovery
+        mock_bars = [MagicMock(close=100.0) for _ in range(2)]
+        close_prev = float(mock_bars[-2].close)
+        close_last = float(mock_bars[-1].close)
+        recovering = close_last > close_prev
+        self.assertFalse(recovering)
+
+    # ── Crash Filter ──────────────────────────────────────────────────────────
+
+    def test_crash_filter_not_in_crash(self):
+        # SPY at 100% of its 252d peak → no crash
+        spy_bars = [MagicMock(close=100.0) for _ in range(252)]
+        self.assertFalse(_in_severe_crash(bars_data={"SPY": spy_bars}))
+
+    def test_crash_filter_detects_severe_crash(self):
+        # SPY at 75% of its 252d peak (25% drawdown) → crash
+        spy_bars = [MagicMock(close=100.0) for _ in range(251)] + [MagicMock(close=75.0)]
+        self.assertTrue(_in_severe_crash(bars_data={"SPY": spy_bars}))
+
+    def test_crash_filter_borderline_not_crash(self):
+        # SPY at 81% of peak (19% drawdown) → not a crash (threshold is 20%)
+        spy_bars = [MagicMock(close=100.0) for _ in range(251)] + [MagicMock(close=81.0)]
+        self.assertFalse(_in_severe_crash(bars_data={"SPY": spy_bars}))
+
+    def test_crash_filter_backtest_warmup_allows_trading(self):
+        # Fewer than 20 bars in backtest warmup → allow (return False)
+        spy_bars = [MagicMock(close=100.0) for _ in range(10)]
+        self.assertFalse(_in_severe_crash(bars_data={"SPY": spy_bars}))
+
+    def test_crash_filter_missing_spy_allows_trading(self):
+        # No SPY key in bars_data → backtest warmup → allow
+        self.assertFalse(_in_severe_crash(bars_data={}))
+
+    # ── Bollinger Band helpers ────────────────────────────────────────────────
+
+    def test_bollinger_lower_below_price_in_flat_market(self):
+        # Flat market: lower band equals SMA (std=0)
+        closes = pd.Series([100.0] * 20)
+        lower = _bollinger_lower(closes, period=20, n_std=2.0)
+        self.assertAlmostEqual(lower, 100.0, places=4)
+
+    def test_bollinger_lower_is_below_sma_in_volatile_market(self):
+        closes = pd.Series([100.0 if i % 2 == 0 else 95.0 for i in range(20)])
+        lower = _bollinger_lower(closes, period=20, n_std=2.0)
+        self.assertLess(lower, closes.mean())
+
+    def test_bollinger_lower_wider_with_higher_std_multiplier(self):
+        closes = pd.Series([100.0 if i % 2 == 0 else 90.0 for i in range(20)])
+        lower_2 = _bollinger_lower(closes, period=20, n_std=2.0)
+        lower_3 = _bollinger_lower(closes, period=20, n_std=3.0)
+        self.assertLess(lower_3, lower_2)
+
+    def test_pct_b_deeply_below_lower_band_is_negative(self):
+        # Price far below lower band → %B is negative (well below 0.20 threshold)
+        closes = pd.Series([100.0] * 19 + [60.0])  # last bar crashes to 60
+        pct_b = _bollinger_pct_b(closes, period=20, n_std=2.0)
+        self.assertLess(pct_b, 0.0)
+
+    def test_pct_b_near_lower_band_qualifies(self):
+        # Price in lower quintile (%B < 0.2) should qualify as near lower band
+        closes = pd.Series([100.0 if i % 2 == 0 else 90.0 for i in range(20)])
+        lower = _bollinger_lower(closes, period=20, n_std=2.0)
+        upper = 2 * closes.mean() - lower  # symmetric around mean
+        price_near_lower = lower + 0.1 * (upper - lower)  # %B ≈ 0.10
+        closes.iloc[-1] = price_near_lower
+        pct_b = _bollinger_pct_b(closes, period=20, n_std=2.0)
+        self.assertLess(pct_b, 0.20)
+
+    def test_pct_b_above_lower_quintile_does_not_qualify(self):
+        # Price mid-band (%B ≈ 0.5) should not qualify
+        closes = pd.Series([100.0] * 19 + [100.0])
+        pct_b = _bollinger_pct_b(closes, period=20, n_std=2.0)
+        # Flat market → bandwidth=0 → returns 0.5
+        self.assertGreaterEqual(pct_b, 0.20)
+
+    def test_pct_b_flat_market_returns_half(self):
+        closes = pd.Series([100.0] * 20)
+        pct_b = _bollinger_pct_b(closes, period=20, n_std=2.0)
+        self.assertAlmostEqual(pct_b, 0.5, places=4)
+
+    # ── VIX proxy filter ──────────────────────────────────────────────────────
+
+    def test_vix_filter_allows_low_vol(self):
+        # Stable returns → HV20 ≈ HV_MA → not high vol
+        closes = pd.Series([100.0 + i * 0.01 for i in range(230)])
+        spy_bars = [MagicMock(close=float(c)) for c in closes]
+        result = _in_high_volatility_regime(bars_data={"SPY": spy_bars})
+        self.assertFalse(result)
+
+    def test_vix_filter_blocks_spike_in_volatility(self):
+        # Stable baseline then sudden large swings → HV20 spikes >> HV_MA
+        stable = [100.0 + i * 0.01 for i in range(220)]
+        # Last 10 bars: large random-looking swings (alternating ±5%)
+        spike = [stable[-1] * (1.05 if i % 2 == 0 else 0.95) for i in range(10)]
+        closes = pd.Series(stable + spike)
+        spy_bars = [MagicMock(close=float(c)) for c in closes]
+        result = _in_high_volatility_regime(bars_data={"SPY": spy_bars})
+        self.assertTrue(result)
+
+    def test_vix_filter_backtest_warmup_allows_trading(self):
+        # Fewer bars than required (hv_period + ma_period = 220) → allow
+        spy_bars = [MagicMock(close=100.0) for _ in range(60)]
+        result = _in_high_volatility_regime(bars_data={"SPY": spy_bars})
+        self.assertFalse(result)
 
     def test_rsi_all_gain_window_returns_100_without_runtime_warning(self):
         closes = pd.Series(range(1, 40), dtype=float)

@@ -128,11 +128,14 @@ strategies:
   rsi_reversion:
     enabled: false
     asset_class: stocks
-    description: "Buy when RSI < 30 (oversold), sell when RSI > 60"
+    description: "Conservative RSI mean reversion. Entry: RSI<30 + lower Bollinger Band touch + vol≥1.5× + 1-bar recovery + within 15% of SMA200. Exit: RSI>70 or 10-day hold cap. Regime: skip on severe crash (SPY >20% below 252d peak) or elevated VIX proxy (HV20 > HV_MA×1.2)."
     rsi_period: 14
-    oversold_threshold: 38
-    overbought_threshold: 62
-    hold_days: 10
+    oversold_threshold: 30          # Entry: RSI below this level
+    overbought_threshold: 70        # Exit: RSI above this level (conservative: wider range to ride recovery)
+    hold_days: 10                   # Hard exit after 10 business days
+    bb_period: 20                   # Bollinger Band lookback period
+    bb_std: 2.0                     # Bollinger Band standard deviation multiplier
+    vix_multiplier: 1.2             # HV20 must be below HV_MA × this to allow entries
     weight: 1.0
 
   gap_up:
