@@ -122,6 +122,17 @@ class AppEndToEndTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn("javascript", r.headers["content-type"])
 
+    def test_dashboard_colors_profit_loss_and_health_status(self):
+        css = self.client.get("/static/app.css").text
+        js = self.client.get("/static/app.js").text
+
+        self.assertIn(".ht-table tbody td.text-emerald-400", css)
+        self.assertIn(".ht-table tbody td.text-rose-400", css)
+        self.assertIn('.ht-status-text[data-status="green"]', css)
+        self.assertIn('.ht-status-text[data-status="yellow"]', css)
+        self.assertIn('.ht-status-text[data-status="red"]', css)
+        self.assertIn("healthEl.dataset.status = healthStatus", js)
+
     def test_favicon_does_not_generate_404_noise(self):
         r = self.client.get("/favicon.ico")
         self.assertEqual(r.status_code, 204)

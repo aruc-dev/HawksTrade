@@ -55,7 +55,7 @@
   function render(s) {
     // Header
     $("mode-badge").textContent = (s.mode || "?").toUpperCase();
-    $("health-dot").className = "w-3 h-3 rounded-full " + ({
+    $("health-dot").className = "ht-dot " + ({
       green: "bg-emerald-400",
       yellow: "bg-amber-400",
       red: "bg-rose-500",
@@ -148,7 +148,8 @@
     const positions = s.positions || [];
     $("pos-count").textContent = "(" + positions.length + ")";
     posBody.innerHTML = positions.map((p) => {
-      const cls = colorFor(p.unrealized_pl);
+      const pnlCls = colorFor(p.unrealized_pl);
+      const pnlPctCls = colorFor(p.unrealized_plpc);
       return "<tr>" +
         "<td class=\"text-left\">" + escape(p.symbol) + "</td>" +
         "<td class=\"text-left\">" + escape(p.strategy || "unknown") + "</td>" +
@@ -156,8 +157,8 @@
         "<td class=\"text-right mono\">" + fmtQty(p.qty) + "</td>" +
         "<td class=\"text-right mono\">" + money(p.avg_entry_price) + "</td>" +
         "<td class=\"text-right mono\">" + money(p.current_price) + "</td>" +
-        "<td class=\"text-right mono " + cls + "\">" + money(p.unrealized_pl, true) + "</td>" +
-        "<td class=\"text-right mono " + cls + "\">" + pct(p.unrealized_plpc) + "</td>" +
+        "<td class=\"text-right mono " + pnlCls + "\">" + money(p.unrealized_pl, true) + "</td>" +
+        "<td class=\"text-right mono " + pnlPctCls + "\">" + pct(p.unrealized_plpc) + "</td>" +
       "</tr>";
     }).join("") || "<tr><td colspan=\"8\" class=\"ht-empty-cell\">No open positions</td></tr>";
 
@@ -189,8 +190,11 @@
     }).join("") || "<tr><td colspan=\"8\" class=\"ht-empty-cell\">No closed trades</td></tr>";
 
     // Health details
+    const healthStatus = s.health && s.health.status ? s.health.status : "unknown";
+    const healthEl = $("health-status");
+    healthEl.dataset.status = healthStatus;
     $("health-status").textContent =
-      (s.health && s.health.status ? s.health.status.toUpperCase() : "?") +
+      (healthStatus !== "unknown" ? healthStatus.toUpperCase() : "?") +
       (s.alpaca_reachable ? "" : " • Alpaca unreachable");
     const lines = (s.health && s.health.systemd && s.health.systemd.stdout_tail) || [];
     $("health-pre").textContent = lines.join("\n");

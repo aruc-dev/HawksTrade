@@ -209,6 +209,9 @@ body {
   text-transform: uppercase;
   color: #64748b;
 }
+.ht-status-text[data-status="green"]  { color: #34d399; }
+.ht-status-text[data-status="yellow"] { color: #fbbf24; }
+.ht-status-text[data-status="red"]    { color: #f87171; }
 
 /* ── Progress bar ──────────────────────────────────────────────── */
 .ht-headroom-card { padding: 0.85rem 1.25rem; }
@@ -388,6 +391,10 @@ body {
 .bg-rose-700      { background-color: #be123c; }
 .bg-slate-600     { background-color: #475569; }
 .bg-slate-950     { background-color: #020617; }
+.ht-table tbody td.text-emerald-400 { color: #34d399; }
+.ht-table tbody td.text-rose-400    { color: #f87171; }
+.ht-table tbody td.text-amber-400   { color: #fbbf24; }
+.ht-table tbody td.text-slate-300   { color: #cbd5e1; }
 
 @media (max-width: 900px) {
   .ht-main {
