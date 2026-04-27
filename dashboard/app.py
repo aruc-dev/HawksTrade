@@ -192,7 +192,7 @@ def _build_state_snapshot() -> Dict[str, Any]:
     portfolio_value = account.get("portfolio_value")
     active_capital = (
         round(portfolio_value * cfg().max_positions * cfg().max_position_pct, 2)
-        if portfolio_value
+        if reachable and portfolio_value is not None
         else None
     )
     strategies = strategy_summary(rows, lookback_days=30)
