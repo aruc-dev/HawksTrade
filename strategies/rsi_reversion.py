@@ -54,7 +54,7 @@ def _in_severe_crash(bars_data=None) -> bool:
     try:
         if bars_data is not None:
             spy_bars = bars_data.get("SPY")
-            if spy_bars is None or len(spy_bars) < 20:
+            if spy_bars is None or len(spy_bars) < 252:
                 return False
             closes = pd.Series([
                 float(b.close) if hasattr(b, "close") else float(b["close"])
@@ -63,12 +63,12 @@ def _in_severe_crash(bars_data=None) -> bool:
         else:
             raw = ac.get_stock_bars(["SPY"], timeframe="1Day", limit=255)
             spy_bars = raw["SPY"]
-            if spy_bars is None or len(spy_bars) < 20:
+            if spy_bars is None or len(spy_bars) < 252:
                 log.warning("[RSI] Insufficient SPY bars for crash check — blocking (fail closed).")
                 return True
             closes = pd.Series([b.close for b in spy_bars])
 
-        peak = closes.rolling(min(252, len(closes))).max().iloc[-1]
+        peak = closes.rolling(252).max().iloc[-1]
         current = float(closes.iloc[-1])
         drawdown = 1.0 - (current / peak)
         in_crash = drawdown > 0.20
@@ -256,11 +256,13 @@ class RSIReversionStrategy(BaseStrategy):
                     near_lower_bb = pct_b < 0.20
                 else:
                     near_lower_bb = False
+                    pct_b = None
 
                 if not near_lower_bb:
-                    log.debug(
-                        f"[RSI] {symbol} skipped — %B={pct_b:.2%} not in lower quintile (need <20%)"
-                    )
+                    if pct_b is not None:
+                        log.debug(
+                            f"[RSI] {symbol} skipped — %B={pct_b:.2%} not in lower quintile (need <20%)"
+                        )
                     continue
 
                 if len(bars) >= 2:
