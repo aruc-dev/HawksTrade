@@ -79,13 +79,16 @@
     const used = limit > 0 ? Math.min(100, Math.round((loss / limit) * 100)) : 0;
     const bar = $("headroom-bar");
     bar.style.width = used + "%";
-    bar.className = "ht-progress-bar " + ({
+    const headroomColorMap = {
       ok: "bg-emerald-500",
       warn: "bg-amber-400",
       critical: "bg-rose-500",
       tripped: "bg-rose-700",
       unknown: "bg-slate-600",
-    }[h.status] || "bg-slate-600");
+    };
+    const newHeadroomColor = headroomColorMap[h.status] || "bg-slate-600";
+    bar.classList.remove(...Object.values(headroomColorMap));
+    bar.classList.add(newHeadroomColor);
     $("headroom-status").textContent = (h.status || "unknown");
     $("headroom-status").dataset.status = h.status || "unknown";
     $("headroom-text").innerHTML =
