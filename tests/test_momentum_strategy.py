@@ -155,7 +155,8 @@ class MomentumStrategyTests(unittest.TestCase):
             patch("strategies.momentum.rm.market_breadth_pct", return_value=0.6),
             patch("strategies.momentum.ac.get_portfolio_value", return_value=10000.0),
         ):
-            signals = MomentumStrategy().scan(["AAPL"])
+            with patch.dict("strategies.momentum.SCFG", {"enabled": True, "min_momentum_pct": 0.01, "volume_spike_ratio": 1.2}):
+                signals = MomentumStrategy().scan(["AAPL"])
             
         self.assertEqual(len(signals), 0)
 

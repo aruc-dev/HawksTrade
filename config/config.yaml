@@ -132,7 +132,6 @@ strategies:
     max_positions_per_sector: 1  # Max concurrent positions in any single GICS sector
     # Phase 3: Market breadth tiered regime guard
     breadth_green_threshold: 0.50  # >= 50% above SMA50 → Green (full top_n deployed)
-    breadth_yellow_threshold: 0.40 # 25–50% above SMA50 → Yellow (reduced deployment)
     breadth_red_threshold: 0.25    # < 25% above SMA50 → Red (no new entries)
     yellow_max_positions: 2        # Max positions in Yellow regime (breadth 25–50%); must be < top_n
     volume_spike_ratio: 1.2        # Entry bar volume must exceed this multiple of the 20-day average

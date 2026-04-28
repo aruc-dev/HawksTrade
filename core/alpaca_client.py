@@ -519,9 +519,8 @@ def get_stock_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
     tf = tf_map.get(timeframe, TimeFrame.Day)
     
     # Chunking logic: Alpaca limits total bars per response (usually 10k).
-    # We chunk symbols to stay safely below that limit given the requested limit per symbol.
-    # 10 symbols per chunk is safe even if each has 800+ bars in the date range.
-    chunk_size = 10
+    # Total bars in one response = chunk_size * limit.
+    chunk_size = max(1, 10000 // limit)
     
     all_bars = {}
     feed = DataFeed.SIP if MODE == "live" else DataFeed.IEX
@@ -623,7 +622,8 @@ def get_crypto_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
     }
     tf = tf_map.get(timeframe, TimeFrame.Day)
     
-    chunk_size = 10
+    # Total bars in one response = chunk_size * limit.
+    chunk_size = max(1, 10000 // limit)
     
     all_bars = {}
     

@@ -542,7 +542,7 @@ def update_high_water_prices(symbol_prices: dict) -> None:
     how many positions are open.
 
     Rows that have never had high_water_price set (positions opened before
-    this column was added) are initialised to the current price on first call.
+    this column was added) are initialised to the entry_price on first call.
     """
     if not symbol_prices:
         return
