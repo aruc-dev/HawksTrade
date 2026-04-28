@@ -21,9 +21,7 @@ from core import alpaca_client as ac
 from core import risk_manager as rm
 from core.config_loader import get_config
 
-BASE_DIR = Path(__file__).resolve().parent.parent
 CFG = get_config()
-
 SCFG = CFG["strategies"]["ma_crossover"]
 log  = logging.getLogger("strategy.ma_crossover")
 
@@ -81,6 +79,9 @@ class MACrossoverStrategy(BaseStrategy):
         rsi_min          = int(SCFG.get("rsi_entry_min", 35))
         rsi_max          = int(SCFG.get("rsi_entry_max", 70))
         risk_pct         = float(SCFG.get("risk_per_trade_pct", 0.01))
+        vol_spike_ratio  = float(SCFG.get("volume_spike_ratio", 1.2))
+        vol_avg_period   = int(SCFG.get("volume_avg_period", 20))
+        vol_filter_period = int(SCFG.get("vol_filter_period", 10))
         min_trade_value  = float(CFG["trading"].get("min_trade_value_usd", 100))
 
         log.info(f"[MACross] Scanning {len(universe)} crypto pairs "
@@ -107,25 +108,46 @@ class MACrossoverStrategy(BaseStrategy):
         for symbol in universe:
             try:
                 bars = _bars_for_symbol(bars_data, symbol)
-                if bars is None or len(bars) < max(slow_span, atr_period) + 5:
+                if bars is None or len(bars) < max(slow_span, atr_period, vol_avg_period, vol_filter_period) + 5:
                     continue
 
-                closes  = pd.Series([b.close for b in bars])
+                closes = pd.Series([
+                    float(b.close) if hasattr(b, "close") else float(b["close"])
+                    for b in bars
+                ])
                 fast    = _ema(closes, fast_span)
                 slow    = _ema(closes, slow_span)
                 cross   = _detect_crossover(fast, slow)
 
                 # Slope Filter: Ensure slow EMA is actually trending up over last 4 periods
-                is_trending_up = slow.iloc[-1] > slow.iloc[-5]
+                # Fix BUG-004: Added length check for iloc[-5]
+                is_trending_up = (len(slow) >= 5) and (slow.iloc[-1] > slow.iloc[-5])
 
                 # Volatility Filter: Ensure we aren't in a completely dead market
-                # Current range must be at least 0.5x the 10-day average range
-                highs  = pd.Series([b.high for b in bars])
-                lows   = pd.Series([b.low for b in bars])
+                # Current range must be at least 0.5x the N-day average range
+                highs  = pd.Series([
+                    float(b.high) if hasattr(b, "high") else float(b["high"])
+                    for b in bars
+                ])
+                lows   = pd.Series([
+                    float(b.low) if hasattr(b, "low") else float(b["low"])
+                    for b in bars
+                ])
                 ranges = highs - lows
-                avg_range = ranges.iloc[-11:-1].mean()
+                
+                # Fix BUG-013: Use configurable vol_filter_period
+                avg_range = ranges.iloc[-(vol_filter_period + 1):-1].mean()
                 curr_range = highs.iloc[-1] - lows.iloc[-1]
                 is_volatile = curr_range >= (avg_range * 0.5)
+
+                # Fix BUG-014: Volume spike confirmation
+                volumes = pd.Series([
+                    float(b.volume) if hasattr(b, "volume") else float(b["volume"])
+                    for b in bars
+                ])
+                avg_vol = volumes.iloc[-(vol_avg_period + 1):-1].mean()
+                curr_vol = volumes.iloc[-1]
+                volume_ok = (avg_vol > 0 and curr_vol >= vol_spike_ratio * avg_vol) if vol_spike_ratio > 0 else True
 
                 fast_v  = float(fast.iloc[-1])
                 slow_v  = float(slow.iloc[-1])
@@ -133,7 +155,7 @@ class MACrossoverStrategy(BaseStrategy):
 
                 rsi_val = _calc_rsi(closes, 14)
 
-                if cross == "bullish" and is_trending_up and is_volatile and rsi_min <= rsi_val <= rsi_max:
+                if cross == "bullish" and is_trending_up and is_volatile and volume_ok and rsi_min <= rsi_val <= rsi_max:
                     atr = _calc_atr(bars, atr_period)
                     atr_stop = round(price - atr_mult * atr, 4)
 
@@ -179,24 +201,33 @@ class MACrossoverStrategy(BaseStrategy):
         return signals
 
     def should_exit(self, symbol: str, entry_price: float) -> tuple:
-        """Exit when fast EMA crosses below slow EMA."""
+        """Exit when fast EMA crosses below slow EMA or RSI is overbought."""
         fast_span = SCFG["fast_ema"]
         slow_span = SCFG["slow_ema"]
         timeframe = SCFG["timeframe"]
+        rsi_exit_max = int(SCFG.get("rsi_exit_max", 70))
 
         try:
-            bars_data = ac.get_crypto_bars([symbol], timeframe=timeframe, limit=slow_span + 10)
+            bars_data = ac.get_crypto_bars([symbol], timeframe=timeframe, limit=slow_span + 20)
             bars      = _bars_for_symbol(bars_data, symbol)
-            if bars is None or len(bars) < slow_span + 2:
+            if bars is None or len(bars) < max(slow_span, 15) + 2:
                 return False, ""
 
-            closes = pd.Series([b.close for b in bars])
+            closes = pd.Series([
+                float(b.close) if hasattr(b, "close") else float(b["close"])
+                for b in bars
+            ])
             fast   = _ema(closes, fast_span)
             slow   = _ema(closes, slow_span)
             cross  = _detect_crossover(fast, slow)
 
             if cross == "bearish":
                 return True, f"EMA {fast_span} crossed below EMA {slow_span}"
+
+            # Fix BUG-005: RSI overbought exit
+            rsi_val = _calc_rsi(closes, 14)
+            if rsi_val > rsi_exit_max:
+                return True, f"RSI overbought: {rsi_val:.1f} > {rsi_exit_max}"
 
         except Exception as e:
             log.warning(f"[MACross] Exit check error for {symbol}: {e}")

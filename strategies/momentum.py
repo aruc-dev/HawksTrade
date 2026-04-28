@@ -184,9 +184,13 @@ class MomentumStrategy(BaseStrategy):
                 # 3. Volume Confirmation (Recommendation 3)
                 # Current bar must be a volume spike (> volume_spike_ratio × 20-day avg)
                 vol_spike_ratio = float(SCFG.get("volume_spike_ratio", 1.2))
-                volumes = pd.Series([float(b.volume) for b in bars])
+                volumes = pd.Series([
+                    float(b.volume) if hasattr(b, "volume") else float(b["volume"])
+                    for b in bars
+                ])
                 avg_vol_20 = volumes.iloc[-21:-1].mean()
-                curr_vol = float(bars[-1].volume)
+                # Fix BUG-007: add safety guard for volume access
+                curr_vol = float(getattr(bars[-1], "volume", 0) or 0)
                 if avg_vol_20 > 0 and curr_vol <= vol_spike_ratio * avg_vol_20:
                     log.debug(f"[Momentum] {symbol} skipped: volume confirmation failed ({curr_vol:.0f} <= {vol_spike_ratio}x {avg_vol_20:.0f})")
                     continue

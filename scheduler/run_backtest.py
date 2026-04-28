@@ -24,27 +24,27 @@ from unittest.mock import MagicMock, patch
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
-from core import alpaca_client as ac
-from core import risk_manager as rm
-from core import order_executor as oe
-from core.config_loader import get_config
-from core.exit_policy import (
+from core import alpaca_client as ac  # noqa: E402
+from core import risk_manager as rm  # noqa: E402
+from core import order_executor as oe  # noqa: E402
+from core.config_loader import get_config  # noqa: E402
+from core.exit_policy import (  # noqa: E402
     VALID_MOMENTUM_EXIT_POLICIES,
     normalize_momentum_exit_policy,
     should_exit_for_hold,
     update_high_water_price,
 )
-import strategies.momentum as momentum_module
-import strategies.rsi_reversion as rsi_module
-import strategies.gap_up as gap_up_module
-import strategies.ma_crossover as ma_crossover_module
-import strategies.range_breakout as range_breakout_module
-from strategies.momentum import MomentumStrategy
-from strategies.rsi_reversion import RSIReversionStrategy
-from strategies.gap_up import GapUpStrategy
-from strategies.ma_crossover import MACrossoverStrategy
-from strategies.range_breakout import RangeBreakoutStrategy
-from screener.universe_builder import UniverseBuilder
+import strategies.momentum as momentum_module  # noqa: E402
+import strategies.rsi_reversion as rsi_module  # noqa: E402
+import strategies.gap_up as gap_up_module  # noqa: E402
+import strategies.ma_crossover as ma_crossover_module  # noqa: E402
+import strategies.range_breakout as range_breakout_module  # noqa: E402
+from strategies.momentum import MomentumStrategy  # noqa: E402
+from strategies.rsi_reversion import RSIReversionStrategy  # noqa: E402
+from strategies.gap_up import GapUpStrategy  # noqa: E402
+from strategies.ma_crossover import MACrossoverStrategy  # noqa: E402
+from strategies.range_breakout import RangeBreakoutStrategy  # noqa: E402
+from screener.universe_builder import UniverseBuilder  # noqa: E402
 
 # Extended pool of ~110 high-liquidity symbols covering major sectors
 EXTENDED_POOL = [

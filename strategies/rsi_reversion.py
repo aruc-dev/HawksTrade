@@ -39,9 +39,7 @@ from strategies.base_strategy import BaseStrategy
 from core import alpaca_client as ac
 from core.config_loader import get_config
 
-BASE_DIR = Path(__file__).resolve().parent.parent
 CFG = get_config()
-
 SCFG = CFG["strategies"]["rsi_reversion"]
 log  = logging.getLogger("strategy.rsi_reversion")
 
@@ -140,8 +138,17 @@ def _calc_rsi(closes: pd.Series, period: int = 14) -> float:
     avg_l  = loss.ewm(com=period - 1, min_periods=period).mean()
     with np.errstate(divide="ignore", invalid="ignore"):
         rs  = avg_g / avg_l
-        rsi = 100 - (100 / (1 + rs))
-    return float(rsi.iloc[-1])
+        # Fix BUG-008: Handle NaN RS in flat markets
+        rs_filled = np.nan_to_num(rs, nan=1.0, posinf=np.inf)
+        rsi = 100 - (100 / (1 + rs_filled))
+
+    # rsi is a Series here because rs_filled (from Series / Series) is likely a Series
+    # But np.nan_to_num on a Series returns a numpy array.
+    if isinstance(rsi, np.ndarray):
+        val = float(rsi[-1])
+    else:
+        val = float(rsi.iloc[-1])
+    return val if not np.isnan(val) else 50.0
 
 
 def _calc_atr(bars, period: int = 14) -> float:
@@ -208,10 +215,11 @@ class RSIReversionStrategy(BaseStrategy):
         atr_mult      = SCFG.get("atr_multiplier", 2.0)
         risk_pct      = float(SCFG.get("risk_per_trade_pct", 0.01))
         sma200_upper  = float(SCFG.get("sma200_upper_buffer_pct", 0.15))
+        sma200_lower  = float(SCFG.get("sma200_lower_buffer_pct", 0.15))
 
         log.info(
             f"[RSI] Scanning {len(universe)} symbols "
-            f"(RSI<{oversold}, %B<20%, vol>1.5×, 1-bar recovery, SMA200 ±{sma200_upper:.0%}, "
+            f"(RSI<{oversold}, %B<20%, vol>1.5×, 1-bar recovery, SMA200 -{sma200_lower:.0%}/+{sma200_upper:.0%}, "
             f"2×ATR stop, exit@SMA20 or RSI>50)..."
         )
 
@@ -257,7 +265,10 @@ class RSIReversionStrategy(BaseStrategy):
                 if bars is None or len(bars) < 201:
                     continue
 
-                closes = pd.Series([b.close for b in bars])
+                closes = pd.Series([
+                    float(b.close) if hasattr(b, "close") else float(b["close"])
+                    for b in bars
+                ])
                 rsi    = _calc_rsi(closes, period)
                 sma200 = closes.rolling(window=200).mean().iloc[-1]
                 price  = float(bars[-1].close)
@@ -266,10 +277,10 @@ class RSIReversionStrategy(BaseStrategy):
                 today_vol  = float(bars[-1].volume)
                 vol_ratio  = today_vol / avg_vol_20 if avg_vol_20 > 0 else 0.0
 
-                # SMA200 band: price must be within ±sma200_upper_buffer_pct of SMA200.
+                # SMA200 band: price must be within configurable buffers of SMA200.
                 # Lower bound prevents buying broken-down stocks; upper bound prevents
                 # buying already-extended stocks that are not genuinely oversold.
-                in_sma200_band = sma200 * 0.85 < price < sma200 * (1 + sma200_upper)
+                in_sma200_band = sma200 * (1 - sma200_lower) < price < sma200 * (1 + sma200_upper)
 
                 if not (rsi < oversold and in_sma200_band and vol_ratio >= 1.5):
                     continue
@@ -364,7 +375,10 @@ class RSIReversionStrategy(BaseStrategy):
             if bars is None or len(bars) < period + 1:
                 return False, ""
 
-            closes     = pd.Series([b.close for b in bars])
+            closes = pd.Series([
+                float(b.close) if hasattr(b, "close") else float(b["close"])
+                for b in bars
+            ])
             price      = float(closes.iloc[-1])
             rsi        = _calc_rsi(closes, period)
             sma_target = float(closes.rolling(bb_period).mean().iloc[-1])

@@ -150,6 +150,7 @@ strategies:
     atr_period: 14                  # ATR lookback for volatility-adjusted stop
     atr_multiplier: 2.0             # Stop = entry - atr_multiplier × ATR
     risk_per_trade_pct: 0.01        # Risk 1% of equity per trade for ATR-based sizing
+    sma200_lower_buffer_pct: 0.15   # Entry blocked if price < SMA200 × (1 - this); prevents buying broken stocks
     sma200_upper_buffer_pct: 0.15   # Entry blocked if price > SMA200 × (1 + this); prevents buying overextended stocks
     profit_floor_pct: 0.015         # Exit via SMA target must exceed entry × (1 + this) to cover slippage
     weight: 1.0
@@ -178,6 +179,10 @@ strategies:
     risk_per_trade_pct: 0.01     # Risk 1% of equity per trade for ATR-based sizing
     rsi_entry_min: 35            # RSI must be at least this to avoid entering oversold chop
     rsi_entry_max: 70            # RSI must be below this to avoid buying overbought
+    rsi_exit_max: 75             # Exit if RSI rises above this (overbought target)
+    volume_spike_ratio: 1.2      # Entry bar volume must exceed this multiple of the 20-day average
+    volume_avg_period: 20        # Period for volume average
+    vol_filter_period: 10        # Period for volatility (range) filter average
     weight: 1.0
 
   range_breakout:

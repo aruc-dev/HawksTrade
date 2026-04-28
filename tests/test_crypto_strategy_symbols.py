@@ -22,6 +22,7 @@ class CryptoStrategySymbolTests(unittest.TestCase):
         with (
             patch("strategies.ma_crossover.ac.get_crypto_bars", return_value={"BTC/USD": bars}),
             patch("strategies.ma_crossover.rm.crypto_regime_ok", return_value=True),
+            patch.dict("strategies.ma_crossover.SCFG", {"volume_spike_ratio": 0}),
         ):
             signals = MACrossoverStrategy().scan(["BTCUSD"])
 
