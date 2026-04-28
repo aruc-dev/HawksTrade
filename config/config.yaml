@@ -114,7 +114,7 @@ strategies:
   momentum:
     enabled: true
     asset_class: stocks          # stocks | crypto | both
-    description: "Adaptive momentum: ATR-adjusted stops, 1% risk sizing, sector-neutral ranking, breadth-tiered regime, volume-confirmed entry (>=80% of 20d avg)"
+    description: "Adaptive momentum: ATR-adjusted stops, 1% risk sizing, sector-neutral ranking, breadth-tiered regime, volume-spike entry (>1.2x 20d avg volume required)"
     top_n: 3                     # Pick top 3 stocks by momentum
     hold_days: 4                 # Minimum hold before profit-aware exit checks
     exit_policy: "profit_trailing" # fixed_hold | profit_trailing | risk_only_baseline
@@ -131,16 +131,16 @@ strategies:
     # Phase 2: Sector-neutral ranking
     max_positions_per_sector: 1  # Max concurrent positions in any single GICS sector
     # Phase 3: Market breadth tiered regime guard
-    breadth_green_threshold: 0.50  # >= 50% above SMA50 → "Green" label (full top_n deployed)
-    breadth_yellow_threshold: 0.40 # >= 40% above SMA50 → full top_n deployed; < 40% → reduced deployment
-    breadth_red_threshold: 0.25    # < 25% above SMA50 → no new entries
-    yellow_max_positions: 2        # Max new positions entered when breadth < yellow_threshold (must be < top_n to have effect)
-    min_volume_ratio: 0.8          # Entry bar volume must be >= 80% of 20-day average (0 = disabled)
+    breadth_green_threshold: 0.50  # >= 50% above SMA50 → Green (full top_n deployed)
+    breadth_yellow_threshold: 0.40 # 25–50% above SMA50 → Yellow (reduced deployment)
+    breadth_red_threshold: 0.25    # < 25% above SMA50 → Red (no new entries)
+    yellow_max_positions: 2        # Max positions in Yellow regime (breadth 25–50%); must be < top_n
+    volume_spike_ratio: 1.2        # Entry bar volume must exceed this multiple of the 20-day average
 
   rsi_reversion:
     enabled: true
     asset_class: stocks
-    description: "Conservative RSI mean reversion. Entry: RSI<30, %B<20%, vol≥1.5×, 1-bar recovery, within 15% of SMA200. Stop: 2×ATR(14) — volatility-adjusted, widens the stop in high-vol capitulation conditions. Exit: price reaches SMA20 OR RSI>50 (edge gone) OR 10-day cap. Regime: skip on severe crash (SPY >20% below 252d peak) or elevated VIX proxy."
+    description: "Conservative RSI mean reversion. Entry: RSI<30, %B<20%, vol≥1.5×, 1-bar recovery, price within 15% below and 15% above SMA200. Stop: 2×ATR(14). Exit: price reaches SMA20 OR RSI>50 OR 10-day cap. Regime: skip on severe crash (SPY >20% below 252d peak) or elevated VIX proxy."
     rsi_period: 14
     oversold_threshold: 30          # Entry: RSI below this level (deeply oversold)
     overbought_threshold: 50        # Exit: RSI above this (momentum neutral = edge evaporated)
@@ -150,6 +150,9 @@ strategies:
     vix_multiplier: 1.2             # HV20 must be below HV_MA × this to allow entries
     atr_period: 14                  # ATR lookback for volatility-adjusted stop
     atr_multiplier: 2.0             # Stop = entry - atr_multiplier × ATR
+    risk_per_trade_pct: 0.01        # Risk 1% of equity per trade for ATR-based sizing
+    sma200_upper_buffer_pct: 0.15   # Entry blocked if price > SMA200 × (1 + this); prevents buying overextended stocks
+    profit_floor_pct: 0.015         # Exit via SMA target must exceed entry × (1 + this) to cover slippage
     weight: 1.0
 
   gap_up:
@@ -166,13 +169,15 @@ strategies:
   ma_crossover:
     enabled: true
     asset_class: crypto
-    description: "Enter when 9-EMA crosses above 21-EMA, exit on cross below. Uses 2xATR volatility-adjusted stop."
+    description: "Enter when 9-EMA crosses above 21-EMA with slope + volatility + RSI filters. Exit on bearish cross or 12-day hold cap. Uses 2xATR stop."
     fast_ema: 9
     slow_ema: 21
     timeframe: "1Day"            # "1Hour" | "4Hour" | "1Day"
     hold_days: 12
     atr_period: 14
     atr_multiplier: 2.0
+    rsi_entry_min: 35            # RSI must be at least this to avoid entering oversold chop
+    rsi_entry_max: 70            # RSI must be below this to avoid buying overbought
     weight: 1.0
 
   range_breakout:

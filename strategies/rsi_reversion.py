@@ -199,17 +199,19 @@ class RSIReversionStrategy(BaseStrategy):
         if not SCFG["enabled"]:
             return []
 
-        period       = SCFG["rsi_period"]
-        oversold     = SCFG["oversold_threshold"]
-        bb_period    = SCFG.get("bb_period", 20)
-        bb_std       = SCFG.get("bb_std", 2.0)
-        vix_mult     = SCFG.get("vix_multiplier", 1.2)
-        atr_period   = SCFG.get("atr_period", 14)
-        atr_mult     = SCFG.get("atr_multiplier", 2.0)
+        period        = SCFG["rsi_period"]
+        oversold      = SCFG["oversold_threshold"]
+        bb_period     = SCFG.get("bb_period", 20)
+        bb_std        = SCFG.get("bb_std", 2.0)
+        vix_mult      = SCFG.get("vix_multiplier", 1.2)
+        atr_period    = SCFG.get("atr_period", 14)
+        atr_mult      = SCFG.get("atr_multiplier", 2.0)
+        risk_pct      = float(SCFG.get("risk_per_trade_pct", 0.01))
+        sma200_upper  = float(SCFG.get("sma200_upper_buffer_pct", 0.15))
 
         log.info(
             f"[RSI] Scanning {len(universe)} symbols "
-            f"(RSI<{oversold}, %B<20%, vol>1.5×, 1-bar recovery, SMA200±15%, "
+            f"(RSI<{oversold}, %B<20%, vol>1.5×, 1-bar recovery, SMA200 ±{sma200_upper:.0%}, "
             f"2×ATR stop, exit@SMA20 or RSI>50)..."
         )
 
@@ -221,6 +223,18 @@ class RSIReversionStrategy(BaseStrategy):
 
         regime_bars = kwargs.get("regime_bars")
 
+        # Pre-fetch SPY once and share between both regime filters to avoid double API call.
+        if regime_bars is None or "SPY" not in (regime_bars or {}):
+            try:
+                raw_spy = ac.get_stock_bars(["SPY"], timeframe="1Day", limit=255)
+                spy_bars = raw_spy.get("SPY")
+                if spy_bars:
+                    combined = dict(regime_bars) if regime_bars else {}
+                    combined["SPY"] = spy_bars
+                    regime_bars = combined
+            except Exception as e:
+                log.warning(f"[RSI] Failed to pre-fetch SPY for regime filters: {e}")
+
         if _in_severe_crash(bars_data=regime_bars):
             log.info("[RSI] Severe crash (SPY >20% below 252d peak) — skipping scan.")
             return []
@@ -228,6 +242,12 @@ class RSIReversionStrategy(BaseStrategy):
         if _in_high_volatility_regime(bars_data=regime_bars, multiplier=vix_mult):
             log.info(f"[RSI] Elevated volatility regime (HV20 > HV_MA×{vix_mult}) — skipping scan.")
             return []
+
+        min_trade_value = float(CFG["trading"].get("min_trade_value_usd", 100))
+        try:
+            portfolio_equity = ac.get_portfolio_value()
+        except Exception:
+            portfolio_equity = 0.0
 
         signals = []
 
@@ -246,9 +266,12 @@ class RSIReversionStrategy(BaseStrategy):
                 today_vol  = float(bars[-1].volume)
                 vol_ratio  = today_vol / avg_vol_20 if avg_vol_20 > 0 else 0.0
 
-                not_broken_down = price > sma200 * 0.85
+                # SMA200 band: price must be within ±sma200_upper_buffer_pct of SMA200.
+                # Lower bound prevents buying broken-down stocks; upper bound prevents
+                # buying already-extended stocks that are not genuinely oversold.
+                in_sma200_band = sma200 * 0.85 < price < sma200 * (1 + sma200_upper)
 
-                if not (rsi < oversold and not_broken_down and vol_ratio >= 1.5):
+                if not (rsi < oversold and in_sma200_band and vol_ratio >= 1.5):
                     continue
 
                 if len(closes) >= bb_period:
@@ -276,12 +299,26 @@ class RSIReversionStrategy(BaseStrategy):
                     log.debug(f"[RSI] {symbol} skipped — no 1-bar recovery (last close not above prior)")
                     continue
 
-                # ATR-based stop: gives the trade room to breathe in high-vol conditions
-                atr           = _calc_atr(bars, atr_period)
-                atr_stop      = round(price - atr_mult * atr, 4)
-                lower_band    = _bollinger_lower(closes, bb_period, bb_std)
+                # ATR-based stop and 1%-risk position sizing
+                atr        = _calc_atr(bars, atr_period)
+                atr_stop   = round(price - atr_mult * atr, 4)
+                lower_band = _bollinger_lower(closes, bb_period, bb_std)
 
-                signals.append({
+                atr_risk_qty = None
+                if atr > 0 and atr_stop < price and portfolio_equity > 0:
+                    risk_dollars   = portfolio_equity * risk_pct
+                    risk_per_share = price - atr_stop
+                    if risk_per_share > 0:
+                        atr_risk_qty = round(risk_dollars / risk_per_share, 6)
+                        if atr_risk_qty * price < min_trade_value:
+                            log.info(
+                                f"[RSI] {symbol} ATR-risk quantity {atr_risk_qty} "
+                                f"(${atr_risk_qty * price:.2f}) is below min ${min_trade_value}. "
+                                "Skipping signal."
+                            )
+                            continue
+
+                sig = {
                     "symbol":         symbol,
                     "action":         "buy",
                     "strategy":       self.name,
@@ -292,10 +329,15 @@ class RSIReversionStrategy(BaseStrategy):
                         f"RSI={rsi:.1f}<{oversold}, %B={pct_b:.2%} (lower-BB={lower_band:.2f}), "
                         f"vol={vol_ratio:.1f}×, ATR={atr:.2f} stop@{atr_stop:.2f}"
                     ),
-                })
+                }
+                if atr_risk_qty is not None:
+                    sig["atr_risk_qty"] = atr_risk_qty
+
+                signals.append(sig)
                 log.info(
                     f"[RSI] Signal: BUY {symbol} | RSI={rsi:.1f} | "
-                    f"%B={pct_b:.2%} | vol={vol_ratio:.1f}× | ATR={atr:.2f} | stop@{atr_stop:.2f}"
+                    f"%B={pct_b:.2%} | vol={vol_ratio:.1f}× | ATR={atr:.2f} | "
+                    f"stop@{atr_stop:.2f} | risk_qty={atr_risk_qty}"
                 )
 
             except Exception as e:
@@ -327,14 +369,13 @@ class RSIReversionStrategy(BaseStrategy):
             rsi        = _calc_rsi(closes, period)
             sma_target = float(closes.rolling(bb_period).mean().iloc[-1])
             
-            # Profit Floor: ensure we cover slippage/commissions before hitting SMA target
-            profit_floor_mult = 1.015 # 1.5% minimum gain
-            effective_target = max(sma_target, entry_price * profit_floor_mult)
+            profit_floor_pct  = float(SCFG.get("profit_floor_pct", 0.015))
+            effective_target  = max(sma_target, entry_price * (1 + profit_floor_pct))
 
             if price >= effective_target:
                 reason = f"Mean target reached: {price:.2f} >= {effective_target:.2f}"
                 if effective_target > sma_target:
-                    reason += f" (SMA{bb_period}={sma_target:.2f}, boosted by 1.5% floor)"
+                    reason += f" (SMA{bb_period}={sma_target:.2f}, boosted by {profit_floor_pct:.1%} floor)"
                 return True, reason
 
             if rsi > overbought:

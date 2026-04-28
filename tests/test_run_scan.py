@@ -389,6 +389,46 @@ class RunScanTests(unittest.TestCase):
 
         exit_position.assert_called_once()
 
+    # ── MA crossover HOLD_DAYS (HIGH fix) ─────────────────────────────────────
+
+    def test_hold_day_exit_fires_for_ma_crossover_after_hold_period(self):
+        open_trade = {
+            "symbol": "BTC/USD",
+            "strategy": "ma_crossover",
+            "asset_class": "crypto",
+            "entry_price": "50000",
+        }
+
+        with (
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "get_trade_age_days", return_value=13),  # > hold_days=12
+            patch.object(run_scan, "_latest_price_for_trade", return_value=48000),  # flat/losing
+            patch.object(run_scan, "_estimate_peak_price_since_entry", return_value=51000),
+            patch.object(run_scan.oe, "exit_position") as exit_position,
+        ):
+            run_scan._check_hold_day_exits([], dry_run=True, market_open=True)
+
+        exit_position.assert_called_once()
+
+    def test_hold_day_exit_does_not_fire_for_ma_crossover_within_hold_period(self):
+        open_trade = {
+            "symbol": "BTC/USD",
+            "strategy": "ma_crossover",
+            "asset_class": "crypto",
+            "entry_price": "50000",
+        }
+
+        with (
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "get_trade_age_days", return_value=5),  # < hold_days=12
+            patch.object(run_scan, "_latest_price_for_trade", return_value=48000),
+            patch.object(run_scan, "_estimate_peak_price_since_entry", return_value=51000),
+            patch.object(run_scan.oe, "exit_position") as exit_position,
+        ):
+            run_scan._check_hold_day_exits([], dry_run=True, market_open=True)
+
+        exit_position.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

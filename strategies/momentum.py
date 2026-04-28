@@ -5,7 +5,7 @@ Phase 1: ATR-adjusted stop-loss (2×ATR below entry) and 1%-risk position sizing
 Phase 2: Sector-neutral ranking — max 1 position per GICS sector.
 Phase 3: Market breadth tiered regime guard.
   - Green  (breadth >= 50%): full deployment.
-  - Yellow (breadth < 40%): reduced deployment (yellow_max_positions cap).
+  - Yellow (breadth 25–50%): reduced deployment (yellow_max_positions cap).
   - Red    (breadth < 25% OR SPY < SMA50): no new entries.
 
 Exits are handled by the scheduler: flat/losing trades exit after the minimum
@@ -118,7 +118,6 @@ class MomentumStrategy(BaseStrategy):
         breadth = rm.market_breadth_pct(universe, bars_data=bars_data)
 
         green_thresh  = float(SCFG.get("breadth_green_threshold", 0.50))
-        yellow_thresh = float(SCFG.get("breadth_yellow_threshold", 0.40))
         red_thresh    = float(SCFG.get("breadth_red_threshold", 0.25))
         yellow_max    = int(SCFG.get("yellow_max_positions", 3))
 
@@ -129,12 +128,13 @@ class MomentumStrategy(BaseStrategy):
             )
             return []
 
-        if breadth < yellow_thresh:
+        if breadth >= green_thresh:
+            regime_tier = "Green"
+            effective_top_n = int(SCFG["top_n"])
+        else:
+            # Yellow: breadth is between red_thresh and green_thresh (25–50%)
             regime_tier = "Yellow"
             effective_top_n = min(int(SCFG["top_n"]), yellow_max)
-        else:
-            regime_tier = "Green" if breadth >= green_thresh else "Yellow"
-            effective_top_n = int(SCFG["top_n"])
 
         log.info(
             f"[Momentum] Regime={regime_tier} breadth={breadth:.1%} "
@@ -195,12 +195,13 @@ class MomentumStrategy(BaseStrategy):
                     continue
 
                 # 3. Volume Confirmation (Recommendation 3)
-                # Ensure current volume is > 1.2x the 20-day average
+                # Current bar must be a volume spike (> volume_spike_ratio × 20-day avg)
+                vol_spike_ratio = float(SCFG.get("volume_spike_ratio", 1.2))
                 volumes = pd.Series([float(b.volume) for b in bars])
                 avg_vol_20 = volumes.iloc[-21:-1].mean()
                 curr_vol = float(bars[-1].volume)
-                if avg_vol_20 > 0 and curr_vol <= 1.2 * avg_vol_20:
-                    log.debug(f"[Momentum] {symbol} skipped: volume confirmation failed ({curr_vol:.0f} <= 1.2x {avg_vol_20:.0f})")
+                if avg_vol_20 > 0 and curr_vol <= vol_spike_ratio * avg_vol_20:
+                    log.debug(f"[Momentum] {symbol} skipped: volume confirmation failed ({curr_vol:.0f} <= {vol_spike_ratio}x {avg_vol_20:.0f})")
                     continue
 
                 # Phase 1: ATR stop price

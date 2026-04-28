@@ -87,6 +87,7 @@ HOLD_DAYS = {
     "gap_up":         CFG["strategies"]["gap_up"]["hold_days"],
     "range_breakout": CFG["strategies"]["range_breakout"]["hold_days"],
     "rsi_reversion":  CFG["strategies"]["rsi_reversion"]["hold_days"],
+    "ma_crossover":   CFG["strategies"]["ma_crossover"]["hold_days"],
 }
 
 # ── Strategy Registry ─────────────────────────────────────────────────────────
@@ -469,7 +470,14 @@ def run(
                     if _max_positions_planned(planned_symbols):
                         break
                     if sig["action"] == "buy":
-                        result = oe.enter_position(sym, strategy=strategy.name, asset_class="crypto", dry_run=dry_run)
+                        result = oe.enter_position(
+                            sym,
+                            strategy=strategy.name,
+                            asset_class="crypto",
+                            dry_run=dry_run,
+                            suggested_qty=sig.get("atr_risk_qty"),
+                            atr_stop_price=sig.get("atr_stop_price"),
+                        )
                         _register_entry_result(result, sym, open_symbols, planned_symbols, new_entry_symbols)
             except Exception as e:
                 log.error(f"Strategy {strategy.name} failed: {e}", exc_info=True)

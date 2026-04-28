@@ -273,5 +273,58 @@ class MomentumStrategyTests(unittest.TestCase):
 
         self.assertEqual(len(signals), 3)
 
+    # ── Yellow regime mid-band fix ────────────────────────────────────────────
+
+    def test_scan_yellow_regime_mid_band_caps_positions(self):
+        # breadth=0.45 sits between red(<0.25) and green(>=0.50) — the 40–50% Yellow band.
+        # Before fix: this band got full top_n (Green behaviour).
+        # After fix: yellow_max_positions cap applies.
+        prices = [100.0] * 100 + [110.0, 110.0]
+        bars = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=2000)]
+        bars_resp = {"AAPL": bars, "MSFT": bars, "GOOG": bars}
+
+        with (
+            patch("strategies.momentum.ac.get_stock_bars", return_value=bars_resp),
+            patch("strategies.momentum.rm.market_regime_ok", return_value=True),
+            patch("strategies.momentum.rm.market_breadth_pct", return_value=0.45),
+            patch("strategies.momentum.ac.get_portfolio_value", return_value=100000.0),
+            patch("strategies.momentum.get_sector", side_effect=lambda x: f"Sector_{x}"),
+        ):
+            with patch.dict("strategies.momentum.SCFG", {
+                "top_n": 3,
+                "enabled": True,
+                "min_momentum_pct": 0.01,
+                "yellow_max_positions": 2,
+                "breadth_green_threshold": 0.50,
+                "breadth_red_threshold": 0.25,
+            }):
+                signals = MomentumStrategy().scan(["AAPL", "MSFT", "GOOG"])
+
+        self.assertLessEqual(len(signals), 2, "Yellow 40-50% breadth must be capped at yellow_max_positions")
+
+    def test_scan_volume_spike_ratio_is_config_driven(self):
+        # volume_spike_ratio=2.0 in config; last bar volume=1500 (1.5x avg=1000)
+        # 1.5 < 2.0 → skipped; if config is ignored and 1.2 used, it would pass
+        prices = [100.0] * 100 + [110.0, 110.0]
+        bars = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=1500)]
+        bars_resp = {"AAPL": bars}
+
+        with (
+            patch("strategies.momentum.ac.get_stock_bars", return_value=bars_resp),
+            patch("strategies.momentum.rm.market_regime_ok", return_value=True),
+            patch("strategies.momentum.rm.market_breadth_pct", return_value=0.6),
+            patch("strategies.momentum.ac.get_portfolio_value", return_value=100000.0),
+            patch("strategies.momentum.get_sector", return_value="Tech"),
+        ):
+            with patch.dict("strategies.momentum.SCFG", {
+                "enabled": True,
+                "min_momentum_pct": 0.01,
+                "volume_spike_ratio": 2.0,
+            }):
+                signals = MomentumStrategy().scan(["AAPL"])
+
+        self.assertEqual(len(signals), 0, "volume_spike_ratio must be read from config, not hardcoded")
+
+
 if __name__ == "__main__":
     unittest.main()

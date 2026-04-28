@@ -92,6 +92,59 @@ class MACrossoverStrategyTests(unittest.TestCase):
             
         self.assertEqual(len(signals), 0)
 
+    # ── Config-driven RSI thresholds ─────────────────────────────────────────
+
+    def test_scan_blocks_signal_when_rsi_below_config_min(self):
+        prices = [100.0] * 121
+        prices[119] = 90.0
+        prices[120] = 200.0
+        bars = [_bar(p, high=p+2, low=p-2) for p in prices]
+        bars_data = {"BTC/USD": bars}
+
+        with (
+            patch("strategies.ma_crossover.ac.get_crypto_bars", return_value=bars_data),
+            patch("strategies.ma_crossover.rm.crypto_regime_ok", return_value=True),
+            patch("strategies.ma_crossover._calc_rsi", return_value=30.0),
+            patch.dict("strategies.ma_crossover.SCFG", {"rsi_entry_min": 35, "rsi_entry_max": 70}),
+        ):
+            signals = MACrossoverStrategy().scan(["BTC/USD"])
+
+        self.assertEqual(len(signals), 0, "RSI below rsi_entry_min must block signal")
+
+    def test_scan_blocks_signal_when_rsi_above_config_max(self):
+        prices = [100.0] * 121
+        prices[119] = 90.0
+        prices[120] = 200.0
+        bars = [_bar(p, high=p+2, low=p-2) for p in prices]
+        bars_data = {"BTC/USD": bars}
+
+        with (
+            patch("strategies.ma_crossover.ac.get_crypto_bars", return_value=bars_data),
+            patch("strategies.ma_crossover.rm.crypto_regime_ok", return_value=True),
+            patch("strategies.ma_crossover._calc_rsi", return_value=75.0),
+            patch.dict("strategies.ma_crossover.SCFG", {"rsi_entry_min": 35, "rsi_entry_max": 70}),
+        ):
+            signals = MACrossoverStrategy().scan(["BTC/USD"])
+
+        self.assertEqual(len(signals), 0, "RSI above rsi_entry_max must block signal")
+
+    def test_scan_generates_signal_when_rsi_within_config_range(self):
+        prices = [100.0] * 121
+        prices[119] = 90.0
+        prices[120] = 200.0
+        bars = [_bar(p, high=p+2, low=p-2) for p in prices]
+        bars_data = {"BTC/USD": bars}
+
+        with (
+            patch("strategies.ma_crossover.ac.get_crypto_bars", return_value=bars_data),
+            patch("strategies.ma_crossover.rm.crypto_regime_ok", return_value=True),
+            patch("strategies.ma_crossover._calc_rsi", return_value=50.0),
+            patch.dict("strategies.ma_crossover.SCFG", {"rsi_entry_min": 35, "rsi_entry_max": 70}),
+        ):
+            signals = MACrossoverStrategy().scan(["BTC/USD"])
+
+        self.assertEqual(len(signals), 1)
+
     def test_scan_blocks_downward_slope(self):
         # Force a crossover in a decisively downtrending slow EMA.
         # We need slow.iloc[-1] <= slow.iloc[-5].
