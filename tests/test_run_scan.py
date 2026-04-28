@@ -272,7 +272,7 @@ class RunScanTests(unittest.TestCase):
             name = "momentum"
             asset_class = "stocks"
 
-            def scan(self, universe):
+            def scan(self, universe, **kwargs):
                 return [{"symbol": "AAPL", "action": "buy"}, {"symbol": "AAPL", "action": "buy"}]
 
         with (
@@ -294,7 +294,7 @@ class RunScanTests(unittest.TestCase):
             name = "momentum"
             asset_class = "stocks"
 
-            def scan(self, universe):
+            def scan(self, universe, **kwargs):
                 return [{"symbol": "NVDA", "action": "buy"}, {"symbol": "MSFT", "action": "buy"}]
 
         open_symbols = [f"SYM{i}" for i in range(run_scan.CFG["trading"]["max_positions"] - 1)]

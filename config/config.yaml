@@ -164,6 +164,9 @@ strategies:
     entry_window_minutes: 45     # Only enter within first 45 min of market open
     intraday_exit: false         # Respect intraday.enabled setting above
     hold_days: 2
+    atr_period: 14
+    atr_multiplier: 2.0
+    risk_per_trade_pct: 0.01
     weight: 0.8
 
   ma_crossover:
@@ -193,6 +196,10 @@ strategies:
     volume_multiplier: 1.8       # Volume must be 1.8x average to confirm breakout
     timeframe: "1Day"
     hold_days: 3
+    atr_period: 14
+    atr_multiplier: 2.0
+    risk_per_trade_pct: 0.01
+    vol_filter_period: 10
     weight: 0.9
 
 # --- SCHEDULING (reference only; OS scheduler templates live in scheduler/) ---

@@ -50,13 +50,15 @@ class CryptoStrategySymbolTests(unittest.TestCase):
         warning.assert_not_called()
 
     def test_range_breakout_scan_accepts_slashless_crypto_universe_symbol(self):
-        bars = [_bar(80 + idx * 0.4) for idx in range(50)]
+        bars = [_bar(80 + idx * 0.4) for idx in range(60)]
         bars.append(_bar(100, high=101, low=99, volume=1000))
         bars.append(_bar(102, high=103, low=99, volume=3000))
 
         with (
             patch("strategies.range_breakout.ac.get_crypto_bars", return_value={"BTC/USD": bars}),
             patch("strategies.range_breakout.rm.crypto_regime_ok", return_value=True),
+            patch("strategies.range_breakout.ac.get_portfolio_value", return_value=10000.0),
+            patch.dict("strategies.range_breakout.SCFG", {"volume_multiplier": 0, "vol_filter_period": 0}),
         ):
             signals = RangeBreakoutStrategy().scan(["BTCUSD"])
 

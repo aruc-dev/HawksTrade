@@ -11,12 +11,14 @@ NOTE: Intraday exit is controlled by config intraday.enabled.
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime
 from typing import List, Dict
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import numpy as np
 
 from strategies.base_strategy import BaseStrategy
 from core import alpaca_client as ac
@@ -56,14 +58,19 @@ class GapUpStrategy(BaseStrategy):
 
         min_gap     = SCFG["min_gap_pct"]
         vol_mult    = SCFG["volume_multiplier"]
+        risk_pct    = float(SCFG.get("risk_per_trade_pct", 0.01))
+        atr_period  = int(SCFG.get("atr_period", 14))
+        atr_mult    = float(SCFG.get("atr_multiplier", 2.0))
+        min_trade_value = float(CFG["trading"].get("min_trade_value_usd", 100))
         max_gap     = 0.15 # 15% cap to avoid buying "exhaustion" gaps
         sma_long    = 200
 
         log.info(f"[GapUp] Scanning {len(universe)} symbols (min_gap={min_gap:.1%}, trend=SMA{sma_long})...")
 
         try:
-            # Need 200 days for trend + 20 days for avg vol
-            bars_data = ac.get_stock_bars(universe, timeframe="1Day", limit=sma_long + 10)
+            # Need 200 days for trend + max(20, atr_period)
+            limit = max(sma_long + 10, atr_period + 10)
+            bars_data = ac.get_stock_bars(universe, timeframe="1Day", limit=limit)
         except Exception as e:
             log.error(f"[GapUp] Failed to fetch bars: {e}")
             return []
@@ -81,13 +88,15 @@ class GapUpStrategy(BaseStrategy):
                 if bars is None or len(bars) < sma_long + 1:
                     continue
 
-                df = pd.DataFrame([{
-                    "open":   float(b.open),
-                    "high":   float(b.high),
-                    "low":    float(b.low),
-                    "close":  float(b.close),
-                    "volume": float(b.volume),
-                } for b in bars])
+                from core.risk_manager import _get_closes
+                
+                df = pd.DataFrame({
+                    "open":   [float(b.open) if hasattr(b, "open") else float(b["open"]) for b in bars],
+                    "high":   [float(b.high) if hasattr(b, "high") else float(b["high"]) for b in bars],
+                    "low":    [float(b.low) if hasattr(b, "low") else float(b["low"]) for b in bars],
+                    "close":  _get_closes(bars),
+                    "volume": [float(b.volume) if hasattr(b, "volume") else float(b["volume"]) for b in bars],
+                })
 
                 prev_open    = df["open"].iloc[-2]
                 prev_close   = df["close"].iloc[-2]
@@ -109,25 +118,46 @@ class GapUpStrategy(BaseStrategy):
                     if (today_vol >= avg_vol_20 * vol_mult and
                         today_open > sma200 and
                         prev_close > prev_open):
-                        # true gap boosts confidence
-                        is_true_gap = today_open > prev_high
-                        confidence = round(min(gap_pct / 0.08, 1.0) * (1.1 if is_true_gap else 1.0), 3)
-                        signals.append({
-                            "symbol":      symbol,
-                            "action":      "buy",
-                            "strategy":    self.name,
-                            "asset_class": self.asset_class,
-                            "confidence":  confidence,
-                            "reason":      (
-                                f"Gap-up {gap_pct:.2%} | vol={today_vol/avg_vol_20:.1f}x | "
-                                f"Trend UP | Prev Day Green"
-                                + (" | True Gap" if is_true_gap else "")
-                            ),
-                        })
-                        log.info(
-                            f"[GapUp] Signal: BUY {symbol} | gap={gap_pct:.2%} | "
-                            f"vol={today_vol/avg_vol_20:.1f}x | SMA200={sma200:.2f}"
-                        )
+                        
+                        from strategies.rsi_reversion import _calc_atr
+                        
+                        price = float(today_open) # Open-based entry for GapUp
+                        atr = _calc_atr(bars, atr_period)
+                        # For GapUp, we use today's open as entry for sizing
+                        atr_stop = round(price - atr_mult * atr, 2)
+                        
+                        portfolio_value = ac.get_portfolio_value()
+                        risk_amount = portfolio_value * risk_pct
+                        risk_per_share = price - atr_stop
+                        
+                        if risk_per_share > 0:
+                            qty = math.floor(risk_amount / risk_per_share)
+                            # Cap at 5% portfolio
+                            max_qty = math.floor((portfolio_value * 0.05) / price)
+                            qty = min(qty, max_qty)
+                            
+                            if qty * price >= min_trade_value:
+                                # true gap boosts confidence
+                                is_true_gap = today_open > prev_high
+                                confidence = round(min(gap_pct / 0.08, 1.0) * (1.1 if is_true_gap else 1.0), 3)
+                                signals.append({
+                                    "symbol":      symbol,
+                                    "action":      "buy",
+                                    "strategy":    self.name,
+                                    "asset_class": self.asset_class,
+                                    "confidence":  confidence,
+                                    "atr_stop":    atr_stop,
+                                    "atr_risk_qty": qty,
+                                    "reason":      (
+                                        f"Gap-up {gap_pct:.2%} | vol={today_vol/avg_vol_20:.1f}x | "
+                                        f"Trend UP | Prev Day Green"
+                                        + (" | True Gap" if is_true_gap else "")
+                                    ),
+                                })
+                                log.info(
+                                    f"[GapUp] Signal: BUY {symbol} | qty={qty} | stop={atr_stop} | gap={gap_pct:.2%} | "
+                                    f"vol={today_vol/avg_vol_20:.1f}x | SMA200={sma200:.2f}"
+                                )
 
             except Exception as e:
                 log.warning(f"[GapUp] Error for {symbol}: {e}")

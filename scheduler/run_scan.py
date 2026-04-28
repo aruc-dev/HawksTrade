@@ -419,6 +419,20 @@ def run(
     if pending_entry_symbols:
         log.info(f"Pending entry orders counted as planned positions: {len(pending_entry_symbols)}")
 
+    # --- Pre-fetch regime bars to share across strategies (reduces API calls) ---
+    regime_bars = {}
+    if run_stocks and market_open:
+        try:
+            regime_bars.update(ac.get_stock_bars(["SPY", "QQQ"], timeframe="1Day", limit=255))
+        except Exception as e:
+            log.warning(f"Could not pre-fetch stock regime bars: {e}")
+
+    if run_crypto:
+        try:
+            regime_bars.update(ac.get_crypto_bars(["BTC/USD"], timeframe="1Day", limit=60))
+        except Exception as e:
+            log.warning(f"Could not pre-fetch crypto regime bars: {e}")
+
     all_strategies = []
 
     # --- Stock scan (only when market is open) ---
@@ -428,7 +442,7 @@ def run(
         enabled_stock_strategies = _enabled_strategies(STOCK_STRATEGIES)
         for strategy in enabled_stock_strategies:
             try:
-                signals = strategy.scan(stock_universe)
+                signals = strategy.scan(stock_universe, regime_bars=regime_bars)
                 for sig in signals:
                     sym = sig["symbol"]
                     normalized = ac.normalize_symbol(sym)
@@ -460,7 +474,7 @@ def run(
         enabled_crypto_strategies = _enabled_strategies(CRYPTO_STRATEGIES)
         for strategy in enabled_crypto_strategies:
             try:
-                signals = strategy.scan(CRYPTO_UNIVERSE)
+                signals = strategy.scan(CRYPTO_UNIVERSE, regime_bars=regime_bars)
                 for sig in signals:
                     sym = sig["symbol"]
                     normalized = ac.normalize_symbol(sym)

@@ -339,6 +339,23 @@ def should_exit_position(
 
 # ── Market Regime Filter ─────────────────────────────────────────────────────
 
+def _get_closes(bars: list) -> pd.Series:
+    """Safely extract close prices from a list of bar objects (Alpaca SDK, SimpleNamespace, or dict)."""
+    vals = []
+    for b in bars:
+        if hasattr(b, "close"):
+            vals.append(float(b.close))
+        elif isinstance(b, dict) and "close" in b:
+            vals.append(float(b["close"]))
+        else:
+            # Fallback for other object types that might have close as a property but not seen by hasattr
+            try:
+                vals.append(float(b.close))
+            except Exception:
+                vals.append(np.nan)
+    return pd.Series(vals)
+
+
 def market_regime_ok(bars_data=None) -> bool:
     """
     Returns True if SPY is above its 50-day SMA — indicates bull market regime.
@@ -356,14 +373,14 @@ def market_regime_ok(bars_data=None) -> bool:
                 bars = bars_data.get(symbol)
                 if bars is None or len(bars) < 51:
                     return True
-                closes = pd.Series([float(b.close) if hasattr(b, 'close') else float(b['close']) for b in bars])
+                closes = _get_closes(bars)
             else:
                 raw = ac.get_stock_bars([symbol], timeframe="1Day", limit=55)
                 bars = raw[symbol]
                 if bars is None or len(bars) < 51:
                     log.warning(f"[RegimeFilter] Insufficient {symbol} bars for SMA50; fail closed.")
                     return False
-                closes = pd.Series([b.close for b in bars])
+                closes = _get_closes(bars)
             
             sma50 = closes.rolling(50).mean().iloc[-1]
             current = float(closes.iloc[-1])
@@ -456,7 +473,7 @@ def crypto_regime_ok(bars_data=None) -> bool:
             if btc_bars is None or len(btc_bars) < 21:
                 # Early in the simulation — not enough history yet; allow trading.
                 return True
-            closes = pd.Series([float(b.close) if hasattr(b, 'close') else float(b['close']) for b in btc_bars])
+            closes = _get_closes(btc_bars)
         else:
             # live mode — fail closed if data is unavailable or insufficient
             raw = ac.get_crypto_bars(["BTC/USD"], timeframe="1Day", limit=25)
@@ -468,7 +485,7 @@ def crypto_regime_ok(bars_data=None) -> bool:
                     len(btc_bars) if btc_bars is not None else 0,
                 )
                 return False
-            closes = pd.Series([b.close for b in btc_bars])
+            closes = _get_closes(btc_bars)
         ema20 = closes.ewm(span=20, adjust=False).mean().iloc[-1]
         current = float(closes.iloc[-1])
         is_bull = current > ema20
