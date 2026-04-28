@@ -106,7 +106,7 @@ class MACrossoverStrategy(BaseStrategy):
         signals = []
 
         try:
-            bars_data = ac.get_crypto_bars(universe, timeframe=timeframe, limit=max(slow_span, atr_period) + 20)
+            bars_data = ac.get_crypto_bars(universe, timeframe=timeframe, limit=max(slow_span, atr_period) + 100)
         except Exception as e:
             log.error(f"[MACross] Failed to fetch bars: {e}")
             return []
