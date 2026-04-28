@@ -211,13 +211,25 @@ def _submitted_order_is_transient(order) -> bool:
 
 # ── Entry Logic ─────────────────────────────────────────────────────────────
 
-def enter_position(symbol: str, strategy: str, asset_class: str = "stock", dry_run: bool = False) -> Optional[dict]:
+def enter_position(
+    symbol: str,
+    strategy: str,
+    asset_class: str = "stock",
+    dry_run: bool = False,
+    suggested_qty: Optional[float] = None,
+    atr_stop_price: Optional[float] = None,
+) -> Optional[dict]:
     """
     Open a new position.
       1. Check risk rules (daily loss, max positions, size)
-      2. Calculate qty
+      2. Calculate qty (ATR-risk qty > Kelly > portfolio-pct, whichever applies)
       3. Place order (limit or market)
       4. Log the trade
+
+    suggested_qty: ATR-risk-based quantity from the strategy signal; takes
+        priority over Kelly when provided and positive.
+    atr_stop_price: volatility-adjusted stop; written to the trade log so the
+        live risk check can use it as the effective stop price.
     """
     try:
         # Get latest price
@@ -237,8 +249,11 @@ def enter_position(symbol: str, strategy: str, asset_class: str = "stock", dry_r
             return None
 
         qty = check["qty"]
-        # Kelly override for momentum — uses dynamic rolling 30-trade params
-        if strategy == "momentum":
+        if suggested_qty and suggested_qty > 0:
+            # ATR-risk sizing from signal takes priority
+            qty = suggested_qty
+        elif strategy == "momentum":
+            # Kelly override for momentum — uses dynamic rolling 30-trade params
             kelly_qty = rm.kelly_position_size(price=price)
             if kelly_qty > 0:
                 qty = kelly_qty
@@ -292,7 +307,9 @@ def enter_position(symbol: str, strategy: str, asset_class: str = "stock", dry_r
         action_status = _entry_log_status(order, qty, filled_qty)
         logged_qty = filled_qty if filled_qty > 0 else qty
         entry_price = _order_filled_avg_price(order, price) if filled_qty > 0 else price
-        sl = rm.stop_loss_price(entry_price)
+        global_sl = rm.stop_loss_price(entry_price)
+        # Use ATR stop when it widens the stop below the global floor; otherwise global governs.
+        sl = atr_stop_price if (atr_stop_price is not None and atr_stop_price < global_sl) else global_sl
         tp = rm.take_profit_price(entry_price)
         trade = {
             "timestamp":   _utc_now().isoformat(),

@@ -11,6 +11,7 @@ Enforces all risk rules before any order is placed:
 
 import json
 import logging
+import math
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -307,15 +308,30 @@ def pre_trade_check(price: float, symbol: str, asset_class: Optional[str] = None
 
 # ── Exit Check (stop-loss / take-profit) ─────────────────────────────────────
 
-def should_exit_position(symbol: str, entry_price: float, current_price: float) -> tuple:
+def should_exit_position(
+    symbol: str,
+    entry_price: float,
+    current_price: float,
+    custom_stop_price: float | None = None,
+) -> tuple:
     """
     Returns (should_exit: bool, reason: str).
+
+    custom_stop_price: when provided (e.g. a 2×ATR stop computed at entry),
+    the effective stop is min(global_stop, custom_stop_price). Both are absolute
+    price levels below entry; min() selects whichever is further below entry,
+    widening the trade's breathing room. The global stop governs whenever the
+    custom stop is tighter (higher price) or absent.
     """
-    sl = stop_loss_price(entry_price)
+    global_sl = stop_loss_price(entry_price)
+    if custom_stop_price is not None and not math.isfinite(custom_stop_price):
+        custom_stop_price = None
+    sl = min(global_sl, custom_stop_price) if custom_stop_price is not None else global_sl
     tp = take_profit_price(entry_price)
 
     if current_price <= sl:
-        return True, f"Stop-loss hit: {current_price:.4f} <= {sl:.4f}"
+        label = "Custom stop-loss" if custom_stop_price is not None and sl == custom_stop_price else "Stop-loss"
+        return True, f"{label} hit: {current_price:.4f} <= {sl:.4f}"
     if current_price >= tp:
         return True, f"Take-profit hit: {current_price:.4f} >= {tp:.4f}"
     return False, ""
@@ -326,47 +342,99 @@ def should_exit_position(symbol: str, entry_price: float, current_price: float) 
 def market_regime_ok(bars_data=None) -> bool:
     """
     Returns True if SPY is above its 50-day SMA — indicates bull market regime.
-    When bars_data is provided (backtest), uses pre-fetched SPY bars dict.
+    If SPY is below SMA50 but QQQ is above SMA50, it also returns True (Bifurcation Detection).
+    
+    When bars_data is provided (backtest), uses pre-fetched bars dict.
     In live trading, fetches from Alpaca directly.
 
-    Backtest mode: insufficient bars (early warmup) returns True so the
-    simulation can begin trading before the full 50-bar window is available.
-
+    Backtest mode: insufficient bars (early warmup) returns True.
     Live mode: any exception or insufficient bars returns False (fail closed).
-    A regime filter is a safety control — when we cannot confirm conditions are
-    favourable, we should block new entries rather than assume they are.
     """
     try:
-        if bars_data is not None:
-            # backtest mode: bars_data is a dict symbol->list of bar mocks
-            spy_bars = bars_data.get("SPY")
-            if spy_bars is None or len(spy_bars) < 51:
-                # Early in the simulation — not enough history yet; allow trading.
-                return True
-            closes = pd.Series([float(b.close) if hasattr(b, 'close') else float(b['close']) for b in spy_bars])
-        else:
-            # live mode — fail closed if data is unavailable or insufficient
-            raw = ac.get_stock_bars(["SPY"], timeframe="1Day", limit=55)
-            spy_bars = raw["SPY"]
-            if spy_bars is None or len(spy_bars) < 51:
-                log.warning(
-                    "[RegimeFilter] Insufficient SPY bars for SMA50 (%s bars); "
-                    "blocking new entries (fail closed).",
-                    len(spy_bars) if spy_bars is not None else 0,
-                )
-                return False
-            closes = pd.Series([b.close for b in spy_bars])
-        sma50 = closes.rolling(50).mean().iloc[-1]
-        current = float(closes.iloc[-1])
-        is_bull = current > sma50
-        log.debug(f"[RegimeFilter] SPY={current:.2f} SMA50={sma50:.2f} bull={is_bull}")
-        return is_bull
+        def _is_above_sma50(symbol: str) -> bool:
+            if bars_data is not None:
+                bars = bars_data.get(symbol)
+                if bars is None or len(bars) < 51:
+                    return True
+                closes = pd.Series([float(b.close) if hasattr(b, 'close') else float(b['close']) for b in bars])
+            else:
+                raw = ac.get_stock_bars([symbol], timeframe="1Day", limit=55)
+                bars = raw[symbol]
+                if bars is None or len(bars) < 51:
+                    log.warning(f"[RegimeFilter] Insufficient {symbol} bars for SMA50; fail closed.")
+                    return False
+                closes = pd.Series([b.close for b in bars])
+            
+            sma50 = closes.rolling(50).mean().iloc[-1]
+            current = float(closes.iloc[-1])
+            return current > sma50
+
+        spy_bull = _is_above_sma50("SPY")
+        if spy_bull:
+            log.debug("[RegimeFilter] SPY above SMA50 - Bull regime confirmed.")
+            return True
+            
+        qqq_bull = _is_above_sma50("QQQ")
+        if qqq_bull:
+            log.info("[RegimeFilter] SPY below SMA50 but QQQ above SMA50 - Bifurcation detected, allowing entries.")
+            return True
+
+        log.debug("[RegimeFilter] Both SPY and QQQ below SMA50 - Bear regime confirmed.")
+        return False
+
     except Exception as e:
         log.warning(
             "[RegimeFilter] Could not determine market regime: %s — "
             "blocking new entries (fail closed).", e,
         )
         return False
+
+
+def market_breadth_pct(universe: list, bars_data: dict | None = None) -> float:
+    """
+    Returns the fraction (0.0–1.0) of universe symbols trading above their own
+    50-day SMA. When bars_data is provided (scan already fetched), reuses it;
+    otherwise fetches from Alpaca live.
+
+    Returns 0.5 (neutral) when data is unavailable or insufficient, so callers
+    can treat an unknown breadth as neither triggering Yellow nor Red thresholds.
+    """
+    try:
+        source = ac.get_stock_bars(universe, timeframe="1Day", limit=55) if bars_data is None else bars_data
+        # Normalize to a plain dict so both live BarSet objects and dicts work.
+        fetched: dict = {}
+        for sym in universe:
+            try:
+                b = source[sym]
+                if b is not None:
+                    fetched[sym] = b
+            except Exception:
+                pass
+
+        above = 0
+        eligible = 0
+        for sym in universe:
+            bars = fetched.get(sym)
+            if bars is None or len(bars) < 51:
+                continue
+            closes = pd.Series([
+                float(b.close) if hasattr(b, "close") else float(b["close"])
+                for b in bars
+            ])
+            sma50 = closes.rolling(50).mean().iloc[-1]
+            eligible += 1
+            if float(closes.iloc[-1]) > sma50:
+                above += 1
+
+        if eligible == 0:
+            log.debug("[Breadth] Insufficient bars for breadth calculation — returning neutral 0.5")
+            return 0.5
+        breadth = above / eligible
+        log.debug(f"[Breadth] {above}/{eligible} symbols above SMA50 = {breadth:.1%}")
+        return breadth
+    except Exception as e:
+        log.warning(f"[Breadth] Could not compute market breadth: {e} — returning neutral 0.5")
+        return 0.5
 
 
 def crypto_regime_ok(bars_data=None) -> bool:

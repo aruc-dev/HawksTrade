@@ -114,7 +114,7 @@ strategies:
   momentum:
     enabled: true
     asset_class: stocks          # stocks | crypto | both
-    description: "Buy top N stocks by 5-day price momentum; let profitable trades run with trailing protection"
+    description: "Adaptive momentum: ATR-adjusted stops, 1% risk sizing, sector-neutral ranking, breadth-tiered regime"
     top_n: 3                     # Pick top 3 stocks by momentum
     hold_days: 4                 # Minimum hold before profit-aware exit checks
     exit_policy: "profit_trailing" # fixed_hold | profit_trailing | risk_only_baseline
@@ -124,15 +124,31 @@ strategies:
     max_hold_days: 20            # Cap stale momentum positions even if still green
     min_momentum_pct: 0.06       # Minimum 6% 5-day gain to qualify
     weight: 1.0                  # Signal weight (relative to other strategies)
+    # Phase 1: Volatility-adjusted risk management
+    atr_period: 14               # ATR lookback for dynamic stop computation
+    atr_multiplier: 2.0          # Stop = entry - atr_multiplier * ATR(14)
+    risk_per_trade_pct: 0.01     # Risk 1% of total equity per trade (position sizing)
+    # Phase 2: Sector-neutral ranking
+    max_positions_per_sector: 1  # Max concurrent positions in any single GICS sector
+    # Phase 3: Market breadth tiered regime guard
+    breadth_green_threshold: 0.50  # >= 50% above SMA50 → "Green" label (full top_n deployed)
+    breadth_yellow_threshold: 0.40 # >= 40% above SMA50 → full top_n deployed; < 40% → reduced deployment
+    breadth_red_threshold: 0.25    # < 25% above SMA50 → no new entries
+    yellow_max_positions: 3        # Max new positions entered when breadth < yellow_threshold
 
   rsi_reversion:
     enabled: false
     asset_class: stocks
-    description: "Buy when RSI < 30 (oversold), sell when RSI > 60"
+    description: "Conservative RSI mean reversion. Entry: RSI<30, %B<20%, vol≥1.5×, 1-bar recovery, within 15% of SMA200. Stop: 2×ATR(14) — volatility-adjusted, widens the stop in high-vol capitulation conditions. Exit: price reaches SMA20 OR RSI>50 (edge gone) OR 10-day cap. Regime: skip on severe crash (SPY >20% below 252d peak) or elevated VIX proxy."
     rsi_period: 14
-    oversold_threshold: 38
-    overbought_threshold: 62
-    hold_days: 10
+    oversold_threshold: 30          # Entry: RSI below this level (deeply oversold)
+    overbought_threshold: 50        # Exit: RSI above this (momentum neutral = edge evaporated)
+    hold_days: 10                   # Hard exit after 10 business days
+    bb_period: 20                   # Bollinger Band lookback period
+    bb_std: 2.0                     # Bollinger Band standard deviation multiplier
+    vix_multiplier: 1.2             # HV20 must be below HV_MA × this to allow entries
+    atr_period: 14                  # ATR lookback for volatility-adjusted stop
+    atr_multiplier: 2.0             # Stop = entry - atr_multiplier × ATR
     weight: 1.0
 
   gap_up:

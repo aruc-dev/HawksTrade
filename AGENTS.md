@@ -1,5 +1,40 @@
 # HawksTrade — AGENTS.md
 ## Universal AI Agent Instruction File
+
+<!-- BEGIN MANDATORY WORKFLOW INTEGRATION -->
+## 🚨 MANDATORY AGENT WORKFLOW 🚨
+
+This project uses **beads (bd)** for issue tracking and has a strict session close protocol. You MUST follow these steps for **EVERY** change and **EVERY** session.
+
+### 1. Start of Session
+- [ ] Run `bd ready` to find available work.
+- [ ] Claim an issue: `bd update <id> --claim`.
+- [ ] If starting a new task, create an issue first: `bd create "Title" --body "Details"`.
+
+### 2. During Development
+- [ ] Use `bd` for ALL task tracking. Do NOT use markdown TODOs or comments.
+- [ ] Run quality gates after every change: `python3 -m unittest discover -v`.
+
+### 3. Session Close (MANDATORY - DO NOT SKIP)
+Work is **NOT COMPLETE** until these steps are finished and `git push` succeeds:
+1. **File issues** for remaining or discovered work.
+2. **Run quality gates**: `python3 -m unittest discover -v`.
+3. **Update issue status**: `bd close <id>`.
+4. **PUSH TO REMOTE**:
+   ```bash
+   git pull --rebase
+   bd dolt push
+   git push
+   git status  # MUST show "up to date with origin"
+   ```
+5. **Verify** all changes are committed AND pushed.
+
+**CRITICAL RULES:**
+- NEVER stop before pushing.
+- NEVER say "ready to push when you are" — YOU must push.
+- If push fails, resolve and retry until it succeeds.
+<!-- END MANDATORY WORKFLOW INTEGRATION -->
+
 ### Compatible with: Claude, OpenAI Codex, GPT-4o, Gemini, and any code-executing AI agent
 
 ---
@@ -19,6 +54,8 @@ version for agents that need quick, structured instructions.
 Before proceeding, confirm you can answer YES to all of the following:
 
 - [ ] I have read access to this project folder
+- [ ] I have run `bd ready` and claimed/created an issue for my task
+- [ ] I will use `bd` for ALL task tracking and will NOT stop until `git push` succeeds
 - [ ] I can execute Python scripts via bash/shell
 - [ ] I will NOT modify `config/config.yaml` risk parameters without human approval
 - [ ] I will NOT switch `mode` from `paper` to `live` without explicit human instruction
@@ -164,6 +201,51 @@ Did any script fail?
 
 - Python 3.10+
 - All packages in `requirements.txt`
+- `config/.env` or `.env` file with valid Alpaca API keys
+- Internet access to `api.alpaca.markets` and `data.alpaca.markets`
+
+## Validation Before Push / Deployment
+
+Run these checks before publishing code changes:
+```bash
+python3 -m unittest discover -v
+python3 -W error::DeprecationWarning -m unittest discover
+python3 -m compileall core strategies scheduler tracking tests
+python3 scheduler/run_scan.py --dry-run
+python3 scheduler/run_risk_check.py --dry-run
+python3 scheduler/run_report.py
+```
+
+Only run a real paper-order lifecycle test when the human explicitly asks for it.
+
+---
+
+## Quality & Documentation
+
+You MUST adhere to these standards for every change:
+1. **Unit Testing**: Implement or update unit tests in the `tests/` directory for ALL logic changes.
+2. **Validation**: After EVERY change, run unit tests AND a 1-month backtest to confirm nothing is broken:
+   ```bash
+   python3 -m unittest discover -v
+   python3 scheduler/run_backtest.py --days 30 --fund 10000
+   ```
+   Both must pass before committing. If either fails, fix the issue first.
+3. **Documentation**: Update `README.md`, strategy tables, or backtest reports immediately if your changes affect system behavior or performance.
+
+---
+
+## Reporting Back to the Human
+
+After each run, summarise:
+- Number of signals found
+- Number of trades entered / exited
+- Current portfolio value and open positions
+- Any errors encountered
+
+---
+
+*See CLAUDE.md for the full operating manual.*
+ackages in `requirements.txt`
 - `config/.env` or `.env` file with valid Alpaca API keys
 - Internet access to `api.alpaca.markets` and `data.alpaca.markets`
 

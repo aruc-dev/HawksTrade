@@ -1,4 +1,39 @@
 # HawksTrade — Gemini Agent Instructions
+
+<!-- BEGIN MANDATORY WORKFLOW INTEGRATION -->
+## 🚨 MANDATORY AGENT WORKFLOW 🚨
+
+This project uses **beads (bd)** for issue tracking and has a strict session close protocol. You MUST follow these steps for **EVERY** change and **EVERY** session.
+
+### 1. Start of Session
+- [ ] Run `bd ready` to find available work.
+- [ ] Claim an issue: `bd update <id> --claim`.
+- [ ] If starting a new task, create an issue first: `bd create "Title" --body "Details"`.
+
+### 2. During Development
+- [ ] Use `bd` for ALL task tracking. Do NOT use markdown TODOs or comments.
+- [ ] Run quality gates after every change: `python3 -m unittest discover -v`.
+
+### 3. Session Close (MANDATORY - DO NOT SKIP)
+Work is **NOT COMPLETE** until these steps are finished and `git push` succeeds:
+1. **File issues** for remaining or discovered work.
+2. **Run quality gates**: `python3 -m unittest discover -v`.
+3. **Update issue status**: `bd close <id>`.
+4. **PUSH TO REMOTE**:
+   ```bash
+   git pull --rebase
+   bd dolt push
+   git push
+   git status  # MUST show "up to date with origin"
+   ```
+5. **Verify** all changes are committed AND pushed.
+
+**CRITICAL RULES:**
+- NEVER stop before pushing.
+- NEVER say "ready to push when you are" — YOU must push.
+- If push fails, resolve and retry until it succeeds.
+<!-- END MANDATORY WORKFLOW INTEGRATION -->
+
 ## Derived from AGENTS.md
 
 This file adapts the shared `AGENTS.md` operating instructions for Gemini.
@@ -13,6 +48,8 @@ any trading-related script. If this file and `AGENTS.md` disagree, follow
 Before proceeding, confirm you can answer YES to all of the following:
 
 - [ ] I have read access to this project folder
+- [ ] I have run `bd ready` and claimed/created an issue for my task
+- [ ] I will use `bd` for ALL task tracking and will NOT stop until `git push` succeeds
 - [ ] I can execute Python scripts via bash/shell
 - [ ] I will NOT modify `config/config.yaml` risk parameters without human approval
 - [ ] I will NOT switch `mode` from `paper` to `live` without explicit human instruction
@@ -192,50 +229,3 @@ After each run, summarize:
 - Any errors encountered
 
 ---
-
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
-## Beads Issue Tracker
-
-This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
-
-### Quick Reference
-
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>         # Complete work
-```
-
-### Rules during AI-based development in this repo
-
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
-- Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
-
-## Session Completion
-
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
-
-**MANDATORY DEVELOPMENT WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   bd dolt push
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-<!-- END BEADS INTEGRATION -->

@@ -553,8 +553,11 @@ def run_backtest(
                 pos = sim.positions[symbol]; price = sim.get_current_price(symbol)
                 if price <= 0: continue
                 update_high_water_price(pos, price)
-                should_exit, reason = rm.should_exit_position(symbol, pos["entry_price"], price)
-                if should_exit: 
+                should_exit, reason = rm.should_exit_position(
+                    symbol, pos["entry_price"], price,
+                    custom_stop_price=pos.get("custom_stop_price"),
+                )
+                if should_exit:
                     oe.exit_position(symbol, reason, pos["asset_class"], open_trades_callback=sim.get_open_trades_for_backtest)
             # Scan
             for strat in strategies:
@@ -565,10 +568,20 @@ def run_backtest(
                 signals = strat.scan(universe, current_time=dt, regime_bars=regime_bars)
                 for sig in signals:
                     if sig["symbol"] not in sim.positions:
-                        order = oe.enter_position(sig["symbol"], strat.name, strat.asset_class)
+                        order = oe.enter_position(
+                            sig["symbol"],
+                            strat.name,
+                            strat.asset_class,
+                            suggested_qty=sig.get("atr_risk_qty"),
+                            atr_stop_price=sig.get("atr_stop_price"),
+                        )
                         # enter_position returns status="open" (not "filled") — update strategy name on any non-None return
                         if order and sig["symbol"] in sim.positions:
                             sim.positions[sig["symbol"]]["strategy"] = strat.name
+                            # Store ATR stop so the risk-check loop uses it instead of the
+                            # global fixed-percentage stop for this position.
+                            if sig.get("atr_stop_price") is not None:
+                                sim.positions[sig["symbol"]]["custom_stop_price"] = sig["atr_stop_price"]
             # Hold Day Check — delegates to sim.get_trade_age_days() (stocks=business days, crypto=calendar days)
             for symbol in list(sim.positions.keys()):
                 pos = sim.positions[symbol]
