@@ -32,6 +32,27 @@ def _ema(series: pd.Series, span: int) -> pd.Series:
     return series.ewm(span=span, adjust=False).mean()
 
 
+def _calc_atr(bars, period: int = 14) -> float:
+    """
+    Compute ATR(period) from a bar list.
+    True Range = max(high-low, |high-prev_close|, |low-prev_close|).
+    Returns ATR as an absolute price value.
+    """
+    highs  = pd.Series([float(b.high)  if hasattr(b, "high")  else float(b["high"])  for b in bars])
+    lows   = pd.Series([float(b.low)   if hasattr(b, "low")   else float(b["low"])   for b in bars])
+    closes = pd.Series([float(b.close) if hasattr(b, "close") else float(b["close"]) for b in bars])
+
+    prev_close = closes.shift(1)
+    tr = pd.concat([
+        highs - lows,
+        (highs - prev_close).abs(),
+        (lows  - prev_close).abs(),
+    ], axis=1).max(axis=1)
+
+    atr = tr.ewm(span=period, min_periods=period).mean()
+    return float(atr.iloc[-1])
+
+
 def _detect_crossover(fast: pd.Series, slow: pd.Series) -> str:
     """
     Returns 'bullish' if fast just crossed above slow,
@@ -76,6 +97,8 @@ class MACrossoverStrategy(BaseStrategy):
         fast_span = SCFG["fast_ema"]
         slow_span = SCFG["slow_ema"]
         timeframe = SCFG["timeframe"]
+        atr_period = SCFG.get("atr_period", 14)
+        atr_mult   = SCFG.get("atr_multiplier", 2.0)
 
         log.info(f"[MACross] Scanning {len(universe)} crypto pairs "
                  f"(EMA {fast_span}/{slow_span}, {timeframe})...")
@@ -83,7 +106,7 @@ class MACrossoverStrategy(BaseStrategy):
         signals = []
 
         try:
-            bars_data = ac.get_crypto_bars(universe, timeframe=timeframe, limit=slow_span + 20)
+            bars_data = ac.get_crypto_bars(universe, timeframe=timeframe, limit=max(slow_span, atr_period) + 20)
         except Exception as e:
             log.error(f"[MACross] Failed to fetch bars: {e}")
             return []
@@ -96,7 +119,7 @@ class MACrossoverStrategy(BaseStrategy):
         for symbol in universe:
             try:
                 bars = _bars_for_symbol(bars_data, symbol)
-                if bars is None or len(bars) < slow_span + 5:
+                if bars is None or len(bars) < max(slow_span, atr_period) + 5:
                     continue
 
                 closes  = pd.Series([b.close for b in bars])
@@ -118,19 +141,24 @@ class MACrossoverStrategy(BaseStrategy):
 
                 fast_v  = float(fast.iloc[-1])
                 slow_v  = float(slow.iloc[-1])
+                price   = float(closes.iloc[-1])
 
                 rsi_val = _calc_rsi(closes, 14)
 
                 if cross == "bullish" and is_trending_up and is_volatile and 35 <= rsi_val <= 70:
+                    atr = _calc_atr(bars, atr_period)
+                    atr_stop = round(price - atr_mult * atr, 4)
+
                     signals.append({
                         "symbol":      symbol,
                         "action":      "buy",
                         "strategy":    self.name,
                         "asset_class": self.asset_class,
                         "confidence":  round(min(abs(fast_v - slow_v) / slow_v * 10, 1.0), 3),
-                        "reason":      f"BULLISH {fast_span}/{slow_span} EMA Crossover | Slope UP | Vol Confirm | RSI={rsi_val:.1f}",
+                        "atr_stop_price": atr_stop,
+                        "reason":      f"BULLISH {fast_span}/{slow_span} EMA Crossover | Slope UP | Vol Confirm | RSI={rsi_val:.1f} | ATR Stop={atr_stop}",
                     })
-                    log.info(f"[MACross] BULLISH crossover on {symbol} | Trend UP | Vol Confirm | RSI={rsi_val:.1f}")
+                    log.info(f"[MACross] BULLISH crossover on {symbol} | Trend UP | Vol Confirm | RSI={rsi_val:.1f} | ATR Stop={atr_stop}")
 
             except Exception as e:
                 log.warning(f"[MACross] Error for {symbol}: {e}")

@@ -165,11 +165,13 @@ strategies:
   ma_crossover:
     enabled: true
     asset_class: crypto
-    description: "Enter when 20-EMA crosses above 50-EMA, exit on cross below"
+    description: "Enter when 9-EMA crosses above 21-EMA, exit on cross below. Uses 2xATR volatility-adjusted stop."
     fast_ema: 9
     slow_ema: 21
     timeframe: "1Day"            # "1Hour" | "4Hour" | "1Day"
     hold_days: 12
+    atr_period: 14
+    atr_multiplier: 2.0
     weight: 1.0
 
   range_breakout:
