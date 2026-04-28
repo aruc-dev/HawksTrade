@@ -11,7 +11,7 @@
 | Strategy | Asset | Status | File |
 |---|---|---|---|
 | Momentum | Stocks | **Enabled** | `momentum.py` |
-| RSI Reversion | Stocks | Disabled | `rsi_reversion.py` |
+| RSI Reversion | Stocks | **Enabled** | `rsi_reversion.py` |
 | Gap-Up | Stocks | Disabled | `gap_up.py` |
 | MA Crossover | Crypto | **Enabled** | `ma_crossover.py` |
 | Range Breakout | Crypto | **Enabled** | `range_breakout.py` |
@@ -85,7 +85,7 @@ room while the global 3.5% stop remains the absolute floor.
 
 ---
 
-## 2. RSI Reversion *(Stocks — Disabled)*
+## 2. RSI Reversion *(Stocks — Enabled)*
 
 **Type:** Mean reversion, swing trade.
 
@@ -94,7 +94,10 @@ room while the global 3.5% stop remains the absolute floor.
 2. Bollinger Band %B < 20% — price in the lower quintile of the 20-day, 2σ band.
 3. Volume ≥ 1.5× 20-day average — confirming capitulation selling.
 4. Last close > prior close — 1-bar recovery; freefall has paused.
-5. Price > SMA200 × 0.85 — not a structurally broken stock (within 15% of 200-day MA).
+5. SMA200 Band: Price must be within configurable buffers of the 200-day MA.
+   - Entry blocked if `price < SMA200 × (1 - sma200_lower_buffer_pct)` (broken stocks).
+   - Entry blocked if `price > SMA200 × (1 + sma200_upper_buffer_pct)` (overextended stocks).
+   - Default buffers: ±15%.
 
 **Stop:** 2 × ATR(14) below entry (volatility-adjusted). The ATR stop flows
 through `order_executor.enter_position` into the trade log and is picked up by
@@ -120,6 +123,8 @@ governs whenever the ATR stop is tighter or absent.
 | `atr_period` | 14 |
 | `atr_multiplier` | 2.0 |
 | `vix_multiplier` | 1.2 |
+| `sma200_lower_buffer_pct` | 15% |
+| `sma200_upper_buffer_pct` | 15% |
 
 **Regime filters:**
 - Crash filter: skip if SPY is >20% below its 252-day peak.
@@ -162,15 +167,18 @@ take-profit from the global risk manager apply throughout.
 
 **Type:** Trend-following, medium-term swing. Runs 24/7 on daily bars.
 
-**Entry:** Four conditions must all be true:
+**Entry:** Five conditions must all be true:
 1. 9-EMA crosses above 21-EMA on the daily chart (bullish crossover).
 2. 21-EMA is sloping upward over the last 5 bars — no crossovers into a flat trend.
 3. Today's price range ≥ 50% of the 10-day average range — market is moving.
 4. RSI(14) between 35 and 70 — not entering an already-overbought or deeply-oversold
    state.
+5. Volume Confirmation: Entry-bar volume ≥ 120% of its 20-day average (`volume_spike_ratio: 1.2`).
 
-**Exit:** 9-EMA crosses back below 21-EMA (bearish crossover). Hard cap at 12
-calendar days.
+**Exit:** Whichever fires first:
+- 9-EMA crosses back below 21-EMA (bearish crossover).
+- RSI(14) > 75 (`rsi_exit_max`) — overbought target reached.
+- Hard cap at 12 calendar days (`hold_days`).
 
 **Key parameters:**
 
@@ -180,6 +188,11 @@ calendar days.
 | `slow_ema` | 21 |
 | `timeframe` | 1Day |
 | `hold_days` | 12 calendar days |
+| `rsi_entry_min` | 35 |
+| `rsi_entry_max` | 70 |
+| `rsi_exit_max` | 75 |
+| `volume_spike_ratio` | 1.2 |
+| `vol_filter_period` | 10 |
 
 **Regime filter:** BTC/USD > 20-day EMA (crypto bull regime required).
 
