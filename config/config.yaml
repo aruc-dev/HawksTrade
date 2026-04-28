@@ -137,7 +137,7 @@ strategies:
     yellow_max_positions: 3        # Max new positions entered when breadth < yellow_threshold
 
   rsi_reversion:
-    enabled: false
+    enabled: true
     asset_class: stocks
     description: "Conservative RSI mean reversion. Entry: RSI<30, %B<20%, vol≥1.5×, 1-bar recovery, within 15% of SMA200. Stop: 2×ATR(14) — volatility-adjusted, widens the stop in high-vol capitulation conditions. Exit: price reaches SMA20 OR RSI>50 (edge gone) OR 10-day cap. Regime: skip on severe crash (SPY >20% below 252d peak) or elevated VIX proxy."
     rsi_period: 14
