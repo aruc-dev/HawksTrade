@@ -527,7 +527,7 @@ def get_stock_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
     feed = DataFeed.SIP if MODE == "live" else DataFeed.IEX
     
     for i in range(0, len(symbols), chunk_size):
-        batch = symbols[i : i + chunk_size]
+        batch = symbols[i: i + chunk_size]
         end = datetime.now(timezone.utc)
         start = end - _lookback_delta(timeframe, limit, market="stock")
         
@@ -628,7 +628,7 @@ def get_crypto_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
     all_bars = {}
     
     for i in range(0, len(request_symbols), chunk_size):
-        batch = request_symbols[i : i + chunk_size]
+        batch = request_symbols[i: i + chunk_size]
         end = datetime.now(timezone.utc)
         start = end - _lookback_delta(timeframe, limit, market="crypto")
         

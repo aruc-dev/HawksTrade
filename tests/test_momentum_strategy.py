@@ -1,12 +1,9 @@
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
-import pandas as pd
-
 from strategies.momentum import (
     MomentumStrategy,
     _calc_atr,
-    _sector_filtered_top_n,
 )
 
 
