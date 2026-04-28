@@ -169,13 +169,14 @@ strategies:
   ma_crossover:
     enabled: true
     asset_class: crypto
-    description: "Enter when 9-EMA crosses above 21-EMA with slope + volatility + RSI filters. Exit on bearish cross or 12-day hold cap. Uses 2xATR stop."
+    description: "Enter when 9-EMA crosses above 21-EMA with slope + volatility + RSI filters. Exit on bearish cross or 12-day hold cap. Uses 2xATR stop and 1%-risk position sizing."
     fast_ema: 9
     slow_ema: 21
     timeframe: "1Day"            # "1Hour" | "4Hour" | "1Day"
     hold_days: 12
     atr_period: 14
     atr_multiplier: 2.0
+    risk_per_trade_pct: 0.01     # Risk 1% of equity per trade for ATR-based sizing
     rsi_entry_min: 35            # RSI must be at least this to avoid entering oversold chop
     rsi_entry_max: 70            # RSI must be below this to avoid buying overbought
     weight: 1.0

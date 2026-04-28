@@ -73,13 +73,15 @@ class MACrossoverStrategy(BaseStrategy):
         if not SCFG["enabled"]:
             return []
 
-        fast_span    = SCFG["fast_ema"]
-        slow_span    = SCFG["slow_ema"]
-        timeframe    = SCFG["timeframe"]
-        atr_period   = SCFG.get("atr_period", 14)
-        atr_mult     = SCFG.get("atr_multiplier", 2.0)
-        rsi_min      = int(SCFG.get("rsi_entry_min", 35))
-        rsi_max      = int(SCFG.get("rsi_entry_max", 70))
+        fast_span        = SCFG["fast_ema"]
+        slow_span        = SCFG["slow_ema"]
+        timeframe        = SCFG["timeframe"]
+        atr_period       = SCFG.get("atr_period", 14)
+        atr_mult         = SCFG.get("atr_multiplier", 2.0)
+        rsi_min          = int(SCFG.get("rsi_entry_min", 35))
+        rsi_max          = int(SCFG.get("rsi_entry_max", 70))
+        risk_pct         = float(SCFG.get("risk_per_trade_pct", 0.01))
+        min_trade_value  = float(CFG["trading"].get("min_trade_value_usd", 100))
 
         log.info(f"[MACross] Scanning {len(universe)} crypto pairs "
                  f"(EMA {fast_span}/{slow_span}, {timeframe})...")
@@ -96,6 +98,11 @@ class MACrossoverStrategy(BaseStrategy):
         if not rm.crypto_regime_ok(bars_data=regime_bars):
             log.info("[MACross] Crypto bear regime (BTC < EMA20), skipping scan.")
             return []
+
+        try:
+            portfolio_equity = ac.get_portfolio_value()
+        except Exception:
+            portfolio_equity = 0.0
 
         for symbol in universe:
             try:
@@ -133,16 +140,37 @@ class MACrossoverStrategy(BaseStrategy):
                     # Guard against zero slow EMA (theoretical edge case on micro-cap assets)
                     ema_divergence = abs(fast_v - slow_v) / slow_v if slow_v != 0 else 0.0
 
-                    signals.append({
-                        "symbol":      symbol,
-                        "action":      "buy",
-                        "strategy":    self.name,
-                        "asset_class": self.asset_class,
-                        "confidence":  round(min(ema_divergence * 10, 1.0), 3),
+                    atr_risk_qty = None
+                    if atr > 0 and atr_stop < price and portfolio_equity > 0:
+                        risk_dollars   = portfolio_equity * risk_pct
+                        risk_per_share = price - atr_stop
+                        if risk_per_share > 0:
+                            atr_risk_qty = round(risk_dollars / risk_per_share, 6)
+                            if atr_risk_qty * price < min_trade_value:
+                                log.info(
+                                    f"[MACross] {symbol} ATR-risk quantity {atr_risk_qty} "
+                                    f"(${atr_risk_qty * price:.2f}) is below min ${min_trade_value}. "
+                                    "Skipping signal."
+                                )
+                                continue
+
+                    sig = {
+                        "symbol":         symbol,
+                        "action":         "buy",
+                        "strategy":       self.name,
+                        "asset_class":    self.asset_class,
+                        "confidence":     round(min(ema_divergence * 10, 1.0), 3),
                         "atr_stop_price": atr_stop,
-                        "reason":      f"BULLISH {fast_span}/{slow_span} EMA Crossover | Slope UP | Vol Confirm | RSI={rsi_val:.1f} | ATR Stop={atr_stop}",
-                    })
-                    log.info(f"[MACross] BULLISH crossover on {symbol} | Trend UP | Vol Confirm | RSI={rsi_val:.1f} | ATR Stop={atr_stop}")
+                        "reason":         f"BULLISH {fast_span}/{slow_span} EMA Crossover | Slope UP | Vol Confirm | RSI={rsi_val:.1f} | ATR Stop={atr_stop}",
+                    }
+                    if atr_risk_qty is not None:
+                        sig["atr_risk_qty"] = atr_risk_qty
+
+                    signals.append(sig)
+                    log.info(
+                        f"[MACross] BULLISH crossover on {symbol} | Trend UP | Vol Confirm | "
+                        f"RSI={rsi_val:.1f} | ATR Stop={atr_stop} | risk_qty={atr_risk_qty}"
+                    )
 
             except Exception as e:
                 log.warning(f"[MACross] Error for {symbol}: {e}")

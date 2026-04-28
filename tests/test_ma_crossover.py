@@ -145,6 +145,44 @@ class MACrossoverStrategyTests(unittest.TestCase):
 
         self.assertEqual(len(signals), 1)
 
+    def test_scan_generates_signal_with_atr_risk_qty(self):
+        prices = [100.0] * 121
+        prices[119] = 90.0
+        prices[120] = 200.0
+        bars = [_bar(p, high=p+2, low=p-2) for p in prices]
+        bars_data = {"BTC/USD": bars}
+
+        with (
+            patch("strategies.ma_crossover.ac.get_crypto_bars", return_value=bars_data),
+            patch("strategies.ma_crossover.rm.crypto_regime_ok", return_value=True),
+            patch("strategies.ma_crossover._calc_rsi", return_value=50.0),
+            patch("strategies.ma_crossover.ac.get_portfolio_value", return_value=10000.0),
+        ):
+            signals = MACrossoverStrategy().scan(["BTC/USD"])
+
+        self.assertEqual(len(signals), 1)
+        self.assertIn("atr_risk_qty", signals[0])
+        self.assertGreater(signals[0]["atr_risk_qty"], 0)
+
+    def test_scan_skips_signal_when_atr_risk_qty_below_notional_minimum(self):
+        # price≈200, ATR≈4 → atr_stop≈192, risk_per_share≈8
+        # portfolio=100 → risk_dollars=1 → qty=0.125 → 0.125*200=25 < min_trade_value=100 → skip
+        prices = [100.0] * 121
+        prices[119] = 90.0
+        prices[120] = 200.0
+        bars = [_bar(p, high=p+2, low=p-2) for p in prices]
+        bars_data = {"BTC/USD": bars}
+
+        with (
+            patch("strategies.ma_crossover.ac.get_crypto_bars", return_value=bars_data),
+            patch("strategies.ma_crossover.rm.crypto_regime_ok", return_value=True),
+            patch("strategies.ma_crossover._calc_rsi", return_value=50.0),
+            patch("strategies.ma_crossover.ac.get_portfolio_value", return_value=100.0),
+        ):
+            signals = MACrossoverStrategy().scan(["BTC/USD"])
+
+        self.assertEqual(len(signals), 0, "Signal below notional minimum must be skipped")
+
     def test_scan_blocks_downward_slope(self):
         # Force a crossover in a decisively downtrending slow EMA.
         # We need slow.iloc[-1] <= slow.iloc[-5].
