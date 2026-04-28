@@ -162,7 +162,7 @@ class AlpacaClientTests(unittest.TestCase):
         with patch.object(alpaca_client, "get_stock_data_client", return_value=fake_client):
             alpaca_client.get_stock_bars(["AAPL", "MSFT"], timeframe="5Min", limit=60)
 
-        self.assertEqual(fake_client.req.limit, 120)
+        self.assertEqual(fake_client.req.limit, 10000)
 
     def test_get_crypto_bars_scales_limit_for_batch_request_and_pair_symbols(self):
         class FakeDataClient:
@@ -174,7 +174,7 @@ class AlpacaClientTests(unittest.TestCase):
         with patch.object(alpaca_client, "get_crypto_data_client", return_value=fake_client):
             alpaca_client.get_crypto_bars(["BTCUSD", "ETHUSD"], timeframe="5Min", limit=60)
 
-        self.assertEqual(fake_client.req.limit, 120)
+        self.assertEqual(fake_client.req.limit, 10000)
         self.assertEqual(fake_client.req.symbol_or_symbols, ["BTC/USD", "ETH/USD"])
 
     def test_normalize_symbol_removes_crypto_slash(self):

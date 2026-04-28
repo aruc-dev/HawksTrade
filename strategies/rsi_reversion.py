@@ -253,7 +253,7 @@ class RSIReversionStrategy(BaseStrategy):
 
         for symbol in universe:
             try:
-                bars = bars_data[symbol]
+                bars = self._get_symbol_bars(bars_data, symbol)
                 if bars is None or len(bars) < 201:
                     continue
 
@@ -360,7 +360,7 @@ class RSIReversionStrategy(BaseStrategy):
         limit = max(period + 10, bb_period + 5)
         try:
             bars_data  = ac.get_stock_bars([symbol], timeframe="1Day", limit=limit)
-            bars       = bars_data[symbol]
+            bars       = self._get_symbol_bars(bars_data, symbol)
             if bars is None or len(bars) < period + 1:
                 return False, ""
 

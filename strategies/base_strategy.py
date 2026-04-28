@@ -14,6 +14,20 @@ class BaseStrategy(ABC):
     name: str = "base"
     asset_class: str = "stocks"   # "stocks" | "crypto" | "both"
 
+    @staticmethod
+    def _missing_symbol_error(exc: Exception) -> bool:
+        message = str(exc)
+        return isinstance(exc, KeyError) or message.startswith("'No key ") or message.startswith("No key ")
+
+    def _get_symbol_bars(self, bars_data, symbol: str):
+        """Safe lookup for bars_data (handles alpaca-py BarSet and dict)."""
+        try:
+            return bars_data[symbol]
+        except Exception as exc:
+            if self._missing_symbol_error(exc):
+                return None
+            raise
+
     @abstractmethod
     def scan(self, universe: List[str], **kwargs) -> List[Dict]:
         """

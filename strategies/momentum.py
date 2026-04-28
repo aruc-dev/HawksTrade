@@ -71,19 +71,6 @@ class MomentumStrategy(BaseStrategy):
     name        = "momentum"
     asset_class = "stocks"
 
-    @staticmethod
-    def _missing_symbol_error(exc: Exception) -> bool:
-        message = str(exc)
-        return isinstance(exc, KeyError) or message.startswith("'No key ") or message.startswith("No key ")
-
-    def _get_symbol_bars(self, bars_data, symbol: str):
-        try:
-            return bars_data[symbol]
-        except Exception as exc:
-            if self._missing_symbol_error(exc):
-                return None
-            raise
-
     def _load_symbol_bars(self, bars_data, symbol: str):
         bars = self._get_symbol_bars(bars_data, symbol)
         if bars is not None:

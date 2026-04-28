@@ -501,7 +501,14 @@ def _lookback_delta(timeframe: str, limit: int, market: str) -> timedelta:
 # ── Market Data: Stocks ──────────────────────────────────────────────────────
 
 def get_stock_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
-    """Fetch OHLCV bars for a list of stock symbols. Always split-adjusted."""
+    """
+    Fetch OHLCV bars for a list of stock symbols. Always split-adjusted.
+    Returns a plain dict: { symbol: [Bar, Bar, ...] }.
+    Chunks large requests to avoid Alpaca's 10,000-bar-per-call limit.
+    """
+    if not symbols:
+        return {}
+
     tf_map = {
         "1Min": TimeFrame(1, TimeFrameUnit.Minute),
         "5Min": TimeFrame(5, TimeFrameUnit.Minute),
@@ -510,26 +517,46 @@ def get_stock_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
         "1Day": TimeFrame.Day,
     }
     tf = tf_map.get(timeframe, TimeFrame.Day)
-    end = datetime.now(timezone.utc)
-    start = end - _lookback_delta(timeframe, limit, market="stock")
-    request_limit = limit * max(len(symbols), 1)
     
-    # Use SIP feed for live, IEX for paper (default)
+    # Chunking logic: Alpaca limits total bars per response (usually 10k).
+    # We chunk symbols to stay safely below that limit given the requested limit per symbol.
+    # 10 symbols per chunk is safe even if each has 800+ bars in the date range.
+    chunk_size = 10
+    
+    all_bars = {}
     feed = DataFeed.SIP if MODE == "live" else DataFeed.IEX
     
-    req = StockBarsRequest(
-        symbol_or_symbols=symbols,
-        timeframe=tf,
-        start=start,
-        end=end,
-        feed=feed,
-        adjustment=Adjustment.ALL,
-        limit=request_limit,
-    )
-    return call_alpaca(
-        f"stock_data.get_stock_bars[{len(symbols)}:{timeframe}]",
-        lambda: get_stock_data_client().get_stock_bars(req),
-    )
+    for i in range(0, len(symbols), chunk_size):
+        batch = symbols[i : i + chunk_size]
+        end = datetime.now(timezone.utc)
+        start = end - _lookback_delta(timeframe, limit, market="stock")
+        
+        # Use Alpaca's maximum allowed limit per request to avoid truncation.
+        # We handle symbols in chunks anyway to stay below this 10k limit.
+        request_limit = 10000
+        
+        req = StockBarsRequest(
+            symbol_or_symbols=batch,
+            timeframe=tf,
+            start=start,
+            end=end,
+            feed=feed,
+            adjustment=Adjustment.ALL,
+            limit=request_limit,
+        )
+        
+        batch_res = call_alpaca(
+            f"stock_data.get_stock_bars[{len(batch)}:{timeframe}]",
+            lambda: get_stock_data_client().get_stock_bars(req),
+        )
+        
+        # Merge BarSet.data (dict) into our master result
+        if hasattr(batch_res, "data"):
+            all_bars.update(batch_res.data)
+        elif isinstance(batch_res, dict):
+            all_bars.update(batch_res)
+
+    return all_bars
 
 
 def get_stock_latest_quote(symbol: str):
@@ -577,7 +604,14 @@ def get_stock_latest_price(symbol: str) -> float:
 # ── Market Data: Crypto ──────────────────────────────────────────────────────
 
 def get_crypto_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
-    """Fetch OHLCV bars for a list of crypto pairs (e.g. ['BTC/USD'])."""
+    """
+    Fetch OHLCV bars for a list of crypto pairs (e.g. ['BTC/USD']).
+    Returns a plain dict: { symbol: [Bar, Bar, ...] }.
+    Chunks requests to avoid Alpaca limits.
+    """
+    if not symbols:
+        return {}
+
     request_symbols = [to_crypto_pair_symbol(symbol) for symbol in symbols]
     tf_map = {
         "1Min": TimeFrame(1, TimeFrameUnit.Minute),
@@ -588,20 +622,37 @@ def get_crypto_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
         "1Day": TimeFrame.Day,
     }
     tf = tf_map.get(timeframe, TimeFrame.Day)
-    end = datetime.now(timezone.utc)
-    start = end - _lookback_delta(timeframe, limit, market="crypto")
-    request_limit = limit * max(len(request_symbols), 1)
-    req = CryptoBarsRequest(
-        symbol_or_symbols=request_symbols,
-        timeframe=tf,
-        start=start,
-        end=end,
-        limit=request_limit,
-    )
-    return call_alpaca(
-        f"crypto_data.get_crypto_bars[{len(request_symbols)}:{timeframe}]",
-        lambda: get_crypto_data_client().get_crypto_bars(req),
-    )
+    
+    chunk_size = 10
+    
+    all_bars = {}
+    
+    for i in range(0, len(request_symbols), chunk_size):
+        batch = request_symbols[i : i + chunk_size]
+        end = datetime.now(timezone.utc)
+        start = end - _lookback_delta(timeframe, limit, market="crypto")
+        
+        # Use safe high limit
+        request_limit = 10000
+        
+        req = CryptoBarsRequest(
+            symbol_or_symbols=batch,
+            timeframe=tf,
+            start=start,
+            end=end,
+            limit=request_limit,
+        )
+        batch_res = call_alpaca(
+            f"crypto_data.get_crypto_bars[{len(batch)}:{timeframe}]",
+            lambda: get_crypto_data_client().get_crypto_bars(req),
+        )
+        
+        if hasattr(batch_res, "data"):
+            all_bars.update(batch_res.data)
+        elif isinstance(batch_res, dict):
+            all_bars.update(batch_res)
+            
+    return all_bars
 
 
 def get_crypto_latest_price(symbol: str) -> float:
