@@ -351,6 +351,44 @@ class RunScanTests(unittest.TestCase):
 
         exit_position.assert_called_once()
 
+    # ── Market-closed guard ───────────────────────────────────────────────────
+
+    def test_hold_day_exit_skipped_for_stock_when_market_closed(self):
+        open_trade = {
+            "symbol": "AAPL",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "entry_price": "100",
+        }
+
+        with (
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "get_trade_age_days", return_value=5),
+            patch.object(run_scan, "_latest_price_for_trade", return_value=99),
+            patch.object(run_scan, "_estimate_peak_price_since_entry", return_value=104),
+            patch.object(run_scan.oe, "exit_position") as exit_position,
+        ):
+            run_scan._check_hold_day_exits([], dry_run=True, market_open=False)
+
+        exit_position.assert_not_called()
+
+    def test_hold_day_exit_proceeds_for_crypto_when_market_closed(self):
+        open_trade = {
+            "symbol": "BTC/USD",
+            "strategy": "range_breakout",
+            "asset_class": "crypto",
+            "entry_price": "50000",
+        }
+
+        with (
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "get_trade_age_days", return_value=4),
+            patch.object(run_scan.oe, "exit_position") as exit_position,
+        ):
+            run_scan._check_hold_day_exits([], dry_run=True, market_open=False)
+
+        exit_position.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

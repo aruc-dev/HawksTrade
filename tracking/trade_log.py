@@ -11,7 +11,7 @@ import csv
 import contextlib
 import logging
 from decimal import Decimal, InvalidOperation
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Iterable, Iterator
 
@@ -582,8 +582,27 @@ def update_high_water_prices(symbol_prices: dict) -> None:
                 writer.writerows(rows)
 
 
+def _business_days_between(start: date, end: date) -> int:
+    """Count Mon–Fri business days in [start, end). Same semantics as np.busday_count."""
+    if end <= start:
+        return 0
+    total = (end - start).days
+    full_weeks, remainder = divmod(total, 7)
+    days = full_weeks * 5
+    start_dow = start.weekday()  # 0=Monday … 6=Sunday
+    for i in range(remainder):
+        if (start_dow + i) % 7 < 5:
+            days += 1
+    return days
+
+
 def get_trade_age_days(symbol: str) -> float:
-    """Return how many calendar days ago the most recent open trade was entered."""
+    """Return trade age for the most recent open position.
+
+    Stocks use business days (Mon–Fri) to match the backtest simulator, so a
+    Thursday entry that spans a weekend reaches ``hold_days=4`` on Wednesday,
+    not Monday.  Crypto positions use calendar days (24/7 market).
+    """
     entries = [
         row for row in get_open_trades()
         if _symbols_match(row.get("symbol", ""), symbol) and row.get("side") == "buy"
@@ -592,5 +611,15 @@ def get_trade_age_days(symbol: str) -> float:
         return 0.0
     latest = sorted(entries, key=lambda x: x["timestamp"])[-1]
     entry_dt = _as_utc(datetime.fromisoformat(latest["timestamp"]))
-    delta    = _utc_now() - entry_dt
-    return delta.total_seconds() / 86400
+
+    asset_class = latest.get("asset_class", "stock")
+    is_crypto = "crypto" in str(asset_class).lower()
+
+    if is_crypto:
+        delta = _utc_now() - entry_dt
+        return max(delta.total_seconds() / 86400, 0.0)
+
+    # Business days for stocks — matches np.busday_count(entry_date, today)
+    entry_date = entry_dt.date()
+    today = _utc_now().date()
+    return float(max(_business_days_between(entry_date, today), 0))

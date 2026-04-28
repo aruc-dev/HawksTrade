@@ -239,14 +239,33 @@ def _estimate_peak_price_since_entry(symbol: str, asset_class: str, current_pric
         return current_price
 
 
-def _check_hold_day_exits(open_symbols: list, dry_run: bool = False, marker: RunScope | None = None):
-    """Exit any swing trade that has been held beyond its target hold_days."""
+def _check_hold_day_exits(
+    open_symbols: list,
+    dry_run: bool = False,
+    marker: RunScope | None = None,
+    market_open: bool = True,
+):
+    """Exit any swing trade that has been held beyond its target hold_days.
+
+    market_open: when False, stock (non-crypto) exits are skipped so that
+    crypto-only overnight scans cannot submit stock sell orders outside
+    regular market hours.
+    """
     open_trades = get_open_trades()
     for trade in open_trades:
         symbol   = trade["symbol"]
         strategy = trade["strategy"]
         if strategy not in HOLD_DAYS:
             continue
+
+        asset_class = trade.get("asset_class", "stock")
+        is_crypto = "crypto" in str(asset_class).lower()
+        if not is_crypto and not market_open:
+            log.debug(
+                f"Market closed; deferring hold-day check for stock position {symbol}."
+            )
+            continue
+
         target_days = HOLD_DAYS[strategy]
         age_days    = get_trade_age_days(symbol)
         if age_days >= target_days:
@@ -483,7 +502,7 @@ def run(
 
     # --- Hold-day expiry exits ---
     log.info("--- Checking hold-day expiry ---")
-    _check_hold_day_exits(open_symbols, dry_run=dry_run, marker=marker)
+    _check_hold_day_exits(open_symbols, dry_run=dry_run, marker=marker, market_open=market_open)
 
     _reconcile_trade_log_after_run(marker, dry_run)
 

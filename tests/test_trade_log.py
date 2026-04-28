@@ -376,11 +376,13 @@ class TradeLogTests(unittest.TestCase):
         self.assertEqual(rows[1]["entry_price"], "0")
         self.assertEqual(rows[1]["pnl_pct"], "")
 
-    def test_get_trade_age_days_accepts_timezone_aware_timestamp(self):
-        timestamp = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    def test_get_trade_age_days_returns_business_days_for_stocks(self):
+        # Entry Monday 2024-01-08, "today" = Wednesday 2024-01-10 → 2 business days
+        fixed_now = datetime(2024, 1, 10, 12, 0, 0, tzinfo=timezone.utc)
+        entry_ts  = datetime(2024, 1,  8,  9, 0, 0, tzinfo=timezone.utc).isoformat()
 
         trade_log.log_trade({
-            "timestamp": timestamp,
+            "timestamp": entry_ts,
             "mode": "paper",
             "symbol": "AAPL",
             "strategy": "momentum",
@@ -388,14 +390,38 @@ class TradeLogTests(unittest.TestCase):
             "side": "buy",
             "qty": 1,
             "entry_price": 100,
-            "order_id": "aware",
+            "order_id": "bday-test",
             "status": "open",
         })
 
-        age = trade_log.get_trade_age_days("AAPL")
+        with mock.patch("tracking.trade_log._utc_now", return_value=fixed_now):
+            age = trade_log.get_trade_age_days("AAPL")
 
-        self.assertGreater(age, 1.9)
-        self.assertLess(age, 2.1)
+        self.assertEqual(age, 2.0)
+
+    def test_get_trade_age_days_weekends_not_counted_for_stocks(self):
+        # Entry Thursday 2024-01-04, "today" = Monday 2024-01-08 → 2 business days (Thu, Fri)
+        fixed_now = datetime(2024, 1,  8, 12, 0, 0, tzinfo=timezone.utc)
+        entry_ts  = datetime(2024, 1,  4,  9, 0, 0, tzinfo=timezone.utc).isoformat()
+
+        trade_log.log_trade({
+            "timestamp": entry_ts,
+            "mode": "paper",
+            "symbol": "MSFT",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "side": "buy",
+            "qty": 1,
+            "entry_price": 200,
+            "order_id": "weekend-test",
+            "status": "open",
+        })
+
+        with mock.patch("tracking.trade_log._utc_now", return_value=fixed_now):
+            age = trade_log.get_trade_age_days("MSFT")
+
+        # 4 calendar days but only 2 business days (Sat+Sun excluded)
+        self.assertEqual(age, 2.0)
 
     def test_get_trade_age_days_matches_crypto_symbol_variants(self):
         timestamp = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
