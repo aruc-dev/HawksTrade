@@ -146,7 +146,7 @@ class GapUpStrategy(BaseStrategy):
                                     "strategy":    self.name,
                                     "asset_class": self.asset_class,
                                     "confidence":  confidence,
-                                    "atr_stop":    atr_stop,
+                                    "atr_stop_price": atr_stop,
                                     "atr_risk_qty": qty,
                                     "reason":      (
                                         f"Gap-up {gap_pct:.2%} | vol={today_vol/avg_vol_20:.1f}x | "

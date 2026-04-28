@@ -138,7 +138,7 @@ class RangeBreakoutStrategy(BaseStrategy):
                                 "strategy":    self.name,
                                 "asset_class": self.asset_class,
                                 "confidence":  round(min(excess_pct / 0.02, 1.0), 3),
-                                "atr_stop":    atr_stop,
+                                "atr_stop_price": atr_stop,
                                 "atr_risk_qty": qty,
                                 "reason":      (
                                     f"Breakout above prior high {prev_high:.4f} | "
