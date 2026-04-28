@@ -312,18 +312,19 @@ def enter_position(
         sl = atr_stop_price if (atr_stop_price is not None and atr_stop_price < global_sl) else global_sl
         tp = rm.take_profit_price(entry_price)
         trade = {
-            "timestamp":   _utc_now().isoformat(),
-            "mode":        MODE,
-            "symbol":      symbol,
-            "strategy":    strategy,
-            "asset_class": asset_class,
-            "side":        "buy",
-            "qty":         logged_qty,
-            "entry_price": entry_price,
-            "stop_loss":   sl,
-            "take_profit": tp,
-            "order_id":    order_id,
-            "status":      action_status,
+            "timestamp":        _utc_now().isoformat(),
+            "mode":             MODE,
+            "symbol":           symbol,
+            "strategy":         strategy,
+            "asset_class":      asset_class,
+            "side":             "buy",
+            "qty":              logged_qty,
+            "entry_price":      entry_price,
+            "stop_loss":        sl,
+            "take_profit":      tp,
+            "high_water_price": entry_price,
+            "order_id":         order_id,
+            "status":           action_status,
         }
         log_trade(trade)
         if action_status == "open":

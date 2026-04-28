@@ -260,7 +260,14 @@ def _check_hold_day_exits(open_symbols: list, dry_run: bool = False, marker: Run
                 if current_price <= 0:
                     log.warning(f"Skipping momentum hold check for {symbol}: invalid current price {current_price}.")
                     continue
-                peak_price = _estimate_peak_price_since_entry(symbol, asset_class, current_price, age_days)
+                high_water_raw = trade.get("high_water_price")
+                if high_water_raw and str(high_water_raw).strip() not in ("", "nan"):
+                    try:
+                        peak_price = float(high_water_raw)
+                    except (ValueError, TypeError):
+                        peak_price = _estimate_peak_price_since_entry(symbol, asset_class, current_price, age_days)
+                else:
+                    peak_price = _estimate_peak_price_since_entry(symbol, asset_class, current_price, age_days)
                 should_exit, reason = should_exit_for_hold(
                     strategy=strategy,
                     age_days=age_days,

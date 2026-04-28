@@ -40,9 +40,15 @@ filtering:
 3. **Phase 3 — Market Breadth Tiered Regime Guard**: Computes what fraction of
    the scan universe trades above its own SMA50 (`rm.market_breadth_pct`):
    - **Red** (SPY < SMA50 OR breadth < 25%): no new entries.
-   - **Yellow** (breadth < 40%): reduced deployment, up to `yellow_max_positions: 3`.
+   - **Yellow** (breadth < 40%): reduced deployment, up to `yellow_max_positions: 2`.
    - **Green** (breadth ≥ 50%): full `top_n: 3` deployment.
    - **Yellow** label also applies when breadth is in [40%, 50%) — full deployment still active.
+
+**Volume Confirmation (per-signal):** Each candidate must have entry-bar volume ≥ 80% of
+its 20-day average volume (`min_volume_ratio: 0.8`). Signals where today's volume is
+suspiciously thin — a common trait of exhaustion moves — are skipped. The screener
+provides a separate 20-day ADV baseline at universe construction time; this check adds
+a per-signal guard at scan time.
 
 **Exit:** Three-layer policy:
 - After the minimum 4-day hold, flat or losing trades exit immediately.
@@ -72,7 +78,8 @@ room while the global 3.5% stop remains the absolute floor.
 | `breadth_green_threshold` | 50% |
 | `breadth_yellow_threshold` | 40% |
 | `breadth_red_threshold` | 25% |
-| `yellow_max_positions` | 3 |
+| `yellow_max_positions` | 2 |
+| `min_volume_ratio` | 0.8 (entry bar ≥ 80% of 20-day avg volume) |
 
 **Regime filters:**
 - SPY > SMA50 (hard requirement; Red if fails).

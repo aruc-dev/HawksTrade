@@ -114,7 +114,7 @@ strategies:
   momentum:
     enabled: true
     asset_class: stocks          # stocks | crypto | both
-    description: "Adaptive momentum: ATR-adjusted stops, 1% risk sizing, sector-neutral ranking, breadth-tiered regime"
+    description: "Adaptive momentum: ATR-adjusted stops, 1% risk sizing, sector-neutral ranking, breadth-tiered regime, volume-confirmed entry (>=80% of 20d avg)"
     top_n: 3                     # Pick top 3 stocks by momentum
     hold_days: 4                 # Minimum hold before profit-aware exit checks
     exit_policy: "profit_trailing" # fixed_hold | profit_trailing | risk_only_baseline
@@ -134,7 +134,8 @@ strategies:
     breadth_green_threshold: 0.50  # >= 50% above SMA50 → "Green" label (full top_n deployed)
     breadth_yellow_threshold: 0.40 # >= 40% above SMA50 → full top_n deployed; < 40% → reduced deployment
     breadth_red_threshold: 0.25    # < 25% above SMA50 → no new entries
-    yellow_max_positions: 3        # Max new positions entered when breadth < yellow_threshold
+    yellow_max_positions: 2        # Max new positions entered when breadth < yellow_threshold (must be < top_n to have effect)
+    min_volume_ratio: 0.8          # Entry bar volume must be >= 80% of 20-day average (0 = disabled)
 
   rsi_reversion:
     enabled: true

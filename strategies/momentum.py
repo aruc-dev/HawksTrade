@@ -161,6 +161,20 @@ class MomentumStrategy(BaseStrategy):
                 if momentum < SCFG["min_momentum_pct"]:
                     continue
 
+                # Volume confirmation: reject exhaustion moves on thin volume
+                min_vol_ratio = float(SCFG.get("min_volume_ratio", 0.0))
+                if min_vol_ratio > 0 and len(bars) >= 21:
+                    avg_vol_20d = sum(
+                        float(getattr(b, "volume", 0) or 0) for b in bars[-21:-1]
+                    ) / 20
+                    latest_vol = float(getattr(bars[-1], "volume", 0) or 0)
+                    if avg_vol_20d > 0 and latest_vol < min_vol_ratio * avg_vol_20d:
+                        log.debug(
+                            f"[Momentum] {symbol} skipped: volume {latest_vol:.0f} "
+                            f"< {min_vol_ratio:.0%} × avg20d {avg_vol_20d:.0f}"
+                        )
+                        continue
+
                 # Phase 1: ATR stop price
                 atr = _calc_atr(bars, period=atr_period) if len(bars) >= atr_period + 1 else 0.0
                 atr_stop = round(price_now - atr_mult * atr, 4) if atr > 0 else None

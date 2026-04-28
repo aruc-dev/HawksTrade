@@ -337,6 +337,70 @@ class MomentumStrategyTests(unittest.TestCase):
 
         self.assertEqual(len(signals), 1)
 
+    # ── Volume confirmation ───────────────────────────────────────────────────
+
+    def test_scan_skips_signal_when_entry_volume_is_below_ratio(self):
+        # 20 history bars with volume=1000, entry bar volume=500 → 50% of avg → below 0.8 threshold
+        history = [_bar(100 + i, volume=1000) for i in range(20)]
+        entry_bar = _bar(125, volume=500)  # 5-day ago index bars[-6] = history[14]
+        bars = history + [entry_bar]
+        bars_resp = {"AAPL": bars}
+
+        mock_cfg = {
+            "strategies": {
+                "momentum": {
+                    "enabled": True, "top_n": 3, "min_momentum_pct": 0.06,
+                    "risk_per_trade_pct": 0.01, "atr_period": 14, "atr_multiplier": 2.0,
+                    "max_positions_per_sector": 1, "breadth_green_threshold": 0.50,
+                    "breadth_yellow_threshold": 0.40, "breadth_red_threshold": 0.25,
+                    "yellow_max_positions": 2, "min_volume_ratio": 0.8,
+                }
+            },
+            "trading": {"min_trade_value_usd": 10.0}
+        }
+
+        with (
+            patch("strategies.momentum.ac.get_stock_bars", return_value=bars_resp),
+            patch("strategies.momentum.rm.market_regime_ok", return_value=True),
+            patch("strategies.momentum.rm.market_breadth_pct", return_value=0.6),
+            patch("strategies.momentum.ac.get_portfolio_value", return_value=10000.0),
+            patch("strategies.momentum.CFG", mock_cfg),
+        ):
+            signals = MomentumStrategy().scan(["AAPL"])
+
+        self.assertEqual(signals, [], "Low-volume entry bar should be filtered out")
+
+    def test_scan_passes_signal_when_entry_volume_meets_ratio(self):
+        # 20 history bars with volume=1000, entry bar volume=900 → 90% of avg → above 0.8 threshold
+        history = [_bar(100 + i, volume=1000) for i in range(20)]
+        entry_bar = _bar(125, volume=900)
+        bars = history + [entry_bar]
+        bars_resp = {"AAPL": bars}
+
+        mock_cfg = {
+            "strategies": {
+                "momentum": {
+                    "enabled": True, "top_n": 3, "min_momentum_pct": 0.06,
+                    "risk_per_trade_pct": 0.01, "atr_period": 14, "atr_multiplier": 2.0,
+                    "max_positions_per_sector": 1, "breadth_green_threshold": 0.50,
+                    "breadth_yellow_threshold": 0.40, "breadth_red_threshold": 0.25,
+                    "yellow_max_positions": 2, "min_volume_ratio": 0.8,
+                }
+            },
+            "trading": {"min_trade_value_usd": 10.0}
+        }
+
+        with (
+            patch("strategies.momentum.ac.get_stock_bars", return_value=bars_resp),
+            patch("strategies.momentum.rm.market_regime_ok", return_value=True),
+            patch("strategies.momentum.rm.market_breadth_pct", return_value=0.6),
+            patch("strategies.momentum.ac.get_portfolio_value", return_value=10000.0),
+            patch("strategies.momentum.CFG", mock_cfg),
+        ):
+            signals = MomentumStrategy().scan(["AAPL"])
+
+        self.assertEqual(len(signals), 1, "Sufficient entry-bar volume should produce a signal")
+
 
 if __name__ == "__main__":
     unittest.main()

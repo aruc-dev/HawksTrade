@@ -183,7 +183,7 @@ def _apply_close_to_matching_buy_rows(
 COLUMNS = [
     "timestamp", "mode", "symbol", "strategy", "asset_class",
     "side", "qty", "entry_price", "exit_price", "stop_loss",
-    "take_profit", "pnl_pct", "exit_reason", "order_id", "status",
+    "take_profit", "high_water_price", "pnl_pct", "exit_reason", "order_id", "status",
 ]
 
 
@@ -531,6 +531,55 @@ def reconcile_open_trades_with_positions(
 
     log.info(f"Trade log reconciliation complete: {summary}")
     return summary
+
+
+def update_high_water_prices(symbol_prices: dict) -> None:
+    """
+    Batch-update high_water_price for open buy rows to the running maximum.
+
+    Called from run_risk_check after each price-poll cycle. A single file
+    rewrite handles all positions so the call is O(1) rewrites regardless of
+    how many positions are open.
+
+    Rows that have never had high_water_price set (positions opened before
+    this column was added) are initialised to the current price on first call.
+    """
+    if not symbol_prices:
+        return
+    with locked_trade_log(exclusive=True) as trade_log_path:
+        rows = _read_rows_unlocked(trade_log_path)
+        changed = False
+        for row in rows:
+            if row.get("side") != "buy" or row.get("status") not in ACTIVE_ENTRY_STATUSES:
+                continue
+            symbol = row.get("symbol", "")
+            price: float | None = None
+            for sym, p in symbol_prices.items():
+                if _symbols_match(sym, symbol):
+                    price = float(p)
+                    break
+            if price is None or price <= 0:
+                continue
+            raw = row.get("high_water_price", "")
+            try:
+                current_hwp = float(raw) if raw and raw != "" else None
+            except (ValueError, TypeError):
+                current_hwp = None
+            if current_hwp is None:
+                # Initialise from entry_price for backward-compat rows
+                try:
+                    current_hwp = float(row.get("entry_price", 0) or 0)
+                except (ValueError, TypeError):
+                    current_hwp = 0.0
+            new_hwp = max(current_hwp, price)
+            if new_hwp != current_hwp:
+                row["high_water_price"] = round(new_hwp, 4)
+                changed = True
+        if changed:
+            with open(trade_log_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=COLUMNS)
+                writer.writeheader()
+                writer.writerows(rows)
 
 
 def get_trade_age_days(symbol: str) -> float:

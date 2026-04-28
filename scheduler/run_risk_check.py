@@ -30,7 +30,7 @@ from core import order_executor as oe
 from core.run_markers import RunScope, run_scope
 from core.logging_config import runtime_log_handlers
 from scheduler.reconcile_trade_log import safe_reconcile
-from tracking.trade_log import get_open_trades
+from tracking.trade_log import get_open_trades, update_high_water_prices
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 LOG_DIR  = BASE_DIR / "logs"
@@ -413,6 +413,8 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
 
     _prune_price_failures_for_positions(positions)
 
+    observed_prices: dict[str, float] = {}
+
     for pos in positions:
         symbol      = pos.symbol
         asset_class = _position_asset_class(pos)
@@ -464,6 +466,7 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
             continue
 
         _clear_price_failure(symbol)
+        observed_prices[symbol] = current_price
 
         # Use the ATR/custom stop recorded at entry only when it actually differs
         # from what the global stop would have been — i.e. the strategy widened
@@ -492,6 +495,9 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
             pnl = (current_price - entry_price) / entry_price
             log.info(f"  {symbol:<12} entry={entry_price:.4f} now={current_price:.4f} "
                      f"P&L={pnl:+.2%} — HOLD")
+
+    if observed_prices and not dry_run:
+        update_high_water_prices(observed_prices)
 
     _reconcile_trade_log_after_run(marker, dry_run, positions=positions)
 
