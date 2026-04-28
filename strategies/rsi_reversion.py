@@ -64,7 +64,10 @@ def _in_severe_crash(bars_data=None) -> bool:
             if spy_bars is None or len(spy_bars) < 252:
                 log.warning("[RSI] Insufficient SPY bars for crash check — blocking (fail closed).")
                 return True
-            closes = pd.Series([b.close for b in spy_bars])
+            closes = pd.Series([
+                float(b.close) if hasattr(b, "close") else float(b["close"])
+                for b in spy_bars
+            ])
 
         peak = closes.rolling(252).max().iloc[-1]
         current = float(closes.iloc[-1])
@@ -107,7 +110,10 @@ def _in_high_volatility_regime(
             if spy_bars is None or len(spy_bars) < required:
                 log.warning("[RSI] Insufficient SPY bars for VIX filter — blocking (fail closed).")
                 return True
-            closes = pd.Series([b.close for b in spy_bars])
+            closes = pd.Series([
+                float(b.close) if hasattr(b, "close") else float(b["close"])
+                for b in spy_bars
+            ])
 
         returns   = closes.pct_change().dropna()
         hv_series = returns.rolling(hv_period).std() * np.sqrt(252)
