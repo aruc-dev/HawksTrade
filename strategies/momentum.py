@@ -141,6 +141,30 @@ class MomentumStrategy(BaseStrategy):
             f"top_n={effective_top_n}"
         )
 
+        # --- Calculate SPY Momentum for Alpha (Recommendation 2) ---
+        spy_momentum = 0.0
+        try:
+            s_bars = None
+            if regime_bars and "SPY" in regime_bars:
+                s_bars = regime_bars["SPY"]
+            else:
+                # Fallback fetch for SPY if not in regime_bars
+                raw_spy = ac.get_stock_bars(["SPY"], timeframe="1Day", limit=25)
+                s_bars = raw_spy.get("SPY")
+
+            if s_bars and len(s_bars) >= 8:
+                s_closes = pd.Series([
+                    float(b.close) if hasattr(b, "close") else float(b["close"])
+                    for b in s_bars
+                ])
+                s_avg_now = s_closes.iloc[-2:].mean()
+                s_avg_then = s_closes.iloc[-8:-5].mean()
+                if s_avg_then > 0:
+                    spy_momentum = (s_avg_now - s_avg_then) / s_avg_then
+                    log.debug(f"[Momentum] SPY 5d-smoothed momentum: {spy_momentum:.2%}")
+        except Exception as e:
+            log.warning(f"[Momentum] Failed to calculate SPY momentum for Alpha: {e}")
+
         # --- Score candidates ---
         scores = []
         atr_period = int(SCFG.get("atr_period", 14))
@@ -149,31 +173,35 @@ class MomentumStrategy(BaseStrategy):
         for symbol in universe:
             try:
                 bars = self._load_symbol_bars(bars_data, symbol)
-                if bars is None or len(bars) < 6:
+                if bars is None or len(bars) < 21: # Need 21 for avg volume
                     continue
 
-                price_now    = float(bars[-1].close)
-                price_5d_ago = float(bars[-6].close)
-                if price_5d_ago <= 0:
+                # 1. Smoothed Lookback (Recommendation 1)
+                closes = pd.Series([float(b.close) for b in bars])
+                if len(closes) < 8:
                     continue
-                momentum = (price_now - price_5d_ago) / price_5d_ago
+                avg_now = closes.iloc[-2:].mean()
+                avg_then = closes.iloc[-8:-5].mean()
+                if avg_then <= 0:
+                    continue
+                
+                momentum = (avg_now - avg_then) / avg_then
+                price_now = float(closes.iloc[-1])
+
+                # 2. Alpha (Recommendation 2)
+                alpha = momentum - spy_momentum
 
                 if momentum < SCFG["min_momentum_pct"]:
                     continue
 
-                # Volume confirmation: reject exhaustion moves on thin volume
-                min_vol_ratio = float(SCFG.get("min_volume_ratio", 0.0))
-                if min_vol_ratio > 0 and len(bars) >= 21:
-                    avg_vol_20d = sum(
-                        float(getattr(b, "volume", 0) or 0) for b in bars[-21:-1]
-                    ) / 20
-                    latest_vol = float(getattr(bars[-1], "volume", 0) or 0)
-                    if avg_vol_20d > 0 and latest_vol < min_vol_ratio * avg_vol_20d:
-                        log.debug(
-                            f"[Momentum] {symbol} skipped: volume {latest_vol:.0f} "
-                            f"< {min_vol_ratio:.0%} × avg20d {avg_vol_20d:.0f}"
-                        )
-                        continue
+                # 3. Volume Confirmation (Recommendation 3)
+                # Ensure current volume is > 1.2x the 20-day average
+                volumes = pd.Series([float(b.volume) for b in bars])
+                avg_vol_20 = volumes.iloc[-21:-1].mean()
+                curr_vol = float(bars[-1].volume)
+                if avg_vol_20 > 0 and curr_vol <= 1.2 * avg_vol_20:
+                    log.debug(f"[Momentum] {symbol} skipped: volume confirmation failed ({curr_vol:.0f} <= 1.2x {avg_vol_20:.0f})")
+                    continue
 
                 # Phase 1: ATR stop price
                 atr = _calc_atr(bars, period=atr_period) if len(bars) >= atr_period + 1 else 0.0
@@ -182,6 +210,7 @@ class MomentumStrategy(BaseStrategy):
                 scores.append({
                     "symbol":        symbol,
                     "momentum":      momentum,
+                    "alpha":         alpha,
                     "price":         price_now,
                     "atr":           atr,
                     "atr_stop":      atr_stop,
@@ -195,7 +224,7 @@ class MomentumStrategy(BaseStrategy):
             return []
 
         # --- Phase 2: Sector-neutral ranking ---
-        scores.sort(key=lambda x: x["momentum"], reverse=True)
+        scores.sort(key=lambda x: x["alpha"], reverse=True)
         max_per_sector = int(SCFG.get("max_positions_per_sector", 1))
         top = _sector_filtered_top_n(scores, effective_top_n, max_per_sector)
 
@@ -234,8 +263,10 @@ class MomentumStrategy(BaseStrategy):
                 "action":     "buy",
                 "strategy":   self.name,
                 "asset_class": self.asset_class,
-                "confidence": min(s["momentum"] / 0.10, 1.0),
-                "reason":     f"5-day momentum: {s['momentum']:.2%}",
+                "confidence": round(min(s["momentum"] / 0.10, 1.0), 3),
+                "momentum_score": round(s["momentum"], 4),
+                "alpha_score":    round(s["alpha"], 4),
+                "reason":     f"Alpha momentum: {s['alpha']:.1%} (Absolute {s['momentum']:.1%})",
             }
             if atr_stop is not None:
                 sig["atr_stop_price"] = atr_stop
@@ -243,8 +274,8 @@ class MomentumStrategy(BaseStrategy):
                 sig["atr_risk_qty"] = atr_risk_qty
 
             log.info(
-                f"[Momentum] Signal: BUY {s['symbol']} | momentum={s['momentum']:.2%} "
-                f"| sector={get_sector(s['symbol'])} "
+                f"[Momentum] Signal: BUY {s['symbol']} | Alpha={s['alpha']:.1%} "
+                f"| Momentum={s['momentum']:.1%} | sector={get_sector(s['symbol'])} "
                 f"| atr_stop={atr_stop} | risk_qty={atr_risk_qty}"
             )
             signals.append(sig)
