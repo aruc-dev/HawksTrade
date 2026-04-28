@@ -16,7 +16,7 @@ from pathlib import Path
 import pandas as pd
 
 from strategies.base_strategy import BaseStrategy
-from strategies.rsi_reversion import _calc_rsi
+from strategies.rsi_reversion import _calc_rsi, _calc_atr
 from core import alpaca_client as ac
 from core import risk_manager as rm
 from core.config_loader import get_config
@@ -30,27 +30,6 @@ log  = logging.getLogger("strategy.ma_crossover")
 
 def _ema(series: pd.Series, span: int) -> pd.Series:
     return series.ewm(span=span, adjust=False).mean()
-
-
-def _calc_atr(bars, period: int = 14) -> float:
-    """
-    Compute ATR(period) from a bar list.
-    True Range = max(high-low, |high-prev_close|, |low-prev_close|).
-    Returns ATR as an absolute price value.
-    """
-    highs  = pd.Series([float(b.high)  if hasattr(b, "high")  else float(b["high"])  for b in bars])
-    lows   = pd.Series([float(b.low)   if hasattr(b, "low")   else float(b["low"])   for b in bars])
-    closes = pd.Series([float(b.close) if hasattr(b, "close") else float(b["close"]) for b in bars])
-
-    prev_close = closes.shift(1)
-    tr = pd.concat([
-        highs - lows,
-        (highs - prev_close).abs(),
-        (lows  - prev_close).abs(),
-    ], axis=1).max(axis=1)
-
-    atr = tr.ewm(span=period, min_periods=period).mean()
-    return float(atr.iloc[-1])
 
 
 def _detect_crossover(fast: pd.Series, slow: pd.Series) -> str:
