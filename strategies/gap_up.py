@@ -17,7 +17,6 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-import numpy as np
 
 from strategies.base_strategy import BaseStrategy
 from strategies.rsi_reversion import _calc_atr
