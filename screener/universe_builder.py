@@ -1,8 +1,13 @@
+import json
 import logging
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
+
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 log = logging.getLogger("screener")
 
@@ -19,7 +24,7 @@ class UniverseBuilder:
         self.ac = alpaca_client
         self._asset_cache: Optional[List[str]] = None       # broad symbol list (session-level)
         self._universe_cache: Dict[str, List[str]] = {}     # date -> qualified symbols
-        self._historical_bars: Dict[str, object] = {}       # symbol -> bars df (backtest)
+        self._historical_bars: Optional[Dict[str, object]] = None  # symbol -> bars df (backtest)
 
         # Screening parameters (can be overridden from config)
         screener_cfg = config.get("screener", {})
@@ -59,12 +64,13 @@ class UniverseBuilder:
         if date_key in self._universe_cache:
             return self._universe_cache[date_key]
 
-        if self._historical_bars:
+        if self._historical_bars is not None:
             # Backtest mode: derive universe from injected historical bars
             qualified = self._screen_from_bars(self._historical_bars, as_of_date)
         else:
-            # Live mode: fetch from Alpaca
-            qualified = self._screen_live()
+            # Live mode: use pre-computed universe file if available, else fetch from Alpaca
+            precomputed = self._load_precomputed_universe(date_key)
+            qualified = precomputed if precomputed is not None else self._screen_live()
 
         # Always merge legacy universe (so existing 20 symbols are never dropped)
         result = list(dict.fromkeys(qualified + self.legacy_universe))  # dedup, preserve order
@@ -74,6 +80,25 @@ class UniverseBuilder:
                  f"({len(qualified)} dynamic + {len(self.legacy_universe)} legacy, "
                  f"deduped to {len(result)})")
         return result
+
+    def _load_precomputed_universe(self, date_key: str) -> Optional[List[str]]:
+        """Load a pre-computed universe file written by run_screener.py, if available."""
+        universe_path = BASE_DIR / "data" / f"universe_{date_key}.json"
+        if not universe_path.exists():
+            return None
+        try:
+            with open(universe_path, "r") as f:
+                data = json.load(f)
+            symbols = data.get("symbols")
+            if isinstance(symbols, list) and symbols:
+                log.info(
+                    f"[Screener] Loaded pre-computed universe for {date_key}: "
+                    f"{len(symbols)} symbols from {universe_path.name}"
+                )
+                return symbols
+        except Exception as e:
+            log.warning(f"[Screener] Could not read pre-computed universe at {universe_path}: {e}")
+        return None
 
     def _screen_from_bars(self, bars_data: Dict, as_of_date: datetime) -> List[str]:
         """Screen using pre-fetched historical bars (backtest mode)."""
