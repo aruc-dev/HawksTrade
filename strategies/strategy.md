@@ -143,6 +143,12 @@ governs whenever the ATR stop is tighter or absent.
 - Crash filter: skip if SPY is >20% below its 252-day peak.
 - VIX proxy: skip if SPY realised HV(20) > 200-day HV MA × `vix_multiplier` (default: 1.2).
 
+**Enablement gate:** This strategy remains disabled by default until
+`python3 scheduler/run_validation_gate.py --profile rsi` passes. The gate
+requires cost-aware backtest performance plus at least 60 paper-trading days,
+20 closed RSI trades, 48% win rate, 1.15 profit factor, +2% aggregate paper
+return, and max drawdown no worse than 4%.
+
 ---
 
 ## 3. Gap-Up *(Stocks — Disabled)*

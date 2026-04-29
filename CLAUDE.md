@@ -194,6 +194,7 @@ The AI agent should run these scripts on this schedule:
 | `scheduler/run_risk_check.py` | Stop-loss / take-profit enforcement | none |
 | `scheduler/run_report.py` | Performance & portfolio report | `--weekly` |
 | `scheduler/run_backtest.py` | Historical strategy simulation | `--days`, `--fund`, `--exit-policy`, `--screener`, `--no-screener`, `--strategies`, `--set` |
+| `scheduler/run_validation_gate.py` | Cost-aware production readiness gates | `--profile production`, `--profile rsi`, `--profile all` |
 
 ---
 
@@ -212,6 +213,7 @@ Each can be individually enabled/disabled.
 
 Momentum backtests can compare `--exit-policy fixed_hold`, `--exit-policy profit_trailing`, and `--exit-policy risk_only_baseline`. Use `risk_only_baseline` only as a benchmark for the old no-hold-exit behavior, not as the default live policy.
 Use `--strategies momentum,ma_crossover,range_breakout` and repeated `--set key.path=value` arguments for backtest-only strategy experiments without editing `config/config.yaml`.
+Run `python3 scheduler/run_validation_gate.py --profile production` before scaling live capital. Run `python3 scheduler/run_validation_gate.py --profile rsi` before enabling RSI Reversion by default.
 
 ---
 

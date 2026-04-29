@@ -110,9 +110,30 @@ python3 scheduler/run_risk_check.py --dry-run
 python3 scheduler/run_report.py
 python3 scheduler/run_backtest.py --days 30 --fund 10000
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/10/2026 --exit-policy profit_trailing --screener
+python3 scheduler/run_validation_gate.py --profile production
 ```
 
 All checks passed at the time this document was updated.
+
+The production validation gate is cost-aware. Its default model assumes 10 bps
+adverse slippage and 5 bps fees per side. Required gates cover the default
+12-month and 6-month windows plus a 12-month crypto-sleeve window. The latest
+30-day crypto-sleeve window is tracked as a watch-only gate because the current
+365-day crypto sleeve remains profitable but recent MA Crossover and Range
+Breakout trades were weak.
+
+Latest production-gate result:
+
+| Gate | Result | Return | Max Drawdown | Trades | Win Rate | Profit Factor | Daily Sharpe |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `default_12m_costed` | PASS | +6.68% | -1.86% | 72 | 44.4% | 1.72 | 1.76 |
+| `default_6m_costed` | PASS | +0.47% | -1.24% | 20 | 35.0% | 1.08 | 0.40 |
+| `crypto_12m_costed` | PASS | +3.81% | -1.36% | 36 | 44.4% | 2.12 | 1.43 |
+| `crypto_recent_30d_watch` | WARN | -0.72% | -0.72% | 6 | 0.0% | 0.00 | -5.88 |
+
+RSI Reversion enablement remains blocked by the `--profile rsi` gate: the latest
+costed 12-month RSI-only run returned -1.20% with only 2 trades, and there is no
+60-day/20-trade forward paper evidence yet.
 
 ---
 

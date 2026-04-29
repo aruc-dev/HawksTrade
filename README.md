@@ -83,6 +83,20 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
   --set strategies.ma_crossover.max_loss_exit_pct=0.01
 ```
 
+Before scaling live capital, run the cost-aware validation gate. It applies the
+configured slippage/fee assumptions, checks 12-month, 6-month, and crypto-sleeve
+windows, and reports watch-only warnings for weak recent crypto windows:
+
+```bash
+python3 scheduler/run_validation_gate.py --profile production
+```
+
+RSI Reversion remains disabled until its explicit enablement gate passes:
+
+```bash
+python3 scheduler/run_validation_gate.py --profile rsi
+```
+
 ---
 
 ## Risk Controls (Tuned)

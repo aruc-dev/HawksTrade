@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import contextlib
+import math
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -392,8 +393,45 @@ def _make_bar_fetcher(sim: "BacktestSimulator"):
 
 # ── Simulation State ─────────────────────────────────────────────────────────
 
+def _normalise_cost_model(cost_model: dict | None = None) -> dict:
+    cost_model = cost_model or {}
+    return {
+        "slippage_bps": float(cost_model.get("slippage_bps", 0.0) or 0.0),
+        "fee_bps": float(cost_model.get("fee_bps", 0.0) or 0.0),
+        "min_fee_usd": float(cost_model.get("min_fee_usd", 0.0) or 0.0),
+    }
+
+
+def _format_ratio(value: float) -> str:
+    if math.isinf(value):
+        return "inf"
+    return f"{value:.2f}"
+
+
+def _compute_profit_factor(df_trades: pd.DataFrame) -> float:
+    if df_trades.empty or "pnl" not in df_trades:
+        return 0.0
+    gross_profit = float(df_trades.loc[df_trades["pnl"] > 0, "pnl"].sum())
+    gross_loss = abs(float(df_trades.loc[df_trades["pnl"] < 0, "pnl"].sum()))
+    if gross_loss == 0:
+        return math.inf if gross_profit > 0 else 0.0
+    return gross_profit / gross_loss
+
+
+def _compute_daily_sharpe(df_curve: pd.DataFrame) -> float:
+    if df_curve.empty or "value" not in df_curve or len(df_curve) < 3:
+        return 0.0
+    returns = df_curve["value"].astype(float).pct_change().dropna()
+    if returns.empty:
+        return 0.0
+    std = float(returns.std(ddof=0))
+    if std <= 0 or not math.isfinite(std):
+        return 0.0
+    return float((returns.mean() / std) * math.sqrt(365))
+
+
 class BacktestSimulator:
-    def __init__(self, initial_fund=10000.0):
+    def __init__(self, initial_fund=10000.0, cost_model: dict | None = None):
         self.portfolio_value = initial_fund
         self.cash = initial_fund
         self.positions = {}  # symbol -> {qty, entry_price, entry_date, asset_class, strategy}
@@ -401,6 +439,7 @@ class BacktestSimulator:
         self.current_date = None
         self.historical_data = {}  # symbol -> df
         self.equity_curve = []
+        self.cost_model = _normalise_cost_model(cost_model)
 
     def get_portfolio_value(self):
         pos_value = 0
@@ -479,25 +518,44 @@ class BacktestSimulator:
         if valid_bars.empty: return 0.0
         return float(valid_bars.iloc[-1]["close"])
 
+    def _execution_price(self, price: float, side: str) -> float:
+        slippage = self.cost_model["slippage_bps"] / 10000.0
+        if side == "buy":
+            return price * (1 + slippage)
+        return price * (1 - slippage)
+
+    def _fee_for_notional(self, notional: float) -> float:
+        if notional <= 0:
+            return 0.0
+        fee = notional * self.cost_model["fee_bps"] / 10000.0
+        min_fee = self.cost_model["min_fee_usd"]
+        if fee <= 0 and min_fee <= 0:
+            return 0.0
+        return max(fee, min_fee)
+
     def submit_order(self, req):
         symbol = req.symbol
         side = req.side.value.lower()
         qty = float(req.qty)
-        price = self.get_current_price(symbol)
+        market_price = self.get_current_price(symbol)
+        price = self._execution_price(market_price, side)
         
         # Pull strategy from the request object (Alpaca SDK Request mock)
         strategy = getattr(req, "strategy", "unknown")
 
         if side == "buy":
-            cost = qty * price
+            notional = qty * price
+            fee = self._fee_for_notional(notional)
+            cost = notional + fee
             if cost > self.cash: return MagicMock(id="failed")
             self.cash -= cost
             if symbol in self.positions:
                 old_pos = self.positions[symbol]
                 total_qty = old_pos["qty"] + qty
-                avg_price = (old_pos["qty"] * old_pos["entry_price"] + cost) / total_qty
+                avg_price = (old_pos["qty"] * old_pos["entry_price"] + notional) / total_qty
                 self.positions[symbol]["qty"] = total_qty
                 self.positions[symbol]["entry_price"] = avg_price
+                self.positions[symbol]["entry_fee"] = old_pos.get("entry_fee", 0.0) + fee
                 self.positions[symbol]["high_water_price"] = max(
                     old_pos.get("high_water_price", old_pos["entry_price"]),
                     price,
@@ -509,23 +567,30 @@ class BacktestSimulator:
                     "high_water_price": price,
                     "entry_date": self.current_date, 
                     "asset_class": "stock" if "/" not in symbol else "crypto", 
-                    "strategy": strategy
+                    "strategy": strategy,
+                    "entry_fee": fee,
                 }
         else:
             if symbol not in self.positions: return MagicMock(id="failed")
             pos = self.positions[symbol]
             sell_qty = min(qty, pos["qty"])
-            proceeds = sell_qty * price
+            notional = sell_qty * price
+            fee = self._fee_for_notional(notional)
+            proceeds = notional - fee
             self.cash += proceeds
-            pnl = (price - pos["entry_price"]) * sell_qty
-            pnl_pct = (price / pos["entry_price"]) - 1
+            entry_fee_share = pos.get("entry_fee", 0.0) * (sell_qty / pos["qty"]) if pos["qty"] > 0 else 0.0
+            pnl = (price - pos["entry_price"]) * sell_qty - entry_fee_share - fee
+            cost_basis = (pos["entry_price"] * sell_qty) + entry_fee_share
+            pnl_pct = pnl / cost_basis if cost_basis > 0 else 0.0
             self.trades_log.append({
                 "symbol": symbol, "entry_date": pos["entry_date"], "exit_date": self.current_date,
                 "entry_price": pos["entry_price"], "exit_price": price, "qty": sell_qty,
                 "pnl": pnl, "pnl_pct": pnl_pct, "strategy": pos.get("strategy", "unknown")
             })
             if sell_qty >= pos["qty"]: del self.positions[symbol]
-            else: self.positions[symbol]["qty"] -= sell_qty
+            else:
+                self.positions[symbol]["qty"] -= sell_qty
+                self.positions[symbol]["entry_fee"] = pos.get("entry_fee", 0.0) - entry_fee_share
         
         # Return a mock order object
         order = MagicMock()
@@ -668,6 +733,8 @@ def run_backtest(
     use_screener=None,
     enabled_strategies=None,
     config_overrides=None,
+    cost_model=None,
+    return_result=False,
 ):
     cfg = get_config()
 
@@ -729,7 +796,7 @@ def run_backtest(
     start_dt = end_dt - timedelta(days=days + 420)
     
     historical_data = fetch_all_data(symbols, start_dt, end_dt)
-    sim = BacktestSimulator(initial_fund)
+    sim = BacktestSimulator(initial_fund, cost_model=cost_model)
     sim.historical_data = historical_data
 
     # Initialize screener with backtest bars for point-in-time accuracy only when enabled.
@@ -885,14 +952,26 @@ def run_backtest(
         final_val = sim.get_portfolio_value()
         total_win_rate = (df["pnl"] > 0).mean()
         max_drawdown = _compute_max_drawdown(df_curve)
+        profit_factor = _compute_profit_factor(df)
+        daily_sharpe = _compute_daily_sharpe(df_curve)
+        return_pct = (final_val / initial_fund) - 1
+
         report = f"### Backtest Results ({days} Days)\n"
         report += f"- **Final Value**: ${final_val:,.2f} ({ (final_val/initial_fund-1):+.2%})\n"
         report += f"- **Total Trades**: {len(df)}\n\n"
         report += f"- **Win Rate**: {total_win_rate:.1%}\n"
         report += f"- **Max Drawdown**: {max_drawdown:.2%}\n"
+        report += f"- **Profit Factor**: {_format_ratio(profit_factor)}\n"
+        report += f"- **Daily Sharpe**: {daily_sharpe:.2f}\n"
         report += f"- **Momentum Exit Policy**: {cfg['strategies']['momentum']['exit_policy']}\n"
         report += f"- **Screener**: {'enabled' if screener_enabled else 'disabled'}\n\n"
         report += f"- **Enabled Strategies**: {', '.join(_enabled_strategy_names(cfg))}\n\n"
+        if any(sim.cost_model.values()):
+            report += (
+                f"- **Cost Model**: slippage={sim.cost_model['slippage_bps']:.2f} bps, "
+                f"fee={sim.cost_model['fee_bps']:.2f} bps, "
+                f"min_fee=${sim.cost_model['min_fee_usd']:.2f}\n\n"
+            )
         report += summary.to_markdown() + "\n\n"
         if graph_file: report += f"![Equity Curve]({graph_file})\n\n"
 
@@ -914,8 +993,46 @@ def run_backtest(
 
         if output_file:
             with open(output_file, "a") as f: f.write(report)
-        return report
-    return "No trades executed."
+        result = {
+            "report": report,
+            "stats": {
+                "days": days,
+                "initial_fund": initial_fund,
+                "final_value": final_val,
+                "return_pct": return_pct,
+                "trades": len(df),
+                "win_rate": total_win_rate,
+                "max_drawdown": max_drawdown,
+                "profit_factor": profit_factor,
+                "daily_sharpe": daily_sharpe,
+                "screener_enabled": screener_enabled,
+                "enabled_strategies": _enabled_strategy_names(cfg),
+                "cost_model": dict(sim.cost_model),
+            },
+            "quarterly": quarterly_data,
+        }
+        return result if return_result else report
+
+    final_val = sim.get_portfolio_value()
+    result = {
+        "report": "No trades executed.",
+        "stats": {
+            "days": days,
+            "initial_fund": initial_fund,
+            "final_value": final_val,
+            "return_pct": (final_val / initial_fund) - 1,
+            "trades": 0,
+            "win_rate": 0.0,
+            "max_drawdown": _compute_max_drawdown(df_curve),
+            "profit_factor": 0.0,
+            "daily_sharpe": _compute_daily_sharpe(df_curve),
+            "screener_enabled": screener_enabled,
+            "enabled_strategies": _enabled_strategy_names(cfg),
+            "cost_model": dict(sim.cost_model),
+        },
+        "quarterly": [],
+    }
+    return result if return_result else result["report"]
 
 
 def _compute_quarterly_performance(sim, df_curve):
@@ -1000,6 +1117,9 @@ if __name__ == "__main__":
         action="append",
         help="Backtest-only config override, e.g. --set strategies.momentum.top_n=3",
     )
+    parser.add_argument("--slippage-bps", type=float, default=0.0, help="Backtest execution slippage in basis points per side")
+    parser.add_argument("--fee-bps", type=float, default=0.0, help="Backtest fee/commission in basis points per side")
+    parser.add_argument("--min-fee", type=float, default=0.0, help="Minimum fee per simulated order")
     args = parser.parse_args()
     enabled_strategies = None
     if args.strategies:
@@ -1014,4 +1134,9 @@ if __name__ == "__main__":
         use_screener=args.use_screener,
         enabled_strategies=enabled_strategies,
         config_overrides=args.config_overrides,
+        cost_model={
+            "slippage_bps": args.slippage_bps,
+            "fee_bps": args.fee_bps,
+            "min_fee_usd": args.min_fee,
+        },
     ))

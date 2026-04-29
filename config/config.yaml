@@ -218,6 +218,74 @@ strategies:
     trend_exit_enabled: true     # Exit when completed close falls below trend EMA
     weight: 0.9
 
+# --- VALIDATION GATES ---
+# Non-trading guardrails used before scaling live capital or enabling disabled alphas.
+# These settings do not change order sizing or live/paper execution behavior.
+validation:
+  cost_model:
+    slippage_bps: 10.0           # Backtest gate assumes 10 bps adverse fill per side
+    fee_bps: 5.0                 # Backtest gate assumes 5 bps fees/commission per side
+    min_fee_usd: 0.0
+
+  production_gate:
+    windows:
+      - name: default_12m_costed
+        days: 365
+        end_date: "04/10/2026"
+        screener: true
+        strategies: [momentum, ma_crossover, range_breakout]
+        required: true
+        min_return_pct: 0.04
+        max_drawdown_pct: 0.035
+        min_profit_factor: 1.05
+        min_trades: 40
+      - name: default_6m_costed
+        days: 180
+        end_date: "04/10/2026"
+        screener: true
+        strategies: [momentum, ma_crossover, range_breakout]
+        required: true
+        min_return_pct: 0.0
+        max_drawdown_pct: 0.025
+        min_trades: 10
+      - name: crypto_12m_costed
+        days: 365
+        end_date: "04/10/2026"
+        screener: false
+        strategies: [ma_crossover, range_breakout]
+        required: true
+        min_return_pct: 0.03
+        max_drawdown_pct: 0.025
+        min_profit_factor: 1.05
+        min_trades: 20
+      - name: crypto_recent_30d_watch
+        days: 30
+        screener: false
+        strategies: [ma_crossover, range_breakout]
+        required: false
+        min_return_pct: 0.0
+        max_drawdown_pct: 0.015
+        min_trades: 4
+
+  rsi_reversion_enablement:
+    required_paper_days: 60
+    min_closed_trades: 20
+    min_win_rate: 0.48
+    min_profit_factor: 1.15
+    min_total_return_pct: 0.02
+    max_drawdown_pct: 0.04
+    backtest_windows:
+      - name: rsi_reversion_12m_costed
+        days: 365
+        end_date: "04/10/2026"
+        screener: true
+        strategies: [rsi_reversion]
+        required: true
+        min_return_pct: 0.02
+        max_drawdown_pct: 0.04
+        min_profit_factor: 1.10
+        min_trades: 15
+
 # --- SCHEDULING (reference only; OS scheduler templates live in scheduler/) ---
 schedule:
   stock_scan_interval_min: 30        # Every 30 min during market hours

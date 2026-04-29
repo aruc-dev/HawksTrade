@@ -24,7 +24,9 @@ from scheduler.run_backtest import (
     _backtest_trading_session_date,
     _backtest_scan_universe,
     _build_regime_bars,
+    _compute_daily_sharpe,
     _compute_max_drawdown,
+    _compute_profit_factor,
     _compute_quarterly_performance,
     _patch_runtime_risk_config,
     _run_backtest_hold_exits,
@@ -544,6 +546,64 @@ class TestBacktestExperimentControls(unittest.TestCase):
         ])
 
         self.assertAlmostEqual(_compute_max_drawdown(df_curve), -0.25)
+
+    def test_compute_profit_factor(self):
+        trades = pd.DataFrame([
+            {"pnl": 20.0},
+            {"pnl": -5.0},
+            {"pnl": -5.0},
+        ])
+
+        self.assertAlmostEqual(_compute_profit_factor(trades), 2.0)
+
+    def test_compute_daily_sharpe_returns_zero_for_flat_curve(self):
+        curve = pd.DataFrame([
+            {"value": 100.0},
+            {"value": 100.0},
+            {"value": 100.0},
+        ])
+
+        self.assertEqual(_compute_daily_sharpe(curve), 0.0)
+
+    def test_backtest_cost_model_applies_slippage_and_fees(self):
+        sim = BacktestSimulator(
+            initial_fund=1000.0,
+            cost_model={"slippage_bps": 100.0, "fee_bps": 10.0},
+        )
+        sim.historical_data = {
+            "AAPL": pd.DataFrame(
+                {
+                    "open": [100.0, 110.0],
+                    "high": [100.0, 110.0],
+                    "low": [100.0, 110.0],
+                    "close": [100.0, 110.0],
+                    "volume": [1000, 1000],
+                },
+                index=pd.date_range("2026-01-01", periods=2, freq="D", tz=timezone.utc),
+            )
+        }
+
+        class Side:
+            def __init__(self, value):
+                self.value = value
+
+        class Req:
+            def __init__(self, side):
+                self.symbol = "AAPL"
+                self.side = Side(side)
+                self.qty = 1
+                self.strategy = "test"
+
+        sim.current_date = sim.historical_data["AAPL"].index[0]
+        sim.submit_order(Req("buy"))
+        self.assertAlmostEqual(sim.positions["AAPL"]["entry_price"], 101.0)
+        self.assertAlmostEqual(sim.positions["AAPL"]["entry_fee"], 0.101)
+
+        sim.current_date = sim.historical_data["AAPL"].index[1]
+        sim.submit_order(Req("sell"))
+
+        self.assertAlmostEqual(sim.trades_log[0]["exit_price"], 108.9)
+        self.assertAlmostEqual(sim.trades_log[0]["pnl"], 7.6901, places=4)
 
 
 class TestExtendedPool(unittest.TestCase):

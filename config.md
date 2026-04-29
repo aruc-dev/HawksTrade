@@ -347,8 +347,10 @@ Use `--strategies` and repeated `--set` arguments to test configuration variants
 ```bash
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
   --strategies momentum,ma_crossover,range_breakout \
-  --set strategies.momentum.top_n=3 \
-  --set strategies.momentum.min_momentum_pct=0.06
+  --set strategies.momentum.top_n=1 \
+  --set strategies.momentum.min_momentum_pct=0.10 \
+  --set strategies.momentum.volume_spike_ratio=1.8 \
+  --set strategies.momentum.min_breadth_coverage_pct=0.75
 ```
 
 Run both screener and fixed-universe variants before adopting a change:
@@ -357,3 +359,48 @@ Run both screener and fixed-universe variants before adopting a change:
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --no-screener
 ```
+
+For execution-cost sensitivity, pass backtest-only slippage and fee assumptions:
+
+```bash
+python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
+  --slippage-bps 10 --fee-bps 5
+```
+
+---
+
+## Production Validation Gates
+
+`validation:` defines non-trading gates used before scaling live capital or
+enabling disabled alpha sleeves. These settings do not change live order sizing,
+stops, take-profits, or mode.
+
+```yaml
+validation:
+  cost_model:
+    slippage_bps: 10.0
+    fee_bps: 5.0
+    min_fee_usd: 0.0
+```
+
+Run the default production gate with:
+
+```bash
+python3 scheduler/run_validation_gate.py --profile production
+```
+
+The production profile requires the costed default strategy set to pass the
+configured 12-month and 6-month windows, and requires the crypto sleeve to pass
+a 12-month window. The latest 30-day crypto sleeve is watch-only: it reports
+weak short-window behavior without blocking the full strategy set when the
+longer capital-preservation gates still pass.
+
+RSI Reversion has a separate enablement gate:
+
+```bash
+python3 scheduler/run_validation_gate.py --profile rsi
+```
+
+Do not enable `rsi_reversion` by default unless this profile passes both its
+costed backtest requirements and the paper-trading criteria in
+`validation.rsi_reversion_enablement`.
