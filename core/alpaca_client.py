@@ -278,6 +278,7 @@ def place_market_order(
     side: str,
     time_in_force: str = "day",
     strategy: str = "unknown",
+    asset_class: Optional[str] = None,
     client_order_id: Optional[str] = None,
 ):
     """Place a market order. side = 'buy' or 'sell'."""
@@ -289,7 +290,11 @@ def place_market_order(
         symbol=symbol,
         qty=qty,
         side=OrderSide.BUY if side == "buy" else OrderSide.SELL,
-        time_in_force=TimeInForce.DAY if time_in_force == "day" else TimeInForce.GTC,
+        time_in_force=normalize_market_time_in_force(
+            symbol,
+            time_in_force,
+            asset_class=asset_class,
+        ),
         client_order_id=client_order_id,
     )
     # Attach strategy for backtest mock visibility (bypass Pydantic strictness)
@@ -429,6 +434,22 @@ def normalize_time_in_force(
     if _is_fractional_stock_order(symbol, qty, asset_class):
         return TimeInForce.DAY
     return requested
+
+
+def normalize_market_time_in_force(
+    symbol: str,
+    time_in_force: str,
+    asset_class: Optional[str] = None,
+) -> TimeInForce:
+    """Return an Alpaca-compatible market-order time-in-force."""
+    time_in_force = (time_in_force or "day").lower()
+    asset_class = (asset_class or "").lower()
+    is_crypto = asset_class == "crypto" or "/" in symbol
+    if is_crypto:
+        if time_in_force == "ioc":
+            return TimeInForce.IOC
+        return TimeInForce.GTC
+    return TimeInForce.GTC if time_in_force == "gtc" else TimeInForce.DAY
 
 
 def _is_fractional_stock_order(symbol: str, qty: float, asset_class: Optional[str] = None) -> bool:

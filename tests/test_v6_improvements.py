@@ -105,6 +105,10 @@ class TestBacktestLiveFidelity(unittest.TestCase):
         self.assertFalse(_stock_market_open_for_backtest(datetime(2026, 7, 3, tzinfo=timezone.utc)))
         self.assertTrue(_stock_market_open_for_backtest(datetime(2026, 7, 6, tzinfo=timezone.utc)))
 
+    def test_stock_market_open_for_backtest_skips_next_year_observed_new_years(self):
+        self.assertFalse(_stock_market_open_for_backtest(datetime(2021, 12, 31, tzinfo=timezone.utc)))
+        self.assertTrue(_stock_market_open_for_backtest(datetime(2021, 12, 30, tzinfo=timezone.utc)))
+
     def test_stock_scan_universe_is_none_on_weekends_but_crypto_continues(self):
         class FakeStock:
             asset_class = "stocks"

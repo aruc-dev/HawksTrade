@@ -56,6 +56,28 @@ class AlpacaClientTests(unittest.TestCase):
             )
         return fake_client.req
 
+    def _capture_market_order(
+        self,
+        symbol,
+        asset_class=None,
+        time_in_force="day",
+    ):
+        class FakeClient:
+            def submit_order(self, req):
+                self.req = req
+                return SimpleNamespace(id="order-1")
+
+        fake_client = FakeClient()
+        with patch.object(alpaca_client, "get_trading_client", return_value=fake_client):
+            alpaca_client.place_market_order(
+                symbol,
+                1,
+                "buy",
+                time_in_force=time_in_force,
+                asset_class=asset_class,
+            )
+        return fake_client.req
+
     def test_market_order_rejects_invalid_side_before_client_init(self):
         with patch.object(alpaca_client, "get_trading_client") as get_client:
             with self.assertRaises(ValueError):
@@ -69,6 +91,25 @@ class AlpacaClientTests(unittest.TestCase):
                 alpaca_client.place_limit_order("AAPL", 1, "hold", 100)
 
         get_client.assert_not_called()
+
+    def test_stock_market_order_defaults_to_day_time_in_force(self):
+        req = self._capture_market_order("AAPL", asset_class="stock")
+
+        self.assertEqual(req.time_in_force, TimeInForce.DAY)
+
+    def test_crypto_market_order_defaults_to_supported_time_in_force(self):
+        req = self._capture_market_order("DOGE/USD", asset_class="crypto")
+
+        self.assertEqual(req.time_in_force, TimeInForce.GTC)
+
+    def test_crypto_market_order_allows_ioc_time_in_force(self):
+        req = self._capture_market_order(
+            "DOGE/USD",
+            asset_class="crypto",
+            time_in_force="ioc",
+        )
+
+        self.assertEqual(req.time_in_force, TimeInForce.IOC)
 
     def test_limit_order_rounds_stock_over_one_dollar_to_cents(self):
         req = self._capture_limit_order("TQQQ", 51.9369, asset_class="stock")

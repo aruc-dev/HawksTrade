@@ -197,7 +197,11 @@ def _stock_market_open_for_backtest(current_date) -> bool:
     session_date = _as_datetime(current_date).date()
     if session_date.weekday() >= 5:
         return False
-    return session_date not in _stock_market_holidays(session_date.year)
+    holidays = (
+        _stock_market_holidays(session_date.year)
+        | _stock_market_holidays(session_date.year + 1)
+    )
+    return session_date not in holidays
 
 
 def _stock_market_open_for_sim(sim: "BacktestSimulator") -> bool:

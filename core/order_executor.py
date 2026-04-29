@@ -335,6 +335,7 @@ def enter_position(
                     qty,
                     "buy",
                     strategy=strategy,
+                    asset_class=asset_class,
                     client_order_id=intent["client_order_id"] if intent else None,
                 )
             except Exception as e:
@@ -555,6 +556,7 @@ def exit_position(
                     qty,
                     "sell",
                     strategy=strategy,
+                    asset_class=asset_class,
                     client_order_id=intent["client_order_id"] if intent else None,
                 )
             except Exception as e:
