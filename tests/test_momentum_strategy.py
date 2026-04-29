@@ -17,6 +17,16 @@ def _bar(close, high=None, low=None, volume=2000):
     )
 
 
+def _bar_dict(close, high=None, low=None, volume=2000):
+    return {
+        "close": float(close),
+        "high": float(high if high is not None else close * 1.01),
+        "low": float(low if low is not None else close * 0.99),
+        "volume": float(volume),
+        "timestamp": "2026-04-23T00:00:00+00:00",
+    }
+
+
 class MomentumStrategyTests(unittest.TestCase):
 
     # ── Fallback fetching ─────────────────────────────────────────────────────
@@ -100,6 +110,11 @@ class MomentumStrategyTests(unittest.TestCase):
         atr = _calc_atr(bars, period=14)
         self.assertEqual(atr, 0.0)
 
+    def test_calc_atr_handles_dict_bars(self):
+        bars = [_bar_dict(close=100.0, high=105.0, low=95.0) for _ in range(21)]
+        atr = _calc_atr(bars, period=14)
+        self.assertGreater(atr, 0)
+
     # ── Enhancements (Smoothed, Alpha, Volume) ────────────────────────────────
 
     def test_momentum_smoothed_lookback(self):
@@ -160,6 +175,24 @@ class MomentumStrategyTests(unittest.TestCase):
             
         self.assertEqual(len(signals), 0)
 
+    def test_scan_accepts_dict_bars_for_volume_and_atr_sizing(self):
+        prices = [100.0] * 100 + [110.0, 110.0]
+        bars = [_bar_dict(p, volume=1000) for p in prices[:-1]] + [_bar_dict(prices[-1], volume=2000)]
+        bars_resp = {"AAPL": bars}
+
+        with (
+            patch("strategies.momentum.ac.get_stock_bars", return_value=bars_resp),
+            patch("strategies.momentum.rm.market_regime_ok", return_value=True),
+            patch("strategies.momentum.rm.market_breadth_pct", return_value=0.6),
+            patch("strategies.momentum.ac.get_portfolio_value", return_value=10000.0),
+            patch("strategies.momentum.get_sector", return_value="Tech"),
+        ):
+            with patch.dict("strategies.momentum.SCFG", {"enabled": True, "min_momentum_pct": 0.01}):
+                signals = MomentumStrategy().scan(["AAPL"])
+
+        self.assertEqual(len(signals), 1)
+        self.assertGreater(signals[0]["atr_risk_qty"], 0)
+
     # ── Original Logic Tests ──────────────────────────────────────────────────
 
     def test_scan_includes_atr_stop_price_in_signal(self):
@@ -201,6 +234,23 @@ class MomentumStrategyTests(unittest.TestCase):
             self.assertIn("atr_risk_qty", sig)
             self.assertGreater(sig["atr_risk_qty"], 0)
 
+    def test_scan_blocks_signals_when_portfolio_value_unavailable_for_atr_sizing(self):
+        prices = list(range(90, 115))
+        bars = [_bar(p, high=p * 1.02, low=p * 0.98, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=2000)]
+        bars_resp = {"AAPL": bars}
+
+        with (
+            patch("strategies.momentum.ac.get_stock_bars", return_value=bars_resp),
+            patch("strategies.momentum.rm.market_regime_ok", return_value=True),
+            patch("strategies.momentum.rm.market_breadth_pct", return_value=0.6),
+            patch("strategies.momentum.ac.get_portfolio_value", side_effect=RuntimeError("account unavailable")),
+            patch("strategies.momentum.get_sector", return_value="Tech"),
+        ):
+            with patch.dict("strategies.momentum.SCFG", {"enabled": True, "min_momentum_pct": 0.01}):
+                signals = MomentumStrategy().scan(["AAPL"])
+
+        self.assertEqual(signals, [])
+
     def test_scan_enforces_sector_neutrality(self):
         prices = [100.0] * 100 + [120.0, 120.0]
         bars_high = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=2000)]
@@ -230,6 +280,31 @@ class MomentumStrategyTests(unittest.TestCase):
         self.assertEqual(len(symbols), 2)
         self.assertIn("JPM", symbols)
         self.assertTrue(("AAPL" in symbols) ^ ("NVDA" in symbols))
+
+    def test_scan_counts_existing_symbols_against_sector_cap(self):
+        prices = [100.0] * 100 + [120.0, 120.0]
+        bars_high = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=2000)]
+        bars_resp = {
+            "NVDA": bars_high,
+            "JPM": bars_high,
+        }
+
+        def mock_sector(symbol):
+            if symbol in ["AAPL", "NVDA"]:
+                return "Technology"
+            return "Financials"
+
+        with (
+            patch("strategies.momentum.ac.get_stock_bars", return_value=bars_resp),
+            patch("strategies.momentum.rm.market_regime_ok", return_value=True),
+            patch("strategies.momentum.rm.market_breadth_pct", return_value=0.6),
+            patch("strategies.momentum.ac.get_portfolio_value", return_value=10000.0),
+            patch("strategies.momentum.get_sector", side_effect=mock_sector),
+        ):
+            with patch.dict("strategies.momentum.SCFG", {"max_positions_per_sector": 1, "top_n": 5, "enabled": True}):
+                signals = MomentumStrategy().scan(["NVDA", "JPM"], existing_symbols=["AAPL"])
+
+        self.assertEqual([sig["symbol"] for sig in signals], ["JPM"])
 
     def test_scan_skips_signal_when_atr_risk_qty_is_below_notional_minimum(self):
         # 120 bars at 1000.

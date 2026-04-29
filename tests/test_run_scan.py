@@ -103,6 +103,37 @@ class RunScanTests(unittest.TestCase):
 
         self.assertEqual(seen_regime_bars, [None])
 
+    def test_momentum_receives_planned_stock_symbols_for_sector_filter(self):
+        seen_existing_symbols = []
+
+        class FakeMomentum:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def scan(self, universe, **kwargs):
+                seen_existing_symbols.append(set(kwargs.get("existing_symbols", [])))
+                return []
+
+        with (
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(
+                run_scan.ac,
+                "get_stock_bars",
+                return_value={"SPY": [object()] * 252, "QQQ": [object()] * 51},
+            ),
+            patch.object(run_scan, "get_open_symbols", side_effect=[["AAPL", "BTC/USD"], ["AAPL", "BTC/USD"]]),
+            patch.object(run_scan, "_pending_entry_symbols", return_value={"MSFT": "stock", "ETHUSD": "crypto"}),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "get_stock_universe", return_value=["NVDA", "JPM"]),
+            patch.object(run_scan, "STOCK_STRATEGIES", [FakeMomentum()]),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "safe_reconcile", return_value={}),
+            patch.object(run_scan, "print_snapshot"),
+        ):
+            run_scan.run(run_stocks=True, run_crypto=False, dry_run=False)
+
+        self.assertEqual(seen_existing_symbols, [{"AAPL", "MSFT"}])
+
     def test_strategy_failure_marks_scan_marker_unhealthy(self):
         class BrokenMomentum:
             name = "momentum"

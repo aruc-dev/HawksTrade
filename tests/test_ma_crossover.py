@@ -7,6 +7,7 @@ from strategies.ma_crossover import (
     MACrossoverStrategy,
     _calc_atr,
     _detect_crossover,
+    _detect_recent_crossover,
 )
 
 def _bar(close, high=None, low=None, volume=1000):
@@ -35,6 +36,17 @@ class MACrossoverStrategyTests(unittest.TestCase):
         slow = pd.Series([11, 11])
         self.assertEqual(_detect_crossover(fast, slow), "none")
 
+    def test_detect_crossover_from_equal_boundary(self):
+        fast = pd.Series([10, 11])
+        slow = pd.Series([10, 10])
+        self.assertEqual(_detect_crossover(fast, slow), "bullish")
+
+    def test_detect_recent_crossover_finds_previous_bar_cross(self):
+        fast = pd.Series([9, 11, 12])
+        slow = pd.Series([10, 10, 10])
+        self.assertEqual(_detect_crossover(fast, slow), "none")
+        self.assertEqual(_detect_recent_crossover(fast, slow, lookback=2), "bullish")
+
     def test_calc_atr_crypto_scale(self):
         # Test with BTC-like prices
         prices = [60000] * 20
@@ -62,6 +74,7 @@ class MACrossoverStrategyTests(unittest.TestCase):
             patch("strategies.ma_crossover.ac.get_crypto_bars", return_value=bars_data),
             patch("strategies.ma_crossover.rm.crypto_regime_ok", return_value=True),
             patch("strategies.ma_crossover._calc_rsi", return_value=50.0),
+            patch("strategies.ma_crossover.ac.get_portfolio_value", return_value=10000.0),
             patch.dict("strategies.ma_crossover.SCFG", {"volume_spike_ratio": 0}),
         ):
             signals = MACrossoverStrategy().scan(["BTC/USD"])
@@ -88,6 +101,7 @@ class MACrossoverStrategyTests(unittest.TestCase):
             patch("strategies.ma_crossover.ac.get_crypto_bars", return_value=bars_data),
             patch("strategies.ma_crossover.rm.crypto_regime_ok", return_value=True),
             patch("strategies.ma_crossover._calc_rsi", return_value=50.0),
+            patch("strategies.ma_crossover.ac.get_portfolio_value", return_value=10000.0),
             patch.dict("strategies.ma_crossover.SCFG", {"volume_spike_ratio": 0}),
         ):
             signals = MACrossoverStrategy().scan(["BTC/USD"])
@@ -107,6 +121,7 @@ class MACrossoverStrategyTests(unittest.TestCase):
             patch("strategies.ma_crossover.ac.get_crypto_bars", return_value=bars_data),
             patch("strategies.ma_crossover.rm.crypto_regime_ok", return_value=True),
             patch("strategies.ma_crossover._calc_rsi", return_value=30.0),
+            patch("strategies.ma_crossover.ac.get_portfolio_value", return_value=10000.0),
             patch.dict("strategies.ma_crossover.SCFG", {"rsi_entry_min": 35, "rsi_entry_max": 70, "volume_spike_ratio": 0}),
         ):
             signals = MACrossoverStrategy().scan(["BTC/USD"])
@@ -124,6 +139,7 @@ class MACrossoverStrategyTests(unittest.TestCase):
             patch("strategies.ma_crossover.ac.get_crypto_bars", return_value=bars_data),
             patch("strategies.ma_crossover.rm.crypto_regime_ok", return_value=True),
             patch("strategies.ma_crossover._calc_rsi", return_value=75.0),
+            patch("strategies.ma_crossover.ac.get_portfolio_value", return_value=10000.0),
             patch.dict("strategies.ma_crossover.SCFG", {"rsi_entry_min": 35, "rsi_entry_max": 70, "volume_spike_ratio": 0}),
         ):
             signals = MACrossoverStrategy().scan(["BTC/USD"])
@@ -141,7 +157,27 @@ class MACrossoverStrategyTests(unittest.TestCase):
             patch("strategies.ma_crossover.ac.get_crypto_bars", return_value=bars_data),
             patch("strategies.ma_crossover.rm.crypto_regime_ok", return_value=True),
             patch("strategies.ma_crossover._calc_rsi", return_value=50.0),
+            patch("strategies.ma_crossover.ac.get_portfolio_value", return_value=10000.0),
             patch.dict("strategies.ma_crossover.SCFG", {"rsi_entry_min": 35, "rsi_entry_max": 70, "volume_spike_ratio": 0}),
+        ):
+            signals = MACrossoverStrategy().scan(["BTC/USD"])
+
+        self.assertEqual(len(signals), 1)
+
+    def test_scan_generates_signal_when_cross_was_previous_bar_within_lookback(self):
+        prices = [100.0] * 122
+        prices[119] = 90.0
+        prices[120] = 200.0
+        prices[121] = 210.0
+        bars = [_bar(p, high=p+2, low=p-2) for p in prices]
+        bars_data = {"BTC/USD": bars}
+
+        with (
+            patch("strategies.ma_crossover.ac.get_crypto_bars", return_value=bars_data),
+            patch("strategies.ma_crossover.rm.crypto_regime_ok", return_value=True),
+            patch("strategies.ma_crossover._calc_rsi", return_value=50.0),
+            patch("strategies.ma_crossover.ac.get_portfolio_value", return_value=10000.0),
+            patch.dict("strategies.ma_crossover.SCFG", {"volume_spike_ratio": 0, "entry_cross_lookback_days": 2}),
         ):
             signals = MACrossoverStrategy().scan(["BTC/USD"])
 
@@ -166,6 +202,24 @@ class MACrossoverStrategyTests(unittest.TestCase):
         self.assertEqual(len(signals), 1)
         self.assertIn("atr_risk_qty", signals[0])
         self.assertGreater(signals[0]["atr_risk_qty"], 0)
+
+    def test_scan_blocks_signals_when_portfolio_value_unavailable_for_atr_sizing(self):
+        prices = [100.0] * 121
+        prices[119] = 90.0
+        prices[120] = 200.0
+        bars = [_bar(p, high=p+2, low=p-2) for p in prices]
+        bars_data = {"BTC/USD": bars}
+
+        with (
+            patch("strategies.ma_crossover.ac.get_crypto_bars", return_value=bars_data),
+            patch("strategies.ma_crossover.rm.crypto_regime_ok", return_value=True),
+            patch("strategies.ma_crossover._calc_rsi", return_value=50.0),
+            patch("strategies.ma_crossover.ac.get_portfolio_value", side_effect=RuntimeError("account unavailable")),
+            patch.dict("strategies.ma_crossover.SCFG", {"volume_spike_ratio": 0}),
+        ):
+            signals = MACrossoverStrategy().scan(["BTC/USD"])
+
+        self.assertEqual(signals, [])
 
     def test_scan_skips_signal_when_atr_risk_qty_below_notional_minimum(self):
         # price≈200, ATR≈4 → atr_stop≈192, risk_per_share≈8
@@ -207,6 +261,7 @@ class MACrossoverStrategyTests(unittest.TestCase):
             patch("strategies.ma_crossover.ac.get_crypto_bars", return_value=bars_data),
             patch("strategies.ma_crossover.rm.crypto_regime_ok", return_value=True),
             patch("strategies.ma_crossover._calc_rsi", return_value=50.0),
+            patch("strategies.ma_crossover.ac.get_portfolio_value", return_value=10000.0),
             patch.dict("strategies.ma_crossover.SCFG", {"volume_spike_ratio": 0}),
         ):
             signals = MACrossoverStrategy().scan(["BTC/USD"])

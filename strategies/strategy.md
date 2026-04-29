@@ -11,7 +11,7 @@
 | Strategy | Asset | Status | File |
 |---|---|---|---|
 | Momentum | Stocks | **Enabled** | `momentum.py` |
-| RSI Reversion | Stocks | **Enabled** | `rsi_reversion.py` |
+| RSI Reversion | Stocks | Disabled by default | `rsi_reversion.py` |
 | Gap-Up | Stocks | Disabled | `gap_up.py` |
 | MA Crossover | Crypto | **Enabled** | `ma_crossover.py` |
 | Range Breakout | Crypto | **Enabled** | `range_breakout.py` |
@@ -19,7 +19,8 @@
 All strategies share a common global risk layer (3.5% stop-loss, 12% take-profit,
 max 10 open positions, 5% daily-loss halt) enforced by `core/risk_manager.py` and
 `scheduler/run_risk_check.py`. Individual strategies may override the stop via
-`custom_stop_price` on their signals (see Momentum and RSI Reversion).
+`atr_stop_price` on their signals; the executor writes that value to the trade log
+when it is wider than the global stop.
 
 ---
 
@@ -35,8 +36,9 @@ filtering:
    (`entry - 2 × ATR_14`). Position size is computed as `(equity × 1%) / (entry - atr_stop)`
    so that every trade risks exactly 1% of capital, capped at 5% per-position max.
 2. **Phase 2 — Sector-Neutral Ranking**: Enforces `max_positions_per_sector: 1`
-   using a static GICS sector map. If the top two ranked stocks share a sector,
-   the lower-ranked one is skipped in favour of the next stock in a different sector.
+   using a static GICS sector map across both existing/pending positions and new
+   candidates. If the top two ranked stocks share a capped sector, the lower-ranked
+   one is skipped in favour of the next stock in a different sector.
 3. **Phase 3 — Market Breadth Tiered Regime Guard**: Computes what fraction of
    the scan universe trades above its own SMA50 (`rm.market_breadth_pct`):
    - **Red** (SPY < SMA50 OR breadth < 25%): no new entries.
@@ -56,7 +58,7 @@ a per-signal guard at scan time.
 - A hard 20-day cap closes any position that never pulled back to trigger the trail.
 
 **Stop:** The ATR-based stop is written to the trade log as `stop_loss` and used by
-the live risk check as `custom_stop_price`, giving volatile stocks more breathing
+the live risk check as the custom stop input, giving volatile stocks more breathing
 room while the global 3.5% stop remains the absolute floor.
 
 **Key parameters (`config/config.yaml`):**
@@ -85,7 +87,7 @@ room while the global 3.5% stop remains the absolute floor.
 
 ---
 
-## 2. RSI Reversion *(Stocks — Enabled)*
+## 2. RSI Reversion *(Stocks — Disabled by default)*
 
 **Type:** Mean reversion, swing trade.
 
@@ -125,6 +127,7 @@ governs whenever the ATR stop is tighter or absent.
 | `vix_multiplier` | 1.2 |
 | `sma200_lower_buffer_pct` | 15% |
 | `sma200_upper_buffer_pct` | 15% |
+| `volume_spike_ratio` | 1.5 |
 
 **Regime filters:**
 - Crash filter: skip if SPY is >20% below its 252-day peak.
@@ -168,7 +171,7 @@ take-profit from the global risk manager apply throughout.
 **Type:** Trend-following, medium-term swing. Runs 24/7 on daily bars.
 
 **Entry:** Five conditions must all be true:
-1. 9-EMA crosses above 21-EMA on the daily chart (bullish crossover).
+1. 9-EMA crosses above 21-EMA on the daily chart, or crossed within the configured recent-entry window.
 2. 21-EMA is sloping upward over the last 5 bars — no crossovers into a flat trend.
 3. Today's price range ≥ 50% of the 10-day average range — market is moving.
 4. RSI(14) between 35 and 70 — not entering an already-overbought or deeply-oversold
@@ -187,6 +190,7 @@ take-profit from the global risk manager apply throughout.
 | `fast_ema` | 9 |
 | `slow_ema` | 21 |
 | `timeframe` | 1Day |
+| `entry_cross_lookback_days` | 2 |
 | `hold_days` | 12 calendar days |
 | `rsi_entry_min` | 35 |
 | `rsi_entry_max` | 70 |

@@ -206,6 +206,14 @@ def _planned_position_counts(planned_asset_classes: dict) -> tuple[int, int, int
     return total, crypto_count, stock_count
 
 
+def _planned_symbols_for_asset_class(planned_asset_classes: dict, asset_class: str) -> list[str]:
+    return [
+        symbol
+        for symbol, planned_asset_class in planned_asset_classes.items()
+        if planned_asset_class == asset_class
+    ]
+
+
 def _max_positions_planned(planned_symbols: set) -> bool:
     max_positions = int(CFG["trading"]["max_positions"])
     if len(planned_symbols) >= max_positions:
@@ -695,7 +703,13 @@ def run(
         enabled_stock_strategies = _enabled_strategies(STOCK_STRATEGIES)
         for strategy in enabled_stock_strategies:
             try:
-                signals = strategy.scan(stock_universe, regime_bars=stock_regime_bars)
+                scan_kwargs = {"regime_bars": stock_regime_bars}
+                if strategy.name == "momentum":
+                    scan_kwargs["existing_symbols"] = _planned_symbols_for_asset_class(
+                        planned_asset_classes,
+                        "stock",
+                    )
+                signals = strategy.scan(stock_universe, **scan_kwargs)
                 for sig in signals:
                     sym = sig["symbol"]
                     normalized = ac.normalize_symbol(sym)

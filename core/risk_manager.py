@@ -356,7 +356,7 @@ def _get_closes(bars: list) -> pd.Series:
     return pd.Series(vals)
 
 
-def market_regime_ok(bars_data=None) -> bool:
+def market_regime_ok(bars_data=None, allow_warmup: bool = False) -> bool:
     """
     Returns True if SPY is above its 50-day SMA — indicates bull market regime.
     If SPY is below SMA50 but QQQ is above SMA50, it also returns True (Bifurcation Detection).
@@ -364,7 +364,8 @@ def market_regime_ok(bars_data=None) -> bool:
     When bars_data is provided (backtest), uses pre-fetched bars dict.
     In live trading, fetches from Alpaca directly.
 
-    Backtest mode: insufficient bars (early warmup) returns True.
+    When allow_warmup=True: insufficient supplied bars return True for
+    backtest warmup only.
     Live mode: any exception or insufficient bars returns False (fail closed).
     """
     try:
@@ -376,7 +377,10 @@ def market_regime_ok(bars_data=None) -> bool:
             if bars_data is not None:
                 bars = bars_data.get(symbol)
                 if bars is None or len(bars) < 51:
-                    return True
+                    if allow_warmup:
+                        return True
+                    log.warning(f"[RegimeFilter] Insufficient supplied {symbol} bars for SMA50; fail closed.")
+                    return False
                 closes = _get_closes(bars)
             else:
                 raw = ac.get_stock_bars([symbol], timeframe="1Day", limit=55)
@@ -458,14 +462,14 @@ def market_breadth_pct(universe: list, bars_data: dict | None = None) -> float:
         return 0.5
 
 
-def crypto_regime_ok(bars_data=None) -> bool:
+def crypto_regime_ok(bars_data=None, allow_warmup: bool = False) -> bool:
     """
     Returns True if BTC/USD is above its 20-day EMA — indicates crypto bull regime.
     When bars_data is provided (backtest), uses pre-fetched BTC bars.
     In live trading, fetches from Alpaca directly.
 
-    Backtest mode: insufficient bars (early warmup) returns True so the
-    simulation can begin trading before the full 20-bar window is available.
+    When allow_warmup=True: insufficient supplied bars return True so backtests
+    can begin before the full 20-bar window is available.
 
     Live mode: any exception or insufficient bars returns False (fail closed).
     A regime filter is a safety control — when we cannot confirm conditions are
@@ -479,8 +483,10 @@ def crypto_regime_ok(bars_data=None) -> bool:
         if bars_data is not None:
             btc_bars = bars_data.get("BTC/USD")
             if btc_bars is None or len(btc_bars) < 21:
-                # Early in the simulation — not enough history yet; allow trading.
-                return True
+                if allow_warmup:
+                    return True
+                log.warning("[CryptoRegime] Insufficient supplied BTC/USD bars for EMA20; blocking new entries (fail closed).")
+                return False
             closes = _get_closes(btc_bars)
         else:
             # live mode — fail closed if data is unavailable or insufficient

@@ -815,7 +815,17 @@ def run_backtest(
                 )
                 if universe is None:
                     continue
-                signals = strat.scan(universe, current_time=dt, regime_bars=regime_bars)
+                scan_kwargs = {
+                    "current_time": dt,
+                    "regime_bars": regime_bars,
+                    "allow_regime_warmup": True,
+                }
+                if strat.name == "momentum":
+                    scan_kwargs["existing_symbols"] = [
+                        symbol for symbol, pos in sim.positions.items()
+                        if pos.get("asset_class", "stock") == "stock"
+                    ]
+                signals = strat.scan(universe, **scan_kwargs)
                 for sig in signals:
                     if sig["symbol"] not in sim.positions:
                         asset_class = "crypto" if strat.asset_class == "crypto" else "stock"

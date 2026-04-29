@@ -43,23 +43,23 @@ HawksTrade includes a high-fidelity historical simulator. The current default st
 | Strategy | Market | Key Parameters | Approach |
 |----------|--------|----------------|----------|
 | **Momentum** | US Stocks | Top 3 by 5-day return, min 6% momentum, profit-aware exit | Captures high-velocity rallies, exits flat/losing trades after the minimum hold, and lets profitable trades run under trailing protection. |
-| **RSI Reversion** | US Stocks | Disabled by default; RSI < 38, SMA-200 within 15%, vol spike 1.5x, 2-bar recovery | Mean reversion with volume confirmation and consecutive higher-close gate. |
+| **RSI Reversion** | US Stocks | Disabled by default; RSI < 30, %B < 20%, SMA-200 within +/-15%, vol spike 1.5x, 1-bar recovery | Conservative mean reversion with crash and realised-volatility regime guards. |
 | **Gap-Up** | US Stocks | Disabled by default; 3% gap, high volume, SMA-200 trend | Gap plays on strong trend confirmation. |
-| **EMA Crossover** | Crypto | 9/21 EMA, RSI 35-70, slope + volatility filters | Bullish EMA crossover with BTC regime gate. |
+| **EMA Crossover** | Crypto | 9/21 EMA, 2-day recent-cross window, RSI 35-70, slope + volatility filters | Bullish EMA crossover with BTC regime gate. |
 | **Range Breakout** | Crypto | Prior-day high breakout, 1.8x volume, EMA-50 trend | Breakout entries with BTC regime gate and volume confirmation. |
 
 **Crypto Universe**: `BTC/USD`, `SOL/USD`, `LINK/USD`, `DOGE/USD`, `LTC/USD`, `DOT/USD`.
 
 ### Market Regime Filters
 
-- **SPY SMA-50 (Stocks)**: All stock strategies (Momentum, RSI Reversion, Gap-Up) are gated by SPY trading above its 50-day SMA. When SPY is below SMA-50 (bear regime), stock scans are skipped.
+- **Stock Regime Guards**: Momentum and Gap-Up use the SPY/QQQ SMA-50 regime gate. RSI Reversion has separate crash and realised-volatility filters and remains disabled by default until it has a validated production edge.
 - **BTC EMA-20 (Crypto)**: EMA Crossover and Range Breakout strategies are gated by BTC/USD trading above its 20-day EMA. When BTC is below EMA-20 (crypto bear regime), crypto scans are skipped.
 
 Live/paper scans fail closed when regime data is unavailable or insufficient, blocking new entries until the bot can confirm market conditions. Backtests still allow early warmup periods with insufficient bars so simulations can start before every long-window filter is populated.
 
-### Kelly Criterion Dynamic Position Sizing
+### Strategy Position Sizing
 
-Momentum strategy uses Half-Kelly position sizing with parameters derived dynamically from the last 30 closed momentum trades. When fewer than 10 trades are available, it falls back to hardcoded defaults (WR=0.567, avg_win=14.0%, avg_loss=5.4%). Position size is capped by `trading.max_position_pct` and currently cannot exceed 5% of portfolio.
+Momentum, RSI Reversion, and EMA Crossover emit ATR-risk quantities that target 1% account risk per trade before the global 5% max-position cap is applied. Momentum still has a Half-Kelly fallback in the executor if a signal does not include ATR sizing, but the current strategy path provides ATR-risk sizing by default.
 
 ### Momentum Exit Policy
 

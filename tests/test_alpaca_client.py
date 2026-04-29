@@ -1,7 +1,7 @@
 import json
 import os
 import unittest
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -217,6 +217,28 @@ class AlpacaClientTests(unittest.TestCase):
 
         self.assertEqual(fake_client.req.limit, 10000)
         self.assertEqual(fake_client.req.symbol_or_symbols, ["BTC/USD", "ETH/USD"])
+
+    def test_completed_daily_stock_bars_drop_current_market_date(self):
+        now = datetime(2026, 4, 29, 16, 0, tzinfo=timezone.utc)
+        bars = [
+            SimpleNamespace(timestamp=datetime(2026, 4, 28, 20, 0, tzinfo=timezone.utc), close=100),
+            SimpleNamespace(timestamp=datetime(2026, 4, 29, 15, 0, tzinfo=timezone.utc), close=101),
+        ]
+
+        completed = alpaca_client._completed_daily_bars(bars, market="stock", now=now)
+
+        self.assertEqual([bar.close for bar in completed], [100])
+
+    def test_completed_daily_crypto_bars_drop_current_utc_date(self):
+        now = datetime(2026, 4, 29, 16, 0, tzinfo=timezone.utc)
+        bars = [
+            SimpleNamespace(timestamp=datetime(2026, 4, 28, 0, 0, tzinfo=timezone.utc), close=100),
+            SimpleNamespace(timestamp=datetime(2026, 4, 29, 0, 0, tzinfo=timezone.utc), close=101),
+        ]
+
+        completed = alpaca_client._completed_daily_bars(bars, market="crypto", now=now)
+
+        self.assertEqual([bar.close for bar in completed], [100])
 
     def test_normalize_symbol_removes_crypto_slash(self):
         self.assertEqual(alpaca_client.normalize_symbol("BTC/USD"), "BTCUSD")

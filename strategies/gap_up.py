@@ -78,7 +78,10 @@ class GapUpStrategy(BaseStrategy):
             return []
 
         regime_bars = kwargs.get("regime_bars")
-        if not rm.market_regime_ok(bars_data=regime_bars):
+        if not rm.market_regime_ok(
+            bars_data=regime_bars,
+            allow_warmup=bool(kwargs.get("allow_regime_warmup", False)),
+        ):
             log.info("[GapUp] Bear regime (SPY < SMA50), skipping scan.")
             return []
 

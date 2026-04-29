@@ -14,6 +14,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from alpaca.trading.client import TradingClient
@@ -519,6 +520,57 @@ def _lookback_delta(timeframe: str, limit: int, market: str) -> timedelta:
     return timedelta(days=max(limit * multiplier, 30))
 
 
+def _bar_timestamp(bar):
+    if hasattr(bar, "timestamp"):
+        return getattr(bar, "timestamp")
+    if isinstance(bar, dict):
+        return bar.get("timestamp")
+    return None
+
+
+def _parse_bar_timestamp(value):
+    if isinstance(value, datetime):
+        ts = value
+    elif isinstance(value, str):
+        raw = value.replace("Z", "+00:00")
+        try:
+            ts = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+    else:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts
+
+
+def _completed_daily_bars(bars, market: str, now: datetime | None = None):
+    if not bars:
+        return bars
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    tz = ZoneInfo("America/New_York") if market == "stock" else timezone.utc
+    current_session_date = now.astimezone(tz).date()
+    completed = []
+    for bar in bars:
+        ts = _parse_bar_timestamp(_bar_timestamp(bar))
+        if ts is not None and ts.astimezone(tz).date() >= current_session_date:
+            continue
+        completed.append(bar)
+    return completed
+
+
+def _filter_completed_daily_bars(bars_by_symbol: dict, timeframe: str, market: str):
+    if timeframe != "1Day":
+        return bars_by_symbol
+    return {
+        symbol: _completed_daily_bars(bars, market=market)
+        for symbol, bars in bars_by_symbol.items()
+    }
+
+
 # ── Market Data: Stocks ──────────────────────────────────────────────────────
 
 def get_stock_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
@@ -576,7 +628,7 @@ def get_stock_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
         elif isinstance(batch_res, dict):
             all_bars.update(batch_res)
 
-    return all_bars
+    return _filter_completed_daily_bars(all_bars, timeframe=timeframe, market="stock")
 
 
 def get_stock_latest_quote(symbol: str):
@@ -673,7 +725,7 @@ def get_crypto_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
         elif isinstance(batch_res, dict):
             all_bars.update(batch_res)
             
-    return all_bars
+    return _filter_completed_daily_bars(all_bars, timeframe=timeframe, market="crypto")
 
 
 def get_crypto_latest_price(symbol: str) -> float:

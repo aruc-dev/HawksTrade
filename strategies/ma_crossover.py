@@ -15,6 +15,7 @@ from typing import List, Dict
 import pandas as pd
 
 from strategies.base_strategy import BaseStrategy
+from strategies.atr_sizing import atr_stop_and_qty
 from strategies.rsi_reversion import _calc_rsi, _calc_atr
 from core import alpaca_client as ac
 from core import risk_manager as rm
@@ -35,17 +36,28 @@ def _detect_crossover(fast: pd.Series, slow: pd.Series) -> str:
             'bearish' if fast just crossed below slow,
             'none'    otherwise.
     """
-    if len(fast) < 2:
+    return _detect_recent_crossover(fast, slow, lookback=1)
+
+
+def _detect_recent_crossover(fast: pd.Series, slow: pd.Series, lookback: int = 1) -> str:
+    """Return the most recent crossover within the last lookback transitions."""
+    if len(fast) < 2 or len(slow) < 2:
         return "none"
 
-    prev_diff = fast.iloc[-2] - slow.iloc[-2]
-    curr_diff = fast.iloc[-1] - slow.iloc[-1]
+    lookback = max(1, int(lookback))
+    diffs = fast - slow
+    start = max(1, len(diffs) - lookback)
 
-    if prev_diff < 0 and curr_diff > 0:
-        return "bullish"
-    if prev_diff > 0 and curr_diff < 0:
-        return "bearish"
-    return "none"
+    latest = "none"
+    for idx in range(start, len(diffs)):
+        prev_diff = diffs.iloc[idx - 1]
+        curr_diff = diffs.iloc[idx]
+        if prev_diff <= 0 and curr_diff > 0:
+            latest = "bullish"
+        elif prev_diff >= 0 and curr_diff < 0:
+            latest = "bearish"
+
+    return latest
 
 
 def _bars_for_symbol(bars_data, symbol: str):
@@ -81,6 +93,7 @@ class MACrossoverStrategy(BaseStrategy):
         vol_spike_ratio  = float(SCFG.get("volume_spike_ratio", 1.2))
         vol_avg_period   = int(SCFG.get("volume_avg_period", 20))
         vol_filter_period = int(SCFG.get("vol_filter_period", 10))
+        cross_lookback   = int(SCFG.get("entry_cross_lookback_days", 1))
         min_trade_value  = float(CFG["trading"].get("min_trade_value_usd", 100))
 
         log.info(f"[MACross] Scanning {len(universe)} crypto pairs "
@@ -95,14 +108,18 @@ class MACrossoverStrategy(BaseStrategy):
             return []
 
         regime_bars = kwargs.get("regime_bars")
-        if not rm.crypto_regime_ok(bars_data=regime_bars):
+        if not rm.crypto_regime_ok(
+            bars_data=regime_bars,
+            allow_warmup=bool(kwargs.get("allow_regime_warmup", False)),
+        ):
             log.info("[MACross] Crypto bear regime (BTC < EMA20), skipping scan.")
             return []
 
         try:
             portfolio_equity = ac.get_portfolio_value()
-        except Exception:
-            portfolio_equity = 0.0
+        except Exception as e:
+            log.error(f"[MACross] Could not fetch portfolio value for ATR-risk sizing; skipping signals: {e}")
+            return []
 
         for symbol in universe:
             try:
@@ -116,7 +133,7 @@ class MACrossoverStrategy(BaseStrategy):
                 ])
                 fast    = _ema(closes, fast_span)
                 slow    = _ema(closes, slow_span)
-                cross   = _detect_crossover(fast, slow)
+                cross   = _detect_recent_crossover(fast, slow, lookback=cross_lookback)
 
                 # Slope Filter: Ensure slow EMA is actually trending up over last 4 periods
                 # Fix BUG-004: Added length check for iloc[-5]
@@ -156,24 +173,24 @@ class MACrossoverStrategy(BaseStrategy):
 
                 if cross == "bullish" and is_trending_up and is_volatile and volume_ok and rsi_min <= rsi_val <= rsi_max:
                     atr = _calc_atr(bars, atr_period)
-                    atr_stop = round(price - atr_mult * atr, 4)
 
                     # Guard against zero slow EMA (theoretical edge case on micro-cap assets)
                     ema_divergence = abs(fast_v - slow_v) / slow_v if slow_v != 0 else 0.0
 
-                    atr_risk_qty = None
-                    if atr > 0 and atr_stop < price and portfolio_equity > 0:
-                        risk_dollars   = portfolio_equity * risk_pct
-                        risk_per_share = price - atr_stop
-                        if risk_per_share > 0:
-                            atr_risk_qty = round(risk_dollars / risk_per_share, 6)
-                            if atr_risk_qty * price < min_trade_value:
-                                log.info(
-                                    f"[MACross] {symbol} ATR-risk quantity {atr_risk_qty} "
-                                    f"(${atr_risk_qty * price:.2f}) is below min ${min_trade_value}. "
-                                    "Skipping signal."
-                                )
-                                continue
+                    sized = atr_stop_and_qty(
+                        symbol=symbol,
+                        price=price,
+                        atr=atr,
+                        atr_multiplier=atr_mult,
+                        portfolio_equity=portfolio_equity,
+                        risk_per_trade_pct=risk_pct,
+                        min_trade_value=min_trade_value,
+                        logger=log,
+                        prefix="[MACross]",
+                    )
+                    if sized is None:
+                        continue
+                    atr_stop, atr_risk_qty = sized
 
                     sig = {
                         "symbol":         symbol,
@@ -184,8 +201,7 @@ class MACrossoverStrategy(BaseStrategy):
                         "atr_stop_price": atr_stop,
                         "reason":         f"BULLISH {fast_span}/{slow_span} EMA Crossover | Slope UP | Vol Confirm | RSI={rsi_val:.1f} | ATR Stop={atr_stop}",
                     }
-                    if atr_risk_qty is not None:
-                        sig["atr_risk_qty"] = atr_risk_qty
+                    sig["atr_risk_qty"] = atr_risk_qty
 
                     signals.append(sig)
                     log.info(

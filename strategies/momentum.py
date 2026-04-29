@@ -20,6 +20,7 @@ from typing import List, Dict
 import pandas as pd
 
 from strategies.base_strategy import BaseStrategy
+from strategies.atr_sizing import atr_stop_and_qty
 from core import alpaca_client as ac
 from core import risk_manager as rm
 from core.config_loader import get_config
@@ -31,15 +32,26 @@ SCFG = CFG["strategies"]["momentum"]
 log = logging.getLogger("strategy.momentum")
 
 
+def _bar_value(bar, field: str, default: float = 0.0) -> float:
+    if isinstance(bar, dict):
+        value = bar.get(field, default)
+    else:
+        value = getattr(bar, field, default)
+    try:
+        return float(value if value is not None else default)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def _calc_atr(bars, period: int = 14) -> float:
     """Compute ATR via EWM-smoothed True Range over the most recent bars."""
     if len(bars) < 2:
         return 0.0
     trs = []
     for i in range(1, len(bars)):
-        high = float(getattr(bars[i], "high", 0) or 0)
-        low = float(getattr(bars[i], "low", 0) or 0)
-        prev_close = float(getattr(bars[i - 1], "close", 0) or 0)
+        high = _bar_value(bars[i], "high")
+        low = _bar_value(bars[i], "low")
+        prev_close = _bar_value(bars[i - 1], "close")
         if high <= 0 or low <= 0 or prev_close <= 0:
             continue
         tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
@@ -49,13 +61,30 @@ def _calc_atr(bars, period: int = 14) -> float:
     return float(pd.Series(trs).ewm(span=period, adjust=False).mean().iloc[-1])
 
 
-def _sector_filtered_top_n(scores: list, top_n: int, max_per_sector: int) -> list:
+def _initial_sector_counts(existing_symbols=None) -> Dict[str, int]:
+    """Count sectors already represented by open or pending stock positions."""
+    sector_counts: Dict[str, int] = {}
+    for symbol in existing_symbols or []:
+        if not str(symbol or "").strip():
+            continue
+        sector = get_sector(str(symbol))
+        sector_counts[sector] = sector_counts.get(sector, 0) + 1
+    return sector_counts
+
+
+def _sector_filtered_top_n(
+    scores: list,
+    top_n: int,
+    max_per_sector: int,
+    existing_symbols=None,
+) -> list:
     """
     Return up to top_n candidates from a pre-sorted (desc momentum) scores list
-    while enforcing max_per_sector per GICS sector.
+    while enforcing max_per_sector per GICS sector across existing and new
+    momentum candidates.
     """
     selected: list = []
-    sector_counts: Dict[str, int] = {}
+    sector_counts = _initial_sector_counts(existing_symbols)
     for candidate in scores:
         sector = get_sector(candidate["symbol"])
         if sector_counts.get(sector, 0) < max_per_sector:
@@ -100,7 +129,10 @@ class MomentumStrategy(BaseStrategy):
 
         # --- Phase 3: Market Breadth Tiered Regime Guard ---
         regime_bars = kwargs.get("regime_bars")
-        spy_bull = rm.market_regime_ok(bars_data=regime_bars)
+        spy_bull = rm.market_regime_ok(
+            bars_data=regime_bars,
+            allow_warmup=bool(kwargs.get("allow_regime_warmup", False)),
+        )
 
         breadth = rm.market_breadth_pct(universe, bars_data=bars_data)
 
@@ -190,14 +222,13 @@ class MomentumStrategy(BaseStrategy):
                 ])
                 avg_vol_20 = volumes.iloc[-21:-1].mean()
                 # Fix BUG-007: add safety guard for volume access
-                curr_vol = float(getattr(bars[-1], "volume", 0) or 0)
+                curr_vol = _bar_value(bars[-1], "volume")
                 if avg_vol_20 > 0 and curr_vol <= vol_spike_ratio * avg_vol_20:
                     log.debug(f"[Momentum] {symbol} skipped: volume confirmation failed ({curr_vol:.0f} <= {vol_spike_ratio}x {avg_vol_20:.0f})")
                     continue
 
-                # Phase 1: ATR stop price
+                # Phase 1: ATR input for stop and risk sizing
                 atr = _calc_atr(bars, period=atr_period) if len(bars) >= atr_period + 1 else 0.0
-                atr_stop = round(price_now - atr_mult * atr, 4) if atr > 0 else None
 
                 scores.append({
                     "symbol":        symbol,
@@ -205,7 +236,6 @@ class MomentumStrategy(BaseStrategy):
                     "alpha":         alpha,
                     "price":         price_now,
                     "atr":           atr,
-                    "atr_stop":      atr_stop,
                 })
 
             except Exception as e:
@@ -218,37 +248,39 @@ class MomentumStrategy(BaseStrategy):
         # --- Phase 2: Sector-neutral ranking ---
         scores.sort(key=lambda x: x["alpha"], reverse=True)
         max_per_sector = int(SCFG.get("max_positions_per_sector", 1))
-        top = _sector_filtered_top_n(scores, effective_top_n, max_per_sector)
+        top = _sector_filtered_top_n(
+            scores,
+            effective_top_n,
+            max_per_sector,
+            existing_symbols=kwargs.get("existing_symbols"),
+        )
 
         # --- Phase 1: ATR-based risk sizing ---
         risk_pct = float(SCFG.get("risk_per_trade_pct", 0.01))
         min_trade_value = float(CFG["trading"].get("min_trade_value_usd", 100))
         try:
             portfolio_equity = ac.get_portfolio_value()
-        except Exception:
-            portfolio_equity = 0.0
+        except Exception as e:
+            log.error(f"[Momentum] Could not fetch portfolio value for ATR-risk sizing; skipping signals: {e}")
+            return []
 
         signals = []
         for s in top:
             price     = s["price"]
-            atr_stop  = s["atr_stop"]
-
-            # Compute ATR-risk quantity when stop is valid and below entry
-            atr_risk_qty = None
-            if atr_stop is not None and atr_stop < price and portfolio_equity > 0:
-                risk_dollars = portfolio_equity * risk_pct
-                risk_per_share = price - atr_stop
-                if risk_per_share > 0:
-                    atr_risk_qty = round(risk_dollars / risk_per_share, 6)
-
-                    # Notional minimum check: prevent micro-trades
-                    if atr_risk_qty * price < min_trade_value:
-                        log.info(
-                            f"[Momentum] {s['symbol']} ATR-risk quantity {atr_risk_qty} "
-                            f"(${atr_risk_qty * price:.2f}) is below min ${min_trade_value}. "
-                            "Skipping signal."
-                        )
-                        continue
+            sized = atr_stop_and_qty(
+                symbol=s["symbol"],
+                price=price,
+                atr=s["atr"],
+                atr_multiplier=atr_mult,
+                portfolio_equity=portfolio_equity,
+                risk_per_trade_pct=risk_pct,
+                min_trade_value=min_trade_value,
+                logger=log,
+                prefix="[Momentum]",
+            )
+            if sized is None:
+                continue
+            atr_stop, atr_risk_qty = sized
 
             sig: Dict = {
                 "symbol":     s["symbol"],
@@ -260,10 +292,8 @@ class MomentumStrategy(BaseStrategy):
                 "alpha_score":    round(s["alpha"], 4),
                 "reason":     f"Alpha momentum: {s['alpha']:.1%} (Absolute {s['momentum']:.1%})",
             }
-            if atr_stop is not None:
-                sig["atr_stop_price"] = atr_stop
-            if atr_risk_qty is not None:
-                sig["atr_risk_qty"] = atr_risk_qty
+            sig["atr_stop_price"] = atr_stop
+            sig["atr_risk_qty"] = atr_risk_qty
 
             log.info(
                 f"[Momentum] Signal: BUY {s['symbol']} | Alpha={s['alpha']:.1%} "

@@ -36,6 +36,7 @@ import pandas as pd
 import numpy as np
 
 from strategies.base_strategy import BaseStrategy
+from strategies.atr_sizing import atr_stop_and_qty
 from core import alpaca_client as ac
 from core.config_loader import get_config
 
@@ -44,16 +45,20 @@ SCFG = CFG["strategies"]["rsi_reversion"]
 log  = logging.getLogger("strategy.rsi_reversion")
 
 
-def _in_severe_crash(bars_data=None) -> bool:
+def _in_severe_crash(bars_data=None, allow_warmup: bool = False) -> bool:
     """
     Returns True if SPY is more than 20% below its 252-day peak.
-    Backtest warmup (< 20 bars) returns False. Live errors return True (fail closed).
+    With allow_warmup=True, insufficient supplied bars return False for
+    backtest warmup. Live/paper errors and insufficient supplied bars fail closed.
     """
     try:
         if bars_data is not None:
             spy_bars = bars_data.get("SPY")
             if spy_bars is None or len(spy_bars) < 252:
-                return False
+                if allow_warmup:
+                    return False
+                log.warning("[RSI] Insufficient supplied SPY bars for crash check — blocking (fail closed).")
+                return True
             closes = pd.Series([
                 float(b.close) if hasattr(b, "close") else float(b["close"])
                 for b in spy_bars
@@ -88,10 +93,12 @@ def _in_high_volatility_regime(
     hv_period: int = 20,
     ma_period: int = 200,
     multiplier: float = 1.2,
+    allow_warmup: bool = False,
 ) -> bool:
     """
     Returns True if SPY realised HV(hv_period) exceeds its ma_period-day MA × multiplier.
-    Backtest warmup periods with insufficient regime_bars return False.
+    With allow_warmup=True, insufficient supplied bars return False for
+    backtest warmup.
     Live mode fetches SPY history directly; errors return True (fail closed).
     """
     required = hv_period + ma_period
@@ -99,7 +106,10 @@ def _in_high_volatility_regime(
         if bars_data is not None:
             spy_bars = bars_data.get("SPY")
             if spy_bars is None or len(spy_bars) < required:
-                return False
+                if allow_warmup:
+                    return False
+                log.warning("[RSI] Insufficient supplied SPY bars for VIX filter — blocking (fail closed).")
+                return True
             closes = pd.Series([
                 float(b.close) if hasattr(b, "close") else float(b["close"])
                 for b in spy_bars
@@ -222,10 +232,11 @@ class RSIReversionStrategy(BaseStrategy):
         risk_pct      = float(SCFG.get("risk_per_trade_pct", 0.01))
         sma200_upper  = float(SCFG.get("sma200_upper_buffer_pct", 0.15))
         sma200_lower  = float(SCFG.get("sma200_lower_buffer_pct", 0.15))
+        volume_spike_ratio = float(SCFG.get("volume_spike_ratio", 1.5))
 
         log.info(
             f"[RSI] Scanning {len(universe)} symbols "
-            f"(RSI<{oversold}, %B<20%, vol>1.5×, 1-bar recovery, SMA200 -{sma200_lower:.0%}/+{sma200_upper:.0%}, "
+            f"(RSI<{oversold}, %B<20%, vol>{volume_spike_ratio:.1f}x, 1-bar recovery, SMA200 -{sma200_lower:.0%}/+{sma200_upper:.0%}, "
             f"2×ATR stop, exit@SMA20 or RSI>50)..."
         )
 
@@ -249,19 +260,26 @@ class RSIReversionStrategy(BaseStrategy):
             except Exception as e:
                 log.warning(f"[RSI] Failed to pre-fetch SPY for regime filters: {e}")
 
-        if _in_severe_crash(bars_data=regime_bars):
+        allow_regime_warmup = bool(kwargs.get("allow_regime_warmup", False))
+
+        if _in_severe_crash(bars_data=regime_bars, allow_warmup=allow_regime_warmup):
             log.info("[RSI] Severe crash (SPY >20% below 252d peak) — skipping scan.")
             return []
 
-        if _in_high_volatility_regime(bars_data=regime_bars, multiplier=vix_mult):
+        if _in_high_volatility_regime(
+            bars_data=regime_bars,
+            multiplier=vix_mult,
+            allow_warmup=allow_regime_warmup,
+        ):
             log.info(f"[RSI] Elevated volatility regime (HV20 > HV_MA×{vix_mult}) — skipping scan.")
             return []
 
         min_trade_value = float(CFG["trading"].get("min_trade_value_usd", 100))
         try:
             portfolio_equity = ac.get_portfolio_value()
-        except Exception:
-            portfolio_equity = 0.0
+        except Exception as e:
+            log.error(f"[RSI] Could not fetch portfolio value for ATR-risk sizing; skipping signals: {e}")
+            return []
 
         signals = []
 
@@ -290,7 +308,7 @@ class RSIReversionStrategy(BaseStrategy):
                 # buying already-extended stocks that are not genuinely oversold.
                 in_sma200_band = sma200 * (1 - sma200_lower) < price < sma200 * (1 + sma200_upper)
 
-                if not (rsi < oversold and in_sma200_band and vol_ratio >= 1.5):
+                if not (rsi < oversold and in_sma200_band and vol_ratio >= volume_spike_ratio):
                     continue
 
                 if len(closes) >= bb_period:
@@ -320,22 +338,21 @@ class RSIReversionStrategy(BaseStrategy):
 
                 # ATR-based stop and 1%-risk position sizing
                 atr        = _calc_atr(bars, atr_period)
-                atr_stop   = round(price - atr_mult * atr, 4)
                 lower_band = _bollinger_lower(closes, bb_period, bb_std)
-
-                atr_risk_qty = None
-                if atr > 0 and atr_stop < price and portfolio_equity > 0:
-                    risk_dollars   = portfolio_equity * risk_pct
-                    risk_per_share = price - atr_stop
-                    if risk_per_share > 0:
-                        atr_risk_qty = round(risk_dollars / risk_per_share, 6)
-                        if atr_risk_qty * price < min_trade_value:
-                            log.info(
-                                f"[RSI] {symbol} ATR-risk quantity {atr_risk_qty} "
-                                f"(${atr_risk_qty * price:.2f}) is below min ${min_trade_value}. "
-                                "Skipping signal."
-                            )
-                            continue
+                sized = atr_stop_and_qty(
+                    symbol=symbol,
+                    price=price,
+                    atr=atr,
+                    atr_multiplier=atr_mult,
+                    portfolio_equity=portfolio_equity,
+                    risk_per_trade_pct=risk_pct,
+                    min_trade_value=min_trade_value,
+                    logger=log,
+                    prefix="[RSI]",
+                )
+                if sized is None:
+                    continue
+                atr_stop, atr_risk_qty = sized
 
                 sig = {
                     "symbol":         symbol,
@@ -349,8 +366,7 @@ class RSIReversionStrategy(BaseStrategy):
                         f"vol={vol_ratio:.1f}×, ATR={atr:.2f} stop@{atr_stop:.2f}"
                     ),
                 }
-                if atr_risk_qty is not None:
-                    sig["atr_risk_qty"] = atr_risk_qty
+                sig["atr_risk_qty"] = atr_risk_qty
 
                 signals.append(sig)
                 log.info(

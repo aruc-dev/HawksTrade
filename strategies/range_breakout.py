@@ -76,7 +76,10 @@ class RangeBreakoutStrategy(BaseStrategy):
             return []
 
         regime_bars = kwargs.get("regime_bars")
-        if not rm.crypto_regime_ok(bars_data=regime_bars):
+        if not rm.crypto_regime_ok(
+            bars_data=regime_bars,
+            allow_warmup=bool(kwargs.get("allow_regime_warmup", False)),
+        ):
             log.info("[Breakout] Crypto bear regime (BTC < EMA20), skipping scan.")
             return []
 
