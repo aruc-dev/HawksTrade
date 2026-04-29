@@ -210,6 +210,20 @@ def _mark_alpaca_error(marker: RunScope | None, stage: str, exc: Exception):
     return info
 
 
+def _mark_strategy_error(marker: RunScope | None, stage: str, strategy_name: str, exc: Exception):
+    info = ac.classify_alpaca_error(exc)
+    if marker is not None:
+        marker.mark_error(
+            stage=stage,
+            strategy=strategy_name,
+            error_type=type(exc).__name__,
+            error_category=info.category,
+            retryable=info.retryable,
+            status_code=info.status_code,
+        )
+    return info
+
+
 def _reconcile_trade_log_after_run(marker: RunScope | None, dry_run: bool) -> None:
     if dry_run:
         log.info("Trade-log reconciliation skipped during dry run.")
@@ -220,6 +234,19 @@ def _reconcile_trade_log_after_run(marker: RunScope | None, dry_run: bool) -> No
             stage="trade_log_reconciliation",
             error_type="TradeLogReconciliationFailed",
         )
+
+
+def _prefetched_bars_are_sufficient(bars_data, required: dict[str, int]) -> bool:
+    if not bars_data:
+        return False
+    for symbol, min_count in required.items():
+        try:
+            bars = bars_data[symbol]
+        except Exception:
+            return False
+        if bars is None or len(bars) < min_count:
+            return False
+    return True
 
 
 def _estimate_peak_price_since_entry(symbol: str, asset_class: str, current_price: float, age_days: float) -> float:
@@ -420,16 +447,25 @@ def run(
         log.info(f"Pending entry orders counted as planned positions: {len(pending_entry_symbols)}")
 
     # --- Pre-fetch regime bars to share across strategies (reduces API calls) ---
-    regime_bars = {}
+    stock_regime_bars = None
+    crypto_regime_bars = None
     if run_stocks and market_open:
         try:
-            regime_bars.update(ac.get_stock_bars(["SPY", "QQQ"], timeframe="1Day", limit=255))
+            fetched = ac.get_stock_bars(["SPY", "QQQ"], timeframe="1Day", limit=255)
+            if _prefetched_bars_are_sufficient(fetched, {"SPY": 252, "QQQ": 51}):
+                stock_regime_bars = fetched
+            else:
+                log.warning("Stock regime prefetch missing required SPY/QQQ history; strategies will fetch live and fail closed if unavailable.")
         except Exception as e:
             log.warning(f"Could not pre-fetch stock regime bars: {e}")
 
     if run_crypto:
         try:
-            regime_bars.update(ac.get_crypto_bars(["BTC/USD"], timeframe="1Day", limit=60))
+            fetched = ac.get_crypto_bars(["BTC/USD"], timeframe="1Day", limit=60)
+            if _prefetched_bars_are_sufficient(fetched, {"BTC/USD": 21}):
+                crypto_regime_bars = fetched
+            else:
+                log.warning("Crypto regime prefetch missing required BTC/USD history; strategies will fetch live and fail closed if unavailable.")
         except Exception as e:
             log.warning(f"Could not pre-fetch crypto regime bars: {e}")
 
@@ -442,7 +478,7 @@ def run(
         enabled_stock_strategies = _enabled_strategies(STOCK_STRATEGIES)
         for strategy in enabled_stock_strategies:
             try:
-                signals = strategy.scan(stock_universe, regime_bars=regime_bars)
+                signals = strategy.scan(stock_universe, regime_bars=stock_regime_bars)
                 for sig in signals:
                     sym = sig["symbol"]
                     normalized = ac.normalize_symbol(sym)
@@ -462,6 +498,7 @@ def run(
                         )
                         _register_entry_result(result, sym, open_symbols, planned_symbols, new_entry_symbols)
             except Exception as e:
+                _mark_strategy_error(marker, "stock_strategy", strategy.name, e)
                 log.error(f"Strategy {strategy.name} failed: {e}", exc_info=True)
         all_strategies.extend(enabled_stock_strategies)
 
@@ -474,7 +511,7 @@ def run(
         enabled_crypto_strategies = _enabled_strategies(CRYPTO_STRATEGIES)
         for strategy in enabled_crypto_strategies:
             try:
-                signals = strategy.scan(CRYPTO_UNIVERSE, regime_bars=regime_bars)
+                signals = strategy.scan(CRYPTO_UNIVERSE, regime_bars=crypto_regime_bars)
                 for sig in signals:
                     sym = sig["symbol"]
                     normalized = ac.normalize_symbol(sym)
@@ -494,6 +531,7 @@ def run(
                         )
                         _register_entry_result(result, sym, open_symbols, planned_symbols, new_entry_symbols)
             except Exception as e:
+                _mark_strategy_error(marker, "crypto_strategy", strategy.name, e)
                 log.error(f"Strategy {strategy.name} failed: {e}", exc_info=True)
         all_strategies.extend(enabled_crypto_strategies)
 

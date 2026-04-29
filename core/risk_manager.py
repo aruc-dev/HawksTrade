@@ -368,6 +368,10 @@ def market_regime_ok(bars_data=None) -> bool:
     Live mode: any exception or insufficient bars returns False (fail closed).
     """
     try:
+        if bars_data is not None and not bars_data:
+            log.warning("[RegimeFilter] Empty regime bars supplied; blocking new entries (fail closed).")
+            return False
+
         def _is_above_sma50(symbol: str) -> bool:
             if bars_data is not None:
                 bars = bars_data.get(symbol)
@@ -468,6 +472,10 @@ def crypto_regime_ok(bars_data=None) -> bool:
     favourable, we should block new entries rather than assume they are.
     """
     try:
+        if bars_data is not None and not bars_data:
+            log.warning("[CryptoRegime] Empty regime bars supplied; blocking new entries (fail closed).")
+            return False
+
         if bars_data is not None:
             btc_bars = bars_data.get("BTC/USD")
             if btc_bars is None or len(btc_bars) < 21:

@@ -10,7 +10,6 @@ Works 24/7 on crypto pairs.
 from __future__ import annotations
 
 import logging
-import math
 from datetime import datetime
 from typing import List, Dict
 from pathlib import Path
@@ -62,6 +61,7 @@ class RangeBreakoutStrategy(BaseStrategy):
         atr_mult     = float(SCFG.get("atr_multiplier", 2.0))
         vol_filter_period = int(SCFG.get("vol_filter_period", 10))
         min_trade_value = float(CFG["trading"].get("min_trade_value_usd", 100))
+        max_position_pct = float(CFG["trading"].get("max_position_pct", 0.05))
 
         log.info(f"[Breakout] Scanning {len(universe)} crypto pairs...")
 
@@ -122,10 +122,9 @@ class RangeBreakoutStrategy(BaseStrategy):
                     risk_per_share = price - atr_stop
 
                     if risk_per_share > 0:
-                        qty = math.floor(risk_amount / risk_per_share)
-                        # Cap at 5% portfolio
-                        max_qty = math.floor((portfolio_value * 0.05) / price)
-                        qty = min(qty, max_qty)
+                        qty = risk_amount / risk_per_share
+                        max_qty = (portfolio_value * max_position_pct) / price
+                        qty = round(min(qty, max_qty), 6)
 
                         if qty * price >= min_trade_value:
                             excess_pct = (today_cls - prev_high) / prev_high

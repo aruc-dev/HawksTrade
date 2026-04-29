@@ -65,6 +65,23 @@ class CryptoStrategySymbolTests(unittest.TestCase):
         self.assertEqual(len(signals), 1)
         self.assertEqual(signals[0]["symbol"], "BTCUSD")
 
+    def test_range_breakout_allows_fractional_crypto_position_size(self):
+        bars = [_bar(48000 + idx * 10, high=48100 + idx * 10, low=47900 + idx * 10) for idx in range(60)]
+        bars.append(_bar(50000, high=50100, low=49900, volume=1000))
+        bars.append(_bar(51000, high=51100, low=50000, volume=3000))
+
+        with (
+            patch("strategies.range_breakout.ac.get_crypto_bars", return_value={"BTC/USD": bars}),
+            patch("strategies.range_breakout.rm.crypto_regime_ok", return_value=True),
+            patch("strategies.range_breakout.ac.get_portfolio_value", return_value=10000.0),
+            patch.dict("strategies.range_breakout.SCFG", {"volume_multiplier": 0, "vol_filter_period": 0}),
+        ):
+            signals = RangeBreakoutStrategy().scan(["BTC/USD"])
+
+        self.assertEqual(len(signals), 1)
+        self.assertGreater(signals[0]["atr_risk_qty"], 0)
+        self.assertLess(signals[0]["atr_risk_qty"], 1)
+
     def test_range_breakout_scan_skips_missing_symbol_without_warning(self):
         with (
             patch("strategies.range_breakout.ac.get_crypto_bars", return_value={"BTC/USD": []}),

@@ -35,6 +35,10 @@ class V4ImprovementsTests(unittest.TestCase):
         mock_bars = {"BTC/USD": [MagicMock(close=100) for _ in range(5)]}
         self.assertTrue(rm.crypto_regime_ok(bars_data=mock_bars))
 
+    def test_crypto_regime_ok_empty_prefetch_returns_false(self):
+        # Empty supplied data means a live prefetch failed before any usable BTC bars arrived.
+        self.assertFalse(rm.crypto_regime_ok(bars_data={}))
+
     # ── crypto_regime_ok (live path — fail closed) ────────────────────────────
 
     def test_crypto_regime_ok_live_api_exception_returns_false(self):
@@ -74,6 +78,10 @@ class V4ImprovementsTests(unittest.TestCase):
         # Backtest warmup: not enough SPY history yet — allow trading so simulation starts.
         mock_bars = {"SPY": [MagicMock(close=100) for _ in range(10)]}
         self.assertTrue(rm.market_regime_ok(bars_data=mock_bars))
+
+    def test_market_regime_ok_empty_prefetch_returns_false(self):
+        # Empty supplied data means a live prefetch failed before any usable SPY/QQQ bars arrived.
+        self.assertFalse(rm.market_regime_ok(bars_data={}))
 
     def test_kelly_dynamic_params(self):
         # Mock 15 trades

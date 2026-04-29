@@ -58,6 +58,81 @@ class RunScanTests(unittest.TestCase):
         self.assertEqual(open_symbols, [])
         self.assertEqual(new_entry_symbols, set())
 
+    def test_prefetched_regime_bars_require_all_symbols_and_minimum_history(self):
+        self.assertTrue(
+            run_scan._prefetched_bars_are_sufficient(
+                {"SPY": [object()] * 252, "QQQ": [object()] * 51},
+                {"SPY": 252, "QQQ": 51},
+            )
+        )
+        self.assertFalse(
+            run_scan._prefetched_bars_are_sufficient(
+                {"SPY": [object()] * 251, "QQQ": [object()] * 51},
+                {"SPY": 252, "QQQ": 51},
+            )
+        )
+        self.assertFalse(
+            run_scan._prefetched_bars_are_sufficient(
+                {"SPY": [object()] * 252},
+                {"SPY": 252, "QQQ": 51},
+            )
+        )
+
+    def test_stock_strategy_receives_none_regime_bars_when_prefetch_fails(self):
+        seen_regime_bars = []
+
+        class FakeMomentum:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def scan(self, universe, **kwargs):
+                seen_regime_bars.append(kwargs.get("regime_bars"))
+                return []
+
+        with (
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(run_scan.ac, "get_stock_bars", side_effect=RuntimeError("bars unavailable")),
+            patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "get_stock_universe", return_value=["AAPL"]),
+            patch.object(run_scan, "STOCK_STRATEGIES", [FakeMomentum()]),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+        ):
+            run_scan.run(run_stocks=True, run_crypto=False, dry_run=True)
+
+        self.assertEqual(seen_regime_bars, [None])
+
+    def test_strategy_failure_marks_scan_marker_unhealthy(self):
+        class BrokenMomentum:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def scan(self, universe, **kwargs):
+                raise RuntimeError("strategy exploded")
+
+        marker = FakeMarker()
+        with (
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(
+                run_scan.ac,
+                "get_stock_bars",
+                return_value={"SPY": [object()] * 252, "QQQ": [object()] * 51},
+            ),
+            patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "get_stock_universe", return_value=["AAPL"]),
+            patch.object(run_scan, "STOCK_STRATEGIES", [BrokenMomentum()]),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+        ):
+            run_scan.run(run_stocks=True, run_crypto=False, dry_run=True, marker=marker)
+
+        self.assertEqual(marker.status, "error")
+        self.assertEqual(marker.fields["stage"], "stock_strategy")
+        self.assertEqual(marker.fields["strategy"], "momentum")
+        self.assertEqual(marker.fields["error_type"], "RuntimeError")
+
     def test_strategy_exit_runs_for_stock_strategy_alias(self):
         class StockStrategy:
             name = "momentum"

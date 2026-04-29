@@ -11,7 +11,6 @@ NOTE: Intraday exit is controlled by config intraday.enabled.
 from __future__ import annotations
 
 import logging
-import math
 from datetime import datetime
 from typing import List, Dict
 from pathlib import Path
@@ -64,6 +63,7 @@ class GapUpStrategy(BaseStrategy):
         atr_period  = int(SCFG.get("atr_period", 14))
         atr_mult    = float(SCFG.get("atr_multiplier", 2.0))
         min_trade_value = float(CFG["trading"].get("min_trade_value_usd", 100))
+        max_position_pct = float(CFG["trading"].get("max_position_pct", 0.05))
         max_gap     = 0.15 # 15% cap to avoid buying "exhaustion" gaps
         sma_long    = 200
 
@@ -129,10 +129,9 @@ class GapUpStrategy(BaseStrategy):
                         risk_per_share = price - atr_stop
                         
                         if risk_per_share > 0:
-                            qty = math.floor(risk_amount / risk_per_share)
-                            # Cap at 5% portfolio
-                            max_qty = math.floor((portfolio_value * 0.05) / price)
-                            qty = min(qty, max_qty)
+                            qty = risk_amount / risk_per_share
+                            max_qty = (portfolio_value * max_position_pct) / price
+                            qty = round(min(qty, max_qty), 6)
                             
                             if qty * price >= min_trade_value:
                                 # true gap boosts confidence
