@@ -32,11 +32,26 @@ class CryptoStrategySymbolTests(unittest.TestCase):
     def test_ma_crossover_exit_accepts_slashless_crypto_symbol(self):
         bars = [_bar(100) for _ in range(25)] + [_bar(120)] + [_bar(80)]
 
-        with patch("strategies.ma_crossover.ac.get_crypto_bars", return_value={"BTC/USD": bars}):
+        with (
+            patch("strategies.ma_crossover.ac.get_crypto_bars", return_value={"BTC/USD": bars}),
+            patch.dict("strategies.ma_crossover.SCFG", {"max_loss_exit_pct": 0.0}),
+        ):
             should_exit, reason = MACrossoverStrategy().should_exit("BTCUSD", entry_price=100)
 
         self.assertTrue(should_exit)
         self.assertIn("crossed below", reason)
+
+    def test_ma_crossover_exit_fires_on_strategy_max_loss(self):
+        bars = [_bar(110) for _ in range(25)] + [_bar(93, high=95, low=92)]
+
+        with (
+            patch("strategies.ma_crossover.ac.get_crypto_bars", return_value={"BTC/USD": bars}),
+            patch.dict("strategies.ma_crossover.SCFG", {"max_loss_exit_pct": 0.06}),
+        ):
+            should_exit, reason = MACrossoverStrategy().should_exit("BTC/USD", entry_price=100)
+
+        self.assertTrue(should_exit)
+        self.assertIn("max-loss", reason)
 
     def test_ma_crossover_scan_skips_missing_symbol_without_warning(self):
         with (

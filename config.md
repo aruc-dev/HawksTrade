@@ -18,10 +18,10 @@ The latest validated default configuration is:
 | Trading mode | `mode: paper` | Paper trading should remain the default until live trading is explicitly approved. |
 | Intraday trading | `intraday.enabled: false` | The system is validated as a swing-trading bot. |
 | Screener | `screener.enabled: true` | The tightened screener improved 12-month return versus the old screener and recent fixed-universe test. |
-| Momentum | enabled, `top_n: 3`, `min_momentum_pct: 0.06` | Reduced lower-quality momentum churn and improved the validated return/win-rate profile. |
+| Momentum | enabled, `top_n: 1`, `min_momentum_pct: 0.10`, `volume_spike_ratio: 1.8`, `min_breadth_coverage_pct: 0.75` | Focuses stock exposure on the single strongest high-volume momentum candidate and blocks entries when breadth data coverage is too thin. |
 | RSI Reversion | disabled | Did not improve the recommended 12-month configuration. |
 | Gap-Up | disabled | Did not improve the recommended 12-month configuration. |
-| MA Crossover | enabled | Positive crypto contribution in the latest 12-month backtest. |
+| MA Crossover | enabled, `max_loss_exit_pct: 0.01` | Positive crypto contribution in the latest 12-month backtest with a tighter daily-close loss exit to preserve capital. |
 | Range Breakout | enabled | Hardened crypto breakout sleeve with ranked signals, ATR-risk sizing, and failed-breakout exits; roughly flat contribution in the latest 12-month reproduction. |
 | Momentum exit policy | `profit_trailing` | Exits flat/losing trades after the minimum hold while allowing winners to run under trailing protection. |
 
@@ -29,9 +29,9 @@ Latest recommended 12-month result:
 
 | Final Value | Return | Trades | Win Rate | Max Drawdown |
 |---:|---:|---:|---:|---:|
-| $10,125.60 | +1.26% | 133 | 32.3% | -7.23% |
+| $10,751.62 | +7.52% | 72 | 44.4% | -1.73% |
 
-These results enforce `trading.max_position_pct: 0.05` for all entries, including momentum/Kelly sizing, and include the hardened Range Breakout implementation.
+These results enforce `trading.max_position_pct: 0.05` for all entries, including momentum/Kelly sizing, and include the hardened Range Breakout implementation. No global stop-loss, position-size, or daily-loss-limit risk parameter was increased.
 
 See [backtests.md](backtests.md) for the full comparison.
 
@@ -212,19 +212,22 @@ These pairs are used by the crypto strategies. Crypto scans can run 24/7.
 momentum:
   enabled: true
   asset_class: stocks
-  top_n: 3
+  top_n: 1
   hold_days: 4
   exit_policy: "profit_trailing"
   profit_floor_pct: 0.0
   trail_activation_pct: 0.06
   trailing_stop_pct: 0.04
   max_hold_days: 20
-  min_momentum_pct: 0.06
+  min_momentum_pct: 0.10
+  min_alpha_pct: 0.0
+  min_breadth_coverage_pct: 0.75
+  volume_spike_ratio: 1.8
 ```
 
 Recommended: enabled.
 
-Momentum is the primary stock contributor. The stricter `top_n: 3` and `min_momentum_pct: 0.06` settings reduced churn and improved the validated default profile.
+Momentum is the primary stock contributor. The stricter `top_n: 1`, `min_momentum_pct: 0.10`, `volume_spike_ratio: 1.8`, and `min_breadth_coverage_pct: 0.75` settings reduced churn, improved win rate, and cut drawdown in the validated default profile.
 
 ### RSI Reversion
 
@@ -232,8 +235,8 @@ Momentum is the primary stock contributor. The stricter `top_n: 3` and `min_mome
 rsi_reversion:
   enabled: false
   rsi_period: 14
-  oversold_threshold: 38
-  overbought_threshold: 62
+  oversold_threshold: 30
+  overbought_threshold: 50
   hold_days: 10
 ```
 
@@ -267,11 +270,12 @@ ma_crossover:
   slow_ema: 21
   timeframe: "1Day"
   hold_days: 12
+  max_loss_exit_pct: 0.01
 ```
 
 Recommended: enabled.
 
-This strategy contributed positively in the latest recommended 12-month backtest.
+This strategy contributed positively in the latest recommended 12-month backtest. The strategy-level max-loss exit closes the position when the latest daily close is at least 1% below entry, which reduced the largest observed 12-month MA Crossover loss in validation.
 
 ### Range Breakout
 

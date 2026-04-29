@@ -1,9 +1,10 @@
 """
-HawksTrade - Momentum Strategy (Adaptive v2.0)
+HawksTrade - Momentum Strategy (Adaptive v2.1)
 ===============================================
 Phase 1: ATR-adjusted stop-loss (2×ATR below entry) and 1%-risk position sizing.
 Phase 2: Sector-neutral ranking — max 1 position per GICS sector.
-Phase 3: Market breadth tiered regime guard.
+Phase 3: Breadth data coverage guard.
+Phase 4: Market breadth tiered regime guard.
   - Green  (breadth >= 50%): full deployment.
   - Yellow (breadth 25–50%): reduced deployment (yellow_max_positions cap).
   - Red    (breadth < 25% OR SPY < SMA50): no new entries.
@@ -15,6 +16,7 @@ Strategy: Swing trade (NOT intraday).
 """
 
 import logging
+import math
 from typing import List, Dict
 
 import pandas as pd
@@ -59,6 +61,24 @@ def _calc_atr(bars, period: int = 14) -> float:
     if not trs:
         return 0.0
     return float(pd.Series(trs).ewm(span=period, adjust=False).mean().iloc[-1])
+
+
+def _breadth_coverage_pct(bars_data, universe: list, min_bars: int = 51) -> float:
+    """Return the fraction of the scan universe with enough valid bars for breadth."""
+    if not universe:
+        return 0.0
+    eligible = 0
+    for symbol in universe:
+        try:
+            bars = bars_data[symbol]
+        except Exception:
+            bars = None
+        if bars is None or len(bars) < min_bars:
+            continue
+        closes = [_bar_value(bar, "close") for bar in bars[-min_bars:]]
+        if all(value > 0 and math.isfinite(value) for value in closes):
+            eligible += 1
+    return eligible / len(universe)
 
 
 def _initial_sector_counts(existing_symbols=None) -> Dict[str, int]:
@@ -139,6 +159,15 @@ class MomentumStrategy(BaseStrategy):
         green_thresh  = float(SCFG.get("breadth_green_threshold", 0.50))
         red_thresh    = float(SCFG.get("breadth_red_threshold", 0.25))
         yellow_max    = int(SCFG.get("yellow_max_positions", 3))
+        min_breadth_coverage = float(SCFG.get("min_breadth_coverage_pct", 0.0))
+
+        breadth_coverage = _breadth_coverage_pct(bars_data, universe)
+        if breadth_coverage < min_breadth_coverage:
+            log.warning(
+                f"[Momentum] Breadth coverage too low: {breadth_coverage:.1%} "
+                f"< required {min_breadth_coverage:.1%}. No new entries."
+            )
+            return []
 
         if not spy_bull or breadth < red_thresh:
             log.info(
@@ -188,6 +217,7 @@ class MomentumStrategy(BaseStrategy):
         scores = []
         atr_period = int(SCFG.get("atr_period", 14))
         atr_mult   = float(SCFG.get("atr_multiplier", 2.0))
+        min_alpha_pct = float(SCFG.get("min_alpha_pct", 0.0))
 
         for symbol in universe:
             try:
@@ -211,6 +241,11 @@ class MomentumStrategy(BaseStrategy):
                 alpha = momentum - spy_momentum
 
                 if momentum < SCFG["min_momentum_pct"]:
+                    continue
+                if alpha < min_alpha_pct:
+                    log.debug(
+                        f"[Momentum] {symbol} skipped: alpha {alpha:.1%} < {min_alpha_pct:.1%}"
+                    )
                     continue
 
                 # 3. Volume Confirmation (Recommendation 3)

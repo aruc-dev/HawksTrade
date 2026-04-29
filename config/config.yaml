@@ -114,15 +114,16 @@ strategies:
   momentum:
     enabled: true
     asset_class: stocks          # stocks | crypto | both
-    description: "Adaptive momentum: ATR-adjusted stops, 1% risk sizing, sector-neutral ranking, breadth-tiered regime, volume-spike entry (>1.2x 20d avg volume required)"
-    top_n: 3                     # Pick top 3 stocks by momentum
+    description: "Adaptive momentum: top-1 high-conviction ranking with ATR-adjusted stops, 1% risk sizing, sector-neutral ranking, breadth coverage guard, breadth-tiered regime, and volume-spike entry (>1.8x 20d avg volume required)"
+    top_n: 1                     # Pick only the strongest stock by momentum
     hold_days: 4                 # Minimum hold before profit-aware exit checks
     exit_policy: "profit_trailing" # fixed_hold | profit_trailing | risk_only_baseline
     profit_floor_pct: 0.0        # After hold_days, exit if P&L is flat/negative
     trail_activation_pct: 0.06   # Enable trailing stop once peak gain reaches 6%
     trailing_stop_pct: 0.04      # Exit if price falls 4% from post-entry peak
     max_hold_days: 20            # Cap stale momentum positions even if still green
-    min_momentum_pct: 0.06       # Minimum 6% 5-day gain to qualify
+    min_momentum_pct: 0.10       # Minimum 10% 5-day gain to qualify
+    min_alpha_pct: 0.0           # Optional excess 5-day return over SPY; 0 disables this stricter gate
     weight: 1.0                  # Signal weight (relative to other strategies)
     # Phase 1: Volatility-adjusted risk management
     atr_period: 14               # ATR lookback for dynamic stop computation
@@ -133,8 +134,9 @@ strategies:
     # Phase 3: Market breadth tiered regime guard
     breadth_green_threshold: 0.50  # >= 50% above SMA50 → Green (full top_n deployed)
     breadth_red_threshold: 0.25    # < 25% above SMA50 → Red (no new entries)
-    yellow_max_positions: 2        # Max positions in Yellow regime (breadth 25–50%); must be < top_n
-    volume_spike_ratio: 1.2        # Entry bar volume must exceed this multiple of the 20-day average
+    min_breadth_coverage_pct: 0.75 # Require valid SMA50 coverage for at least 75% of the scan universe
+    yellow_max_positions: 1        # Max positions in Yellow regime (breadth 25–50%)
+    volume_spike_ratio: 1.8        # Entry bar volume must exceed this multiple of the 20-day average
 
   rsi_reversion:
     enabled: false
@@ -173,12 +175,13 @@ strategies:
   ma_crossover:
     enabled: true
     asset_class: crypto
-    description: "Enter when 9-EMA crosses above 21-EMA with slope + volatility + RSI filters. Exit on bearish cross or 12-day hold cap. Uses 2xATR stop and 1%-risk position sizing."
+    description: "Enter when 9-EMA crosses above 21-EMA with slope + volatility + RSI filters. Exit on daily close max-loss, bearish cross, RSI target, or 12-day hold cap. Uses 2xATR stop and 1%-risk position sizing."
     fast_ema: 9
     slow_ema: 21
     timeframe: "1Day"            # "1Hour" | "4Hour" | "1Day"
     entry_cross_lookback_days: 2  # Allow entry if bullish cross happened within this many completed daily transitions
     hold_days: 12
+    max_loss_exit_pct: 0.01      # Strategy-level exit if latest daily close is at least 1% below entry
     atr_period: 14
     atr_multiplier: 2.0
     risk_per_trade_pct: 0.01     # Risk 1% of equity per trade for ATR-based sizing

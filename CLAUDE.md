@@ -204,10 +204,10 @@ Each can be individually enabled/disabled.
 
 | Strategy | Asset | Logic |
 |----------|-------|-------|
-| `momentum` | Stocks | Buy top 3 by 5-day return (min 6%), exit flat/losing trades after 4 trading days, let profitable trades run with trailing protection |
+| `momentum` | Stocks | Buy top 1 by 5-day return (min 10%) with 1.8x volume and 75% breadth coverage, exit flat/losing trades after 4 trading days, let profitable trades run with trailing protection |
 | `rsi_reversion` | Stocks | Disabled by default; conservative mean reversion with RSI < 30, %B < 20%, volume spike, 1-bar recovery, SMA200 band, and crash/volatility guards |
 | `gap_up` | Stocks | Disabled by default; buy on >3% gap-up with 1.5x volume, hold 2 days |
-| `ma_crossover` | Crypto | Buy on 9-EMA crossing above 21-EMA, including the configured recent-cross window (daily bars) |
+| `ma_crossover` | Crypto | Buy on 9-EMA crossing above 21-EMA, including the configured recent-cross window (daily bars), with a 1% daily-close max-loss exit |
 | `range_breakout` | Crypto | Buy on ranked daily close breakouts above the prior day high with 1.8x volume, rising EMA50, RSI/extension guards, ATR-risk sizing, and failed-breakout exits |
 
 Momentum backtests can compare `--exit-policy fixed_hold`, `--exit-policy profit_trailing`, and `--exit-policy risk_only_baseline`. Use `risk_only_baseline` only as a benchmark for the old no-hold-exit behavior, not as the default live policy.

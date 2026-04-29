@@ -24,12 +24,12 @@ when it is wider than the global stop.
 
 ---
 
-## 1. Momentum *(Stocks — Enabled, Adaptive v2.0)*
+## 1. Momentum *(Stocks — Enabled, Adaptive v2.1)*
 
 **Type:** Trend-following, swing trade.
 
 **Entry:** Ranks every stock in the scan universe by its 5-day price return. Buys
-the top 3 that have gained at least 6%, subject to three layers of adaptive
+only the top candidate that has gained at least 10%, subject to four layers of adaptive
 filtering:
 
 1. **Phase 1 — ATR Stop + 1% Risk Sizing**: Each signal carries an ATR-based stop
@@ -39,17 +39,24 @@ filtering:
    using a static GICS sector map across both existing/pending positions and new
    candidates. If the top two ranked stocks share a capped sector, the lower-ranked
    one is skipped in favour of the next stock in a different sector.
-3. **Phase 3 — Market Breadth Tiered Regime Guard**: Computes what fraction of
+3. **Breadth Coverage Guard**: Requires at least 75% of the scan universe to have
+   enough valid bars for SMA50 breadth computation. If coverage is lower, Momentum
+   fails closed and opens no new positions rather than trading from a partial market sample.
+4. **Market Breadth Tiered Regime Guard**: Computes what fraction of
    the scan universe trades above its own SMA50 (`rm.market_breadth_pct`):
    - **Red** (SPY < SMA50 OR breadth < 25%): no new entries.
-   - **Yellow** (breadth 25–50%): reduced deployment, up to `yellow_max_positions: 2`.
-   - **Green** (breadth ≥ 50%): full `top_n: 3` deployment.
+   - **Yellow** (breadth 25–50%): reduced deployment, up to `yellow_max_positions: 1`.
+   - **Green** (breadth ≥ 50%): full `top_n: 1` deployment.
 
-**Volume Confirmation (per-signal):** Each candidate must have entry-bar volume ≥ 120% of
-its 20-day average volume (`volume_spike_ratio: 1.2`). Signals where today's volume is
+**Volume Confirmation (per-signal):** Each candidate must have entry-bar volume ≥ 180% of
+its 20-day average volume (`volume_spike_ratio: 1.8`). Signals where today's volume is
 suspiciously thin — a common trait of exhaustion moves — are skipped. The screener
 provides a separate 20-day ADV baseline at universe construction time; this check adds
 a per-signal guard at scan time.
+
+**Optional Alpha Gate:** `min_alpha_pct` can require a candidate's 5-day return to
+exceed SPY's 5-day return by a configured amount. It is set to `0.0` in the validated
+default because the stricter alpha gate reduced the latest 12-month result.
 
 **Exit:** Three-layer policy:
 - After the minimum 4-day hold, flat or losing trades exit immediately.
@@ -65,8 +72,9 @@ room while the global 3.5% stop remains the absolute floor.
 
 | Parameter | Value |
 |---|---|
-| `top_n` | 3 |
-| `min_momentum_pct` | 6% (5-day return) |
+| `top_n` | 1 |
+| `min_momentum_pct` | 10% (5-day return) |
+| `min_alpha_pct` | 0% excess return over SPY (disabled) |
 | `hold_days` (minimum) | 4 business days |
 | `max_hold_days` | 20 business days |
 | `trail_activation_pct` | 6% peak gain |
@@ -78,12 +86,14 @@ room while the global 3.5% stop remains the absolute floor.
 | `max_positions_per_sector` | 1 |
 | `breadth_green_threshold` | 50% |
 | `breadth_red_threshold` | 25% |
-| `yellow_max_positions` | 2 |
-| `volume_spike_ratio` | 1.2 (entry bar ≥ 120% of 20-day avg volume) |
+| `min_breadth_coverage_pct` | 75% |
+| `yellow_max_positions` | 1 |
+| `volume_spike_ratio` | 1.8 (entry bar ≥ 180% of 20-day avg volume) |
 
 **Regime filters:**
 - SPY > SMA50 (hard requirement; Red if fails).
 - Market breadth ≥ 25% of universe above SMA50 (Red if fails).
+- Valid breadth inputs for at least 75% of the scan universe.
 
 ---
 
@@ -179,6 +189,7 @@ take-profit from the global risk manager apply throughout.
 5. Volume Confirmation: Entry-bar volume ≥ 120% of its 20-day average (`volume_spike_ratio: 1.2`).
 
 **Exit:** Whichever fires first:
+- Latest daily close is at least 1% below entry (`max_loss_exit_pct`) — strategy-level capital preservation exit.
 - 9-EMA crosses back below 21-EMA (bearish crossover).
 - RSI(14) > 75 (`rsi_exit_max`) — overbought target reached.
 - Hard cap at 12 calendar days (`hold_days`).
@@ -192,6 +203,7 @@ take-profit from the global risk manager apply throughout.
 | `timeframe` | 1Day |
 | `entry_cross_lookback_days` | 2 |
 | `hold_days` | 12 calendar days |
+| `max_loss_exit_pct` | 1% below entry on latest daily close |
 | `rsi_entry_min` | 35 |
 | `rsi_entry_max` | 70 |
 | `rsi_exit_max` | 75 |

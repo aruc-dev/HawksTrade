@@ -216,11 +216,12 @@ class MACrossoverStrategy(BaseStrategy):
         return signals
 
     def should_exit(self, symbol: str, entry_price: float) -> tuple:
-        """Exit when fast EMA crosses below slow EMA or RSI is overbought."""
+        """Exit on max loss, bearish EMA cross, or overbought RSI."""
         fast_span = SCFG["fast_ema"]
         slow_span = SCFG["slow_ema"]
         timeframe = SCFG["timeframe"]
         rsi_exit_max = int(SCFG.get("rsi_exit_max", 70))
+        max_loss_exit_pct = float(SCFG.get("max_loss_exit_pct", 0.0))
 
         try:
             bars_data = ac.get_crypto_bars([symbol], timeframe=timeframe, limit=slow_span + 20)
@@ -232,6 +233,13 @@ class MACrossoverStrategy(BaseStrategy):
                 float(b.close) if hasattr(b, "close") else float(b["close"])
                 for b in bars
             ])
+            price = float(closes.iloc[-1])
+            if max_loss_exit_pct > 0 and price <= entry_price * (1 - max_loss_exit_pct):
+                return True, (
+                    f"MA crossover max-loss exit: close {price:.4f} <= "
+                    f"entry {entry_price:.4f} - {max_loss_exit_pct:.1%}"
+                )
+
             fast   = _ema(closes, fast_span)
             slow   = _ema(closes, slow_span)
             cross  = _detect_crossover(fast, slow)

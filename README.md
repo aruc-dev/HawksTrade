@@ -30,7 +30,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener
 
 ## Backtesting & Performance
 
-HawksTrade includes a high-fidelity historical simulator. The current hardened default strategy set achieved **+1.26% annual return** in the 12-month backtest ending 2026-04-10 on $10,000 starting capital, with the configured 5% max-position risk cap enforced.
+HawksTrade includes a high-fidelity historical simulator. The current capital-preserving default strategy set achieved **+7.52% annual return** in the 12-month backtest ending 2026-04-10 on $10,000 starting capital, with the configured 5% max-position risk cap enforced.
 
 - **Backtest Summary**: [backtests.md](backtests.md)
 - **Configuration Guide**: [config.md](config.md)
@@ -42,10 +42,10 @@ HawksTrade includes a high-fidelity historical simulator. The current hardened d
 
 | Strategy | Market | Key Parameters | Approach |
 |----------|--------|----------------|----------|
-| **Momentum** | US Stocks | Top 3 by 5-day return, min 6% momentum, profit-aware exit | Captures high-velocity rallies, exits flat/losing trades after the minimum hold, and lets profitable trades run under trailing protection. |
+| **Momentum** | US Stocks | Top 1 by 5-day return, min 10% momentum, 1.8x volume spike, 75% breadth coverage, profit-aware exit | Captures only high-conviction rallies, exits flat/losing trades after the minimum hold, and lets profitable trades run under trailing protection. |
 | **RSI Reversion** | US Stocks | Disabled by default; RSI < 30, %B < 20%, SMA-200 within +/-15%, vol spike 1.5x, 1-bar recovery | Conservative mean reversion with crash and realised-volatility regime guards. |
 | **Gap-Up** | US Stocks | Disabled by default; 3% gap, high volume, SMA-200 trend | Gap plays on strong trend confirmation. |
-| **EMA Crossover** | Crypto | 9/21 EMA, 2-day recent-cross window, RSI 35-70, slope + volatility filters | Bullish EMA crossover with BTC regime gate. |
+| **EMA Crossover** | Crypto | 9/21 EMA, 2-day recent-cross window, RSI 35-70, slope + volatility filters, 1% daily-close max-loss exit | Bullish EMA crossover with BTC regime gate and tighter strategy-level capital defense. |
 | **Range Breakout** | Crypto | Prior-day high close breakout, 1.8x volume, rising EMA-50, RSI/extension guards | Ranked breakout entries with BTC regime gate, ATR-risk sizing, and failed-breakout exits. |
 
 **Crypto Universe**: `BTC/USD`, `SOL/USD`, `LINK/USD`, `DOGE/USD`, `LTC/USD`, `DOT/USD`.
@@ -76,8 +76,11 @@ Use `--no-screener` to backtest only the fixed configured stock universe, or `--
 ```bash
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
   --strategies momentum,ma_crossover,range_breakout \
-  --set strategies.momentum.top_n=3 \
-  --set strategies.momentum.min_momentum_pct=0.06
+  --set strategies.momentum.top_n=1 \
+  --set strategies.momentum.min_momentum_pct=0.10 \
+  --set strategies.momentum.volume_spike_ratio=1.8 \
+  --set strategies.momentum.min_breadth_coverage_pct=0.75 \
+  --set strategies.ma_crossover.max_loss_exit_pct=0.01
 ```
 
 ---
@@ -86,6 +89,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
 
 - **Asymmetric Reward**: 3.5% stop-loss / 12% take-profit.
 - **Capital Protection**: SMA-based trend filters on all strategies.
+- **Strategy-Local Loss Defense**: MA Crossover exits on a daily close at least 1% below entry, reducing crypto trend-tail losses before the global stop layer is needed.
 - **Position Limits**: Max 5% of portfolio per trade, cap of 10 concurrent positions.
 - **Daily Guardrail**: 5% daily loss limit (hard stop for the day), keyed to the `America/New_York` trading-session date so UTC cloud hosts do not reset the baseline at UTC midnight. The baseline is the first observed account value for that trading date and is persisted in `data/daily_loss_baseline.json`; it is not reconstructed from the prior close.
 - **Broker Resilience**: Alpaca timeouts, rate limits, and 5xx outages use bounded retry; auth failures, not-found responses, and broker rejections are classified for fail-closed logging.
