@@ -464,7 +464,7 @@ def run_backtest(
     else:
         end_dt = datetime.now(timezone.utc) - timedelta(days=2)
         
-    start_dt = end_dt - timedelta(days=days + 210) # 210 for SMA200
+    start_dt = end_dt - timedelta(days=days + 310) # 310 cal days ≈ 215 trading days — enough for SMA200 warmup
     
     historical_data = fetch_all_data(symbols, start_dt, end_dt)
     sim = BacktestSimulator(initial_fund)

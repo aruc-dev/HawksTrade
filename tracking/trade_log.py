@@ -275,8 +275,16 @@ def get_open_trades() -> list:
 
 
 def get_closed_trades() -> list:
-    """Return all closed trades from the trade log CSV."""
-    return [row for row in read_trade_rows() if row.get("status") == "closed"]
+    """Return exit-side (sell) closed trade rows from the trade log CSV.
+
+    Only sell rows are returned so callers like kelly_position_size() see
+    one row per completed round-trip — not two (the buy row is also marked
+    closed by mark_trade_closed, which would otherwise double the sample).
+    """
+    return [
+        row for row in read_trade_rows()
+        if row.get("status") == "closed" and row.get("side") == "sell"
+    ]
 
 
 def mark_trade_closed(

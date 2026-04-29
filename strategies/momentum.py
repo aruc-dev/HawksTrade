@@ -164,7 +164,7 @@ class MomentumStrategy(BaseStrategy):
                     continue
 
                 # 1. Smoothed Lookback (Recommendation 1)
-                closes = pd.Series([float(b.close) for b in bars])
+                closes = pd.Series([float(b.close) if hasattr(b, "close") else float(b["close"]) for b in bars])
                 if len(closes) < 8:
                     continue
                 avg_now = closes.iloc[-2:].mean()
