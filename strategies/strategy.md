@@ -16,9 +16,10 @@
 | MA Crossover | Crypto | **Enabled** | `ma_crossover.py` |
 | Range Breakout | Crypto | **Enabled** | `range_breakout.py` |
 
-All strategies share a common global risk layer (3.5% stop-loss, 12% take-profit,
-max 10 open positions, 5% daily-loss halt) enforced by `core/risk_manager.py` and
-`scheduler/run_risk_check.py`. Individual strategies may override the stop via
+All strategies share a common global risk layer (7% max position size,
+3.5% stop-loss, 12% take-profit, max 10 open positions, 5% daily-loss halt)
+enforced by `core/risk_manager.py` and `scheduler/run_risk_check.py`.
+Individual strategies may override the stop via
 `atr_stop_price` on their signals; the executor writes that value to the trade log
 when it is wider than the global stop.
 
@@ -34,7 +35,7 @@ filtering:
 
 1. **Phase 1 — ATR Stop + 1% Risk Sizing**: Each signal carries an ATR-based stop
    (`entry - 2 × ATR_14`). Position size is computed as `(equity × 1%) / (entry - atr_stop)`
-   so that every trade risks exactly 1% of capital, capped at 5% per-position max.
+   so that every trade risks exactly 1% of capital, capped at 7% per-position max.
 2. **Phase 2 — Sector-Neutral Ranking**: Enforces `max_positions_per_sector: 1`
    using a static GICS sector map across both existing/pending positions and new
    candidates. If the top two ranked stocks share a capped sector, the lower-ranked
@@ -233,7 +234,7 @@ take-profit from the global risk manager apply throughout.
 6. RSI(14) ≤ 78 — avoids severely overextended breakout closes.
 
 **Sizing:** Each signal carries a 2 × ATR(14) stop and ATR-risk quantity targeting
-1% account risk before the executor applies the global 5% max-position cap.
+1% account risk before the executor applies the global 7% max-position cap.
 
 **Ranking:** Simultaneous crypto breakouts are sorted by confidence, combining
 breakout excess, volume ratio, and trend spread. This avoids entering lower-quality

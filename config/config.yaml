@@ -35,7 +35,7 @@ trading:
                                  # Crypto is NOT required to use them; reservation only blocks stocks
                                  # from saturating the portfolio. Set both max and min to 0 to disable crypto.
                                  # Invariant: min_crypto_positions <= max_crypto_positions <= max_positions
-  max_position_pct: 0.05         # Max % of portfolio per position (5%)
+  max_position_pct: 0.07         # Max % of portfolio per position (7%)
   stop_loss_pct: 0.035           # Stop-loss at 3.5% below entry
   take_profit_pct: 0.12          # Take-profit at 12% above entry
   daily_loss_limit_pct: 0.05     # Hard stop from first observed account value for the NY trading date

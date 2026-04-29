@@ -19,12 +19,12 @@ The current recommended configuration uses:
 - `rsi_reversion` disabled
 - `gap_up` disabled
 
-These results enforce `trading.max_position_pct: 0.05` for every entry, including momentum/Kelly sizing, and include the hardened Range Breakout implementation with ranked signals, extension/RSI guards, and failed-breakout exits. The tuning improved the 12-month default from +1.26% return / -7.23% max drawdown to +7.52% return / -1.73% max drawdown without increasing global risk limits.
+These results enforce `trading.max_position_pct: 0.07` for every entry, including momentum/Kelly sizing, and include the hardened Range Breakout implementation with ranked signals, extension/RSI guards, and failed-breakout exits. The latest tuning raised the max-position cap from 5% to 7%, improving the 12-month default from +7.52% return / -1.73% max drawdown to +10.66% return / -2.27% max drawdown.
 
 | Period | Final Value | Return | Trades | Win Rate | Max Drawdown |
 |---|---:|---:|---:|---:|---:|
-| 12 months | $10,751.62 | +7.52% | 72 | 44.4% | -1.73% |
-| 6 months | $10,046.99 | +0.47% | 20 | 35.0% | -1.28% |
+| 12 months | $11,066.32 | +10.66% | 72 | 44.4% | -2.27% |
+| 6 months | $10,076.90 | +0.77% | 20 | 35.0% | -1.78% |
 
 ---
 
@@ -32,19 +32,19 @@ These results enforce `trading.max_position_pct: 0.05` for every entry, includin
 
 | Strategy | Trades | Win Rate | Avg P&L % | Total P&L | Best | Worst |
 |---|---:|---:|---:|---:|---:|---:|
-| `ma_crossover` | 19 | 42.1% | +4.33% | $414.22 | +18.74% | -6.32% |
-| `momentum` | 36 | 44.4% | +1.65% | $313.06 | +17.34% | -17.03% |
-| `range_breakout` | 17 | 47.1% | +0.05% | -$0.86 | +13.47% | -6.74% |
+| `ma_crossover` | 19 | 42.1% | +4.33% | $578.61 | +18.74% | -6.32% |
+| `momentum` | 36 | 44.4% | +1.65% | $449.93 | +17.34% | -17.03% |
+| `range_breakout` | 17 | 47.1% | +0.05% | $1.50 | +13.47% | -6.74% |
 
 ## 12-Month Quarterly Breakdown
 
 | Quarter | Start Value | End Value | Return | Trades | Win Rate |
 |---|---:|---:|---:|---:|---:|
-| Q2 2025 | $10,000.00 | $10,082.19 | +0.82% | 18 | 50.0% |
-| Q3 2025 | $10,071.04 | $10,776.53 | +7.01% | 30 | 53.3% |
-| Q4 2025 | $10,787.77 | $10,694.46 | -0.87% | 10 | 20.0% |
-| Q1 2026 | $10,694.46 | $10,732.64 | +0.36% | 13 | 38.5% |
-| Q2 2026 | $10,732.64 | $10,751.62 | +0.18% | 1 | 0.0% |
+| Q2 2025 | $10,000.00 | $10,117.54 | +1.18% | 18 | 50.0% |
+| Q3 2025 | $10,101.87 | $11,090.24 | +9.78% | 30 | 53.3% |
+| Q4 2025 | $11,106.42 | $10,971.89 | -1.21% | 10 | 20.0% |
+| Q1 2026 | $10,971.89 | $11,039.01 | +0.61% | 13 | 38.5% |
+| Q2 2026 | $11,039.01 | $11,066.32 | +0.25% | 1 | 0.0% |
 
 ---
 
@@ -52,7 +52,8 @@ These results enforce `trading.max_position_pct: 0.05` for every entry, includin
 
 | Scenario | Screener | Strategies | Return | Trades | Win Rate | Max Drawdown |
 |---|---|---|---:|---:|---:|---:|
-| Current capital-preserving default strategy set | On | `momentum`, `ma_crossover`, `range_breakout` | +7.52% | 72 | 44.4% | -1.73% |
+| Current profit-tuned default strategy set | On | `momentum`, `ma_crossover`, `range_breakout` | +10.66% | 72 | 44.4% | -2.27% |
+| Previous 5% cap capital-preserving default strategy set | On | `momentum`, `ma_crossover`, `range_breakout` | +7.52% | 72 | 44.4% | -1.73% |
 | Previous tight screener, hardened default strategy set | On | `momentum`, `ma_crossover`, `range_breakout` | +1.26% | 133 | 32.3% | -7.23% |
 | Historical fixed-universe run before Range Breakout hardening | Off | `momentum`, `ma_crossover`, `range_breakout` | +14.50% | 172 | 39.0% | -3.06% |
 | Historical pre-cap recommended run | On | `momentum`, `ma_crossover`, `range_breakout` | +26.53% | 274 | 34.7% | -9.34% |
@@ -60,11 +61,11 @@ These results enforce `trading.max_position_pct: 0.05` for every entry, includin
 
 Interpretation:
 
-- The stricter Momentum profile cut churn materially: 98 previous trades fell to 36, win rate improved from 26.5% to 44.4%, and the sleeve became profitable without changing account-level risk limits.
+- The stricter Momentum profile cut churn materially: 98 previous trades fell to 36, win rate improved from 26.5% to 44.4%, and the sleeve remained profitable under the new 7% max-position cap.
 - The MA Crossover 1% daily-close max-loss exit reduced its worst observed 12-month loss from -19.25% to -6.32% while improving total contribution.
-- Range Breakout remained close to flat over the 12-month reproduction: 17 trades, 47.1% win rate, -$0.86 total P&L. A no-Range variant produced +7.41% return with -1.45% max drawdown; the current default keeps Range Breakout enabled because it added a small amount of return while total drawdown stayed below 2%.
+- Range Breakout remained close to flat over the 12-month reproduction: 17 trades, 47.1% win rate, $1.50 total P&L. The current default keeps Range Breakout enabled because it adds diversified crypto breakout exposure while total drawdown stays below the production gate.
 - Use the current row above for live/paper expectations and treat older rows as historical baselines only.
-- Enforcing the configured 5% position cap lowered dollar returns versus the earlier pre-cap runs, but also reduced position-size risk.
+- Raising the configured position cap from 5% to 7% increased return while keeping the costed production-gate drawdown below 2.5%.
 - `rsi_reversion` and `gap_up` are disabled by default because they did not improve the validated 12-month configuration.
 
 ---
@@ -126,10 +127,10 @@ Latest production-gate result:
 
 | Gate | Result | Return | Max Drawdown | Trades | Win Rate | Profit Factor | Daily Sharpe |
 |---|---|---:|---:|---:|---:|---:|---:|
-| `default_12m_costed` | PASS | +6.68% | -1.86% | 72 | 44.4% | 1.72 | 1.76 |
-| `default_6m_costed` | PASS | +0.47% | -1.24% | 20 | 35.0% | 1.08 | 0.40 |
-| `crypto_12m_costed` | PASS | +3.81% | -1.36% | 36 | 44.4% | 2.12 | 1.43 |
-| `crypto_recent_30d_watch` | WARN | -0.72% | -0.72% | 6 | 0.0% | 0.00 | -5.88 |
+| `default_12m_costed` | PASS | +9.48% | -2.45% | 72 | 44.4% | 1.74 | 1.80 |
+| `default_6m_costed` | PASS | +0.78% | -1.74% | 20 | 35.0% | 1.11 | 0.48 |
+| `crypto_12m_costed` | PASS | +5.38% | -1.87% | 36 | 44.4% | 2.14 | 1.45 |
+| `crypto_recent_30d_watch` | WARN | -1.00% | -1.01% | 6 | 0.0% | 0.00 | -5.88 |
 
 RSI Reversion enablement remains blocked by the `--profile rsi` gate: the latest
 costed 12-month RSI-only run returned -1.20% with only 2 trades, and there is no
