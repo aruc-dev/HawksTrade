@@ -30,7 +30,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener
 
 ## Backtesting & Performance
 
-HawksTrade includes a high-fidelity historical simulator. The current default strategy set achieved **+19.00% annual return** in the 12-month backtest ending 2026-04-10 on $10,000 starting capital, with the configured 5% max-position risk cap enforced.
+HawksTrade includes a high-fidelity historical simulator. The current hardened default strategy set achieved **+1.26% annual return** in the 12-month backtest ending 2026-04-10 on $10,000 starting capital, with the configured 5% max-position risk cap enforced.
 
 - **Backtest Summary**: [backtests.md](backtests.md)
 - **Configuration Guide**: [config.md](config.md)
@@ -46,7 +46,7 @@ HawksTrade includes a high-fidelity historical simulator. The current default st
 | **RSI Reversion** | US Stocks | Disabled by default; RSI < 30, %B < 20%, SMA-200 within +/-15%, vol spike 1.5x, 1-bar recovery | Conservative mean reversion with crash and realised-volatility regime guards. |
 | **Gap-Up** | US Stocks | Disabled by default; 3% gap, high volume, SMA-200 trend | Gap plays on strong trend confirmation. |
 | **EMA Crossover** | Crypto | 9/21 EMA, 2-day recent-cross window, RSI 35-70, slope + volatility filters | Bullish EMA crossover with BTC regime gate. |
-| **Range Breakout** | Crypto | Prior-day high breakout, 1.8x volume, EMA-50 trend | Breakout entries with BTC regime gate and volume confirmation. |
+| **Range Breakout** | Crypto | Prior-day high close breakout, 1.8x volume, rising EMA-50, RSI/extension guards | Ranked breakout entries with BTC regime gate, ATR-risk sizing, and failed-breakout exits. |
 
 **Crypto Universe**: `BTC/USD`, `SOL/USD`, `LINK/USD`, `DOGE/USD`, `LTC/USD`, `DOT/USD`.
 
@@ -59,7 +59,7 @@ Live/paper scans fail closed when regime data is unavailable or insufficient, bl
 
 ### Strategy Position Sizing
 
-Momentum, RSI Reversion, and EMA Crossover emit ATR-risk quantities that target 1% account risk per trade before the global 5% max-position cap is applied. Momentum still has a Half-Kelly fallback in the executor if a signal does not include ATR sizing, but the current strategy path provides ATR-risk sizing by default.
+Momentum, RSI Reversion, EMA Crossover, and Range Breakout emit ATR-risk quantities that target 1% account risk per trade before the global 5% max-position cap is applied. Momentum still has a Half-Kelly fallback in the executor if a signal does not include ATR sizing, but the current strategy path provides ATR-risk sizing by default.
 
 ### Momentum Exit Policy
 

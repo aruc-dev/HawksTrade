@@ -208,7 +208,7 @@ Each can be individually enabled/disabled.
 | `rsi_reversion` | Stocks | Disabled by default; conservative mean reversion with RSI < 30, %B < 20%, volume spike, 1-bar recovery, SMA200 band, and crash/volatility guards |
 | `gap_up` | Stocks | Disabled by default; buy on >3% gap-up with 1.5x volume, hold 2 days |
 | `ma_crossover` | Crypto | Buy on 9-EMA crossing above 21-EMA, including the configured recent-cross window (daily bars) |
-| `range_breakout` | Crypto | Buy on breakout above prior day high, 1.8x volume |
+| `range_breakout` | Crypto | Buy on ranked daily close breakouts above the prior day high with 1.8x volume, rising EMA50, RSI/extension guards, ATR-risk sizing, and failed-breakout exits |
 
 Momentum backtests can compare `--exit-policy fixed_hold`, `--exit-policy profit_trailing`, and `--exit-policy risk_only_baseline`. Use `risk_only_baseline` only as a benchmark for the old no-hold-exit behavior, not as the default live policy.
 Use `--strategies momentum,ma_crossover,range_breakout` and repeated `--set key.path=value` arguments for backtest-only strategy experiments without editing `config/config.yaml`.

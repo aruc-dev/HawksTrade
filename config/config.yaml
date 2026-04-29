@@ -193,15 +193,26 @@ strategies:
   range_breakout:
     enabled: true
     asset_class: crypto
-    description: "Enter on breakout of prior day high/low with volume confirmation"
-    breakout_pct: 0.008          # Price must break 0.8% beyond prior day high/low
+    description: "Enter long on confirmed daily close breakout above the prior day high with volume, trend, volatility, RSI, and extension guards. Exit failed breakouts early before the 3-day cap."
+    breakout_pct: 0.008          # Close must break 0.8% beyond prior day high
+    max_breakout_extension_pct: 0.08  # Avoid chasing closes >8% beyond the breakout level
     volume_multiplier: 1.8       # Volume must be 1.8x average to confirm breakout
+    volume_avg_period: 20        # Lookback for average volume confirmation
     timeframe: "1Day"
     hold_days: 3
     atr_period: 14
     atr_multiplier: 2.0
     risk_per_trade_pct: 0.01
     vol_filter_period: 10
+    min_range_ratio: 0.5         # Entry bar range must be at least 50% of recent average range
+    trend_ema_period: 50         # Price must close above this EMA
+    trend_slope_lookback: 5      # Trend EMA must be non-declining across this many bars
+    rsi_period: 14
+    rsi_entry_max: 78            # Avoid buying severely overextended breakout closes
+    rsi_exit_max: 82             # Profit-taking exhaustion exit after profit floor
+    profit_floor_pct: 0.03       # RSI exhaustion exit only after at least 3% open profit
+    breakdown_exit_pct: 0.02     # Exit failed breakout when close falls 2% below entry
+    trend_exit_enabled: true     # Exit when completed close falls below trend EMA
     weight: 0.9
 
 # --- SCHEDULING (reference only; OS scheduler templates live in scheduler/) ---

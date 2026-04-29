@@ -1,6 +1,6 @@
 # HawksTrade Configuration Guide
 
-> **Updated:** April 14, 2026
+> **Updated:** April 29, 2026
 > **Primary config file:** `config/config.yaml`
 > **Local config:** `config/config.local.yaml` — if present, deep-merged over `config/config.yaml`. Include only the keys you want to override. Gitignored; use for per-machine settings without modifying the committed file.
 > **Recommended profile:** growth-oriented paper trading profile validated by the latest 12-month backtest.
@@ -22,16 +22,16 @@ The latest validated default configuration is:
 | RSI Reversion | disabled | Did not improve the recommended 12-month configuration. |
 | Gap-Up | disabled | Did not improve the recommended 12-month configuration. |
 | MA Crossover | enabled | Positive crypto contribution in the latest 12-month backtest. |
-| Range Breakout | enabled | Positive crypto contribution in the latest recommended 12-month backtest. |
+| Range Breakout | enabled | Hardened crypto breakout sleeve with ranked signals, ATR-risk sizing, and failed-breakout exits; roughly flat contribution in the latest 12-month reproduction. |
 | Momentum exit policy | `profit_trailing` | Exits flat/losing trades after the minimum hold while allowing winners to run under trailing protection. |
 
 Latest recommended 12-month result:
 
 | Final Value | Return | Trades | Win Rate | Max Drawdown |
 |---:|---:|---:|---:|---:|
-| $11,900.35 | +19.00% | 274 | 34.7% | -6.13% |
+| $10,125.60 | +1.26% | 133 | 32.3% | -7.23% |
 
-These results enforce `trading.max_position_pct: 0.05` for all entries, including momentum/Kelly sizing. Earlier higher-return documentation reflected the older sizing behavior before that risk-cap fix.
+These results enforce `trading.max_position_pct: 0.05` for all entries, including momentum/Kelly sizing, and include the hardened Range Breakout implementation.
 
 See [backtests.md](backtests.md) for the full comparison.
 
@@ -280,14 +280,29 @@ range_breakout:
   enabled: true
   asset_class: crypto
   breakout_pct: 0.008
+  max_breakout_extension_pct: 0.08
   volume_multiplier: 1.8
+  volume_avg_period: 20
   timeframe: "1Day"
   hold_days: 3
+  atr_period: 14
+  atr_multiplier: 2.0
+  risk_per_trade_pct: 0.01
+  vol_filter_period: 10
+  min_range_ratio: 0.5
+  trend_ema_period: 50
+  trend_slope_lookback: 5
+  rsi_period: 14
+  rsi_entry_max: 78
+  rsi_exit_max: 82
+  profit_floor_pct: 0.03
+  breakdown_exit_pct: 0.02
+  trend_exit_enabled: true
 ```
 
 Recommended: enabled.
 
-This strategy improved the latest recommended 12-month configuration after the momentum entry criteria were tightened.
+This strategy is the production crypto breakout sleeve. It now uses confirmed daily close breakouts, ranked signal selection, ATR-risk sizing, and explicit failed-breakout exits before the 3-day hold cap.
 
 ---
 

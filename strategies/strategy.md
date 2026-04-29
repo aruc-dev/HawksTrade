@@ -209,19 +209,39 @@ take-profit from the global risk manager apply throughout.
 **Entry:** All of the following must be true:
 1. Today's close ≥ prior day's high × 1.008 (price breaks 0.8% above the prior range).
 2. Volume ≥ 1.8× 20-day average — breakout backed by conviction.
-3. Price > 50-day EMA — breakout in the direction of the longer trend.
+3. Price > 50-day EMA and EMA50 is non-declining over 5 bars — breakout in the direction of the longer trend.
 4. Today's range ≥ 50% of the 10-day average range — market is not compressed.
+5. Close is no more than 8% beyond the breakout level — avoids chasing stale vertical moves.
+6. RSI(14) ≤ 78 — avoids severely overextended breakout closes.
 
-**Exit:** No active strategy-level exit signal. Held for 3 calendar days, then
-exited by the hold-days cap. Stop-loss and take-profit from the global risk manager
-apply throughout.
+**Sizing:** Each signal carries a 2 × ATR(14) stop and ATR-risk quantity targeting
+1% account risk before the executor applies the global 5% max-position cap.
+
+**Ranking:** Simultaneous crypto breakouts are sorted by confidence, combining
+breakout excess, volume ratio, and trend spread. This avoids entering lower-quality
+signals first just because they appear earlier in `crypto.scan_universe`.
+
+**Exit:** Failed breakouts can exit before the 3-calendar-day cap:
+- Close ≤ entry × 0.98 — breakout failure.
+- Close < EMA50 — trend filter failure.
+- RSI(14) ≥ 82 after at least 3% open profit — exhaustion profit-taking.
+
+Stop-loss and take-profit from the global risk manager apply throughout.
 
 **Key parameters:**
 
 | Parameter | Value |
 |---|---|
 | `breakout_pct` | 0.8% above prior high |
+| `max_breakout_extension_pct` | 8% above breakout level |
 | `volume_multiplier` | 1.8× |
+| `volume_avg_period` | 20 |
+| `trend_ema_period` | 50 |
+| `trend_slope_lookback` | 5 |
+| `min_range_ratio` | 50% of recent average range |
+| `rsi_entry_max` | 78 |
+| `rsi_exit_max` | 82 |
+| `breakdown_exit_pct` | 2% below entry |
 | `timeframe` | 1Day |
 | `hold_days` | 3 calendar days |
 
