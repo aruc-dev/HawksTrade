@@ -17,8 +17,8 @@ Exit:  FIRST of:
 Regime filters (both must pass):
   1. Crash filter  — skip if SPY >20% below its 252-day peak.
   2. VIX proxy     — skip if SPY realised HV(20) > its 200-day MA × 1.2.
-                     Falls back gracefully; backtest regime_bars (60 bars)
-                     are too short for this filter → always passes through.
+                     Backtests pass enough SPY history after warmup for both
+                     filters to run; early warmup still passes through.
 
 ATR stop price is stored in each signal dict as "atr_stop_price". In both
 backtest and live/paper modes it flows through order_executor.enter_position
@@ -91,7 +91,7 @@ def _in_high_volatility_regime(
 ) -> bool:
     """
     Returns True if SPY realised HV(hv_period) exceeds its ma_period-day MA × multiplier.
-    Backtest regime_bars (60 bars) are insufficient for a 200-day MA → returns False.
+    Backtest warmup periods with insufficient regime_bars return False.
     Live mode fetches SPY history directly; errors return True (fail closed).
     """
     required = hv_period + ma_period

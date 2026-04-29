@@ -17,13 +17,45 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from scheduler.run_backtest import (
     BacktestSimulator,
     EXTENDED_POOL,
+    REGIME_HISTORY_LIMITS,
     _apply_override,
+    _build_regime_bars,
     _compute_max_drawdown,
     _compute_quarterly_performance,
     _patch_runtime_risk_config,
 )
 from core import risk_manager as rm
 from core.exit_policy import should_exit_for_hold
+
+
+def _price_frame(periods: int) -> pd.DataFrame:
+    index = pd.date_range("2025-01-01", periods=periods, freq="D", tz=timezone.utc)
+    return pd.DataFrame(
+        {
+            "open": range(periods),
+            "high": range(periods),
+            "low": range(periods),
+            "close": range(periods),
+            "volume": [1000] * periods,
+        },
+        index=index,
+    )
+
+
+class TestBacktestRegimeHistory(unittest.TestCase):
+    def test_regime_bars_use_full_filter_windows(self):
+        historical_data = {
+            "SPY": _price_frame(300),
+            "QQQ": _price_frame(100),
+            "BTC/USD": _price_frame(80),
+        }
+        current_date = historical_data["SPY"].index[-1]
+
+        regime_bars = _build_regime_bars(historical_data, current_date)
+
+        self.assertEqual(len(regime_bars["SPY"]), REGIME_HISTORY_LIMITS["SPY"])
+        self.assertEqual(len(regime_bars["QQQ"]), REGIME_HISTORY_LIMITS["QQQ"])
+        self.assertEqual(len(regime_bars["BTC/USD"]), REGIME_HISTORY_LIMITS["BTC/USD"])
 
 
 class TestHoldDayExitFix(unittest.TestCase):

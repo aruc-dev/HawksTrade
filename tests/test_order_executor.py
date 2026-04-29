@@ -54,7 +54,7 @@ class OrderExecutorTests(unittest.TestCase):
 
         self.assertEqual(rows[0]["side"], "buy")
         self.assertEqual(rows[0]["status"], "closed")
-        self.assertEqual(rows[0]["exit_price"], "110")
+        self.assertEqual(float(rows[0]["exit_price"]), 110.0)
         self.assertEqual(rows[1]["side"], "sell")
         self.assertEqual(rows[1]["status"], "closed")
 
@@ -179,6 +179,38 @@ class OrderExecutorTests(unittest.TestCase):
         place_limit_order.assert_not_called()
         self.assertTrue(any("non-long position" in message for message in logs.output))
 
+    def test_exit_position_rejects_non_positive_latest_price_before_submit(self):
+        position = SimpleNamespace(qty="2", avg_entry_price="100")
+
+        with (
+            patch.object(order_executor.ac, "get_position", return_value=position),
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=0),
+            patch.object(order_executor.ac, "place_limit_order") as place_limit_order,
+        ):
+            result = order_executor.exit_position("AAPL", "take profit", dry_run=False)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "invalid_exit_price")
+        place_limit_order.assert_not_called()
+
+    def test_exit_position_force_market_bypasses_limit_order_type(self):
+        position = SimpleNamespace(qty="2", avg_entry_price="100")
+        order = SimpleNamespace(id="exit-market", status="filled", filled_qty="2")
+
+        with (
+            patch.object(order_executor.ac, "get_position", return_value=position),
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=110),
+            patch.object(order_executor.ac, "get_open_orders", return_value=[]),
+            patch.object(order_executor.ac, "place_market_order", return_value=order) as place_market_order,
+            patch.object(order_executor.ac, "place_limit_order") as place_limit_order,
+        ):
+            result = order_executor.exit_position("AAPL", "emergency", dry_run=False, force_market=True)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "closed")
+        place_market_order.assert_called_once()
+        place_limit_order.assert_not_called()
+
     def test_enter_position_logs_submitted_buy_without_open_exposure(self):
         order = SimpleNamespace(id="entry-submitted", status="pending_new", filled_qty="0")
 
@@ -277,7 +309,8 @@ class OrderExecutorTests(unittest.TestCase):
 
         rows = order_intents.read_order_intents()
 
-        self.assertIsNone(first)
+        self.assertIsNotNone(first)
+        self.assertEqual(first["status"], "entry_failed")
         self.assertIsNotNone(second)
         self.assertEqual(len(seen_client_ids), 2)
         self.assertEqual(seen_client_ids[0], seen_client_ids[1])

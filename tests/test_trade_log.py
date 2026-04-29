@@ -100,6 +100,24 @@ class TradeLogTests(unittest.TestCase):
     def test_locked_trade_log_docstring_describes_generic_csv_lock(self):
         self.assertIn("CSV file path", trade_log.locked_trade_log.__doc__)
 
+    def test_shared_locked_trade_log_reuses_existing_lock_read_only(self):
+        lock_path = trade_log._lock_path(trade_log.TRADE_LOG)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path.write_bytes(b"\0")
+        real_open = open
+        lock_open_modes = []
+
+        def recording_open(path, mode="r", *args, **kwargs):
+            if Path(path) == lock_path:
+                lock_open_modes.append(mode)
+            return real_open(path, mode, *args, **kwargs)
+
+        with mock.patch("builtins.open", recording_open):
+            with trade_log.locked_trade_log(exclusive=False):
+                pass
+
+        self.assertEqual(lock_open_modes, ["rb"])
+
     def test_read_rows_unlocked_opens_csv_with_newline_empty(self):
         path = Path(self.tmpdir.name) / "rows.csv"
         path.write_text("symbol,status\nAAPL,open\n")

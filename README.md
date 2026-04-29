@@ -55,7 +55,7 @@ HawksTrade includes a high-fidelity historical simulator. The current default st
 - **SPY SMA-50 (Stocks)**: All stock strategies (Momentum, RSI Reversion, Gap-Up) are gated by SPY trading above its 50-day SMA. When SPY is below SMA-50 (bear regime), stock scans are skipped.
 - **BTC EMA-20 (Crypto)**: EMA Crossover and Range Breakout strategies are gated by BTC/USD trading above its 20-day EMA. When BTC is below EMA-20 (crypto bear regime), crypto scans are skipped.
 
-Both filters fail open (return True) if data is unavailable, ensuring the system doesn't halt on data issues.
+Live/paper scans fail closed when regime data is unavailable or insufficient, blocking new entries until the bot can confirm market conditions. Backtests still allow early warmup periods with insufficient bars so simulations can start before every long-window filter is populated.
 
 ### Kelly Criterion Dynamic Position Sizing
 
@@ -100,7 +100,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
 
 All settings are in `config/config.yaml`. See [config.md](config.md) for the available configuration options and the recommended backtest-backed profile. Toggle strategies, adjust risk, or switch between `paper` and `live` modes only when you intend to revalidate those changes.
 
-For machine-local configuration (e.g. switching to `live` on a specific host without touching the committed file), create `config/config.local.yaml`. When present it is used **in full** in place of `config/config.yaml` — it must contain the complete configuration. This file is gitignored and never committed.
+For machine-local configuration (e.g. switching to `live` on a specific host without touching the committed file), create `config/config.local.yaml`. When present it is deep-merged over `config/config.yaml`, so it only needs the keys you want to override. This file is gitignored and never committed.
 
 ---
 

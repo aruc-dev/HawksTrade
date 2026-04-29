@@ -2,7 +2,7 @@
 
 > **Updated:** April 14, 2026
 > **Primary config file:** `config/config.yaml`
-> **Local config:** `config/config.local.yaml` — if present, used **in full** in place of `config/config.yaml`. Must contain the complete configuration. Gitignored; use for per-machine settings without modifying the committed file.
+> **Local config:** `config/config.local.yaml` — if present, deep-merged over `config/config.yaml`. Include only the keys you want to override. Gitignored; use for per-machine settings without modifying the committed file.
 > **Recommended profile:** growth-oriented paper trading profile validated by the latest 12-month backtest.
 
 This guide explains the available user-facing configuration sections and the currently recommended defaults. Do not switch `mode` to `live` or change risk parameters unless you explicitly intend to accept the added trading risk.

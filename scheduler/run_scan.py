@@ -98,6 +98,10 @@ CRYPTO_STRATEGIES = [MACrossoverStrategy(), RangeBreakoutStrategy()]
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+class PendingEntryOrderCheckFailed(RuntimeError):
+    """Raised when broker buy orders cannot be inspected safely."""
+
+
 def _already_holding(symbol: str, open_symbols: list) -> bool:
     return any(_symbols_match(symbol, open_symbol) for open_symbol in open_symbols)
 
@@ -108,6 +112,26 @@ def _normalized_symbol_set(symbols) -> set:
 
 def _symbols_match(left: str, right: str) -> bool:
     return ac.normalize_symbol(left) == ac.normalize_symbol(right)
+
+
+def _asset_class_value(value) -> str:
+    raw = str(getattr(value, "value", value) or "").strip().lower()
+    if "crypto" in raw:
+        return "crypto"
+    if raw in {"stock", "stocks", "equity", "us_equity"}:
+        return "stock"
+    return ""
+
+
+def _planned_asset_class(symbol: str, explicit_asset_class=None) -> str:
+    asset_class = _asset_class_value(explicit_asset_class)
+    if asset_class:
+        return asset_class
+    normalized = ac.normalize_symbol(str(symbol))
+    crypto_symbols = _normalized_symbol_set(CRYPTO_UNIVERSE)
+    if normalized in crypto_symbols or "/" in str(symbol):
+        return "crypto"
+    return "stock"
 
 
 def _strategy_enabled(strategy) -> bool:
@@ -131,21 +155,55 @@ def _order_side(order) -> str | None:
     return str(getattr(side, "value", side)).lower()
 
 
-def _pending_entry_symbols() -> set:
-    """Return symbols with open broker buy orders so entries are not duplicated."""
+def _pending_entry_symbols() -> dict:
+    """Return normalized symbols with open broker buy orders and asset classes."""
     try:
         orders = ac.get_open_orders()
     except Exception as e:
-        log.warning(f"Could not check pending entry orders; continuing with position snapshot only: {e}")
-        return set()
+        log.error(f"Could not check pending entry orders; blocking new entries fail-closed: {e}")
+        raise PendingEntryOrderCheckFailed("Could not check pending entry orders") from e
 
-    symbols = []
+    pending = {}
     for order in orders or []:
         if _order_side(order) == "buy":
             symbol = _order_value(order, "symbol")
             if symbol:
-                symbols.append(symbol)
-    return _normalized_symbol_set(symbols)
+                pending[ac.normalize_symbol(str(symbol))] = _planned_asset_class(
+                    str(symbol),
+                    _order_value(order, "asset_class"),
+                )
+    return pending
+
+
+def _coerce_pending_entry_symbols(pending_entries) -> dict:
+    if isinstance(pending_entries, dict):
+        return {
+            ac.normalize_symbol(str(symbol)): _planned_asset_class(str(symbol), asset_class)
+            for symbol, asset_class in pending_entries.items()
+            if str(symbol or "").strip()
+        }
+    return {
+        ac.normalize_symbol(str(symbol)): _planned_asset_class(str(symbol))
+        for symbol in (pending_entries or set())
+        if str(symbol or "").strip()
+    }
+
+
+def _planned_asset_classes(open_symbols: list, pending_entries) -> dict:
+    planned = {
+        ac.normalize_symbol(str(symbol)): _planned_asset_class(str(symbol))
+        for symbol in open_symbols
+        if str(symbol or "").strip()
+    }
+    planned.update(_coerce_pending_entry_symbols(pending_entries))
+    return planned
+
+
+def _planned_position_counts(planned_asset_classes: dict) -> tuple[int, int, int]:
+    total = len(planned_asset_classes)
+    crypto_count = sum(1 for asset_class in planned_asset_classes.values() if asset_class == "crypto")
+    stock_count = total - crypto_count
+    return total, crypto_count, stock_count
 
 
 def _max_positions_planned(planned_symbols: set) -> bool:
@@ -156,11 +214,53 @@ def _max_positions_planned(planned_symbols: set) -> bool:
     return False
 
 
-def _register_entry_result(result, symbol: str, open_symbols: list, planned_symbols: set, new_entry_symbols: set):
+def _planned_asset_class_cap_reached(asset_class: str, planned_asset_classes: dict) -> bool:
+    if _max_positions_planned(planned_asset_classes):
+        return True
+
+    max_total = int(CFG["trading"]["max_positions"])
+    max_crypto = int(CFG["trading"].get("max_crypto_positions", max_total))
+    min_crypto = int(CFG["trading"].get("min_crypto_positions", 0))
+    max_crypto = max(0, min(max_crypto, max_total))
+    min_crypto = max(0, min(min_crypto, max_crypto))
+    _, crypto_count, stock_count = _planned_position_counts(planned_asset_classes)
+
+    if asset_class == "crypto":
+        if max_crypto <= 0:
+            log.info("Crypto entries disabled by planned cap (max_crypto_positions=0).")
+            return True
+        if crypto_count >= max_crypto:
+            log.info(f"Max planned crypto positions reached: {crypto_count}/{max_crypto}")
+            return True
+        return False
+
+    stock_slots_available = max_total - min_crypto
+    if stock_count >= stock_slots_available:
+        log.info(
+            f"Planned stock slots exhausted: {stock_count}/{stock_slots_available} "
+            f"({min_crypto} reserved for crypto)"
+        )
+        return True
+    return False
+
+
+def _register_entry_result(
+    result,
+    symbol: str,
+    open_symbols: list,
+    planned_symbols: set,
+    new_entry_symbols: set,
+    asset_class: str = "stock",
+    planned_asset_classes: dict | None = None,
+):
     if not result:
+        return
+    if result.get("status") == "entry_failed":
         return
     normalized = ac.normalize_symbol(symbol)
     planned_symbols.add(normalized)
+    if planned_asset_classes is not None:
+        planned_asset_classes[normalized] = _planned_asset_class(symbol, asset_class)
     if result.get("status") not in {"open", "partially_filled", "dry_run"}:
         return
     new_entry_symbols.add(normalized)
@@ -194,6 +294,25 @@ def _mark_unhealthy_exit_result(marker: RunScope | None, result: dict | None, st
             stage=stage,
             error_type="PendingExitOrderCheckFailed",
             blocked_exit_symbol=result.get("symbol", ""),
+        )
+    elif result.get("status") in {"exit_failed", "invalid_exit_price", "invalid_entry_price"}:
+        marker.mark_error(
+            stage=stage,
+            error_type=result.get("error_type", "ExitFailed"),
+            failed_exit_symbol=result.get("symbol", ""),
+            error=result.get("error", ""),
+        )
+
+
+def _mark_unhealthy_entry_result(marker: RunScope | None, result: dict | None, stage: str):
+    if marker is None or not result:
+        return
+    if result.get("status") == "entry_failed":
+        marker.mark_error(
+            stage=stage,
+            error_type=result.get("error_type", "EntryFailed"),
+            failed_entry_symbol=result.get("symbol", ""),
+            error=result.get("error", ""),
         )
 
 
@@ -440,8 +559,20 @@ def run(
             marker.mark_status("ok", outcome="halted_by_daily_loss_limit")
         return
 
-    pending_entry_symbols = set() if dry_run else _pending_entry_symbols()
-    planned_symbols = _normalized_symbol_set(open_symbols) | pending_entry_symbols
+    try:
+        pending_entry_symbols = {} if dry_run else _coerce_pending_entry_symbols(_pending_entry_symbols())
+    except PendingEntryOrderCheckFailed as e:
+        if marker is not None:
+            marker.mark_error(
+                stage="pending_entry_order_check",
+                error_type="PendingEntryOrderCheckFailed",
+                error=str(e),
+            )
+        log.error("Pending entry order check failed; skipping scan to avoid duplicate entries.", exc_info=True)
+        return
+
+    planned_asset_classes = _planned_asset_classes(open_symbols, pending_entry_symbols)
+    planned_symbols = set(planned_asset_classes)
     new_entry_symbols = set()
     if pending_entry_symbols:
         log.info(f"Pending entry orders counted as planned positions: {len(pending_entry_symbols)}")
@@ -485,7 +616,7 @@ def run(
                     if normalized in planned_symbols:
                         log.debug(f"Already holding {sym}, skipping entry.")
                         continue
-                    if _max_positions_planned(planned_symbols):
+                    if _planned_asset_class_cap_reached("stock", planned_asset_classes):
                         break
                     if sig["action"] == "buy":
                         result = oe.enter_position(
@@ -496,7 +627,16 @@ def run(
                             suggested_qty=sig.get("atr_risk_qty"),
                             atr_stop_price=sig.get("atr_stop_price"),
                         )
-                        _register_entry_result(result, sym, open_symbols, planned_symbols, new_entry_symbols)
+                        _mark_unhealthy_entry_result(marker, result, "stock_entry")
+                        _register_entry_result(
+                            result,
+                            sym,
+                            open_symbols,
+                            planned_symbols,
+                            new_entry_symbols,
+                            asset_class="stock",
+                            planned_asset_classes=planned_asset_classes,
+                        )
             except Exception as e:
                 _mark_strategy_error(marker, "stock_strategy", strategy.name, e)
                 log.error(f"Strategy {strategy.name} failed: {e}", exc_info=True)
@@ -518,7 +658,7 @@ def run(
                     if normalized in planned_symbols:
                         log.debug(f"Already holding {sym}, skipping entry.")
                         continue
-                    if _max_positions_planned(planned_symbols):
+                    if _planned_asset_class_cap_reached("crypto", planned_asset_classes):
                         break
                     if sig["action"] == "buy":
                         result = oe.enter_position(
@@ -529,7 +669,16 @@ def run(
                             suggested_qty=sig.get("atr_risk_qty"),
                             atr_stop_price=sig.get("atr_stop_price"),
                         )
-                        _register_entry_result(result, sym, open_symbols, planned_symbols, new_entry_symbols)
+                        _mark_unhealthy_entry_result(marker, result, "crypto_entry")
+                        _register_entry_result(
+                            result,
+                            sym,
+                            open_symbols,
+                            planned_symbols,
+                            new_entry_symbols,
+                            asset_class="crypto",
+                            planned_asset_classes=planned_asset_classes,
+                        )
             except Exception as e:
                 _mark_strategy_error(marker, "crypto_strategy", strategy.name, e)
                 log.error(f"Strategy {strategy.name} failed: {e}", exc_info=True)

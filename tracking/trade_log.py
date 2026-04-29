@@ -224,7 +224,10 @@ def locked_trade_log(path: Path | None = None, *, exclusive: bool = True) -> Ite
     trade_log_path = Path(path or TRADE_LOG)
     trade_log_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = _lock_path(trade_log_path)
-    with open(lock_path, "a+b") as lock_file:
+    lock_mode = "a+b"
+    if not exclusive and lock_path.exists():
+        lock_mode = "rb"
+    with open(lock_path, lock_mode) as lock_file:
         _lock_file(lock_file, exclusive=exclusive)
         try:
             yield trade_log_path

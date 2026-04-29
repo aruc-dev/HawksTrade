@@ -209,6 +209,63 @@ def _submitted_order_is_transient(order) -> bool:
     }
 
 
+def _entry_failure_result(symbol: str, strategy: str, asset_class: str, exc: Exception) -> dict:
+    return {
+        "timestamp": _utc_now().isoformat(),
+        "mode": MODE,
+        "symbol": symbol,
+        "strategy": strategy,
+        "asset_class": asset_class,
+        "side": "buy",
+        "qty": "",
+        "entry_price": "",
+        "order_id": "",
+        "status": "entry_failed",
+        "error_type": type(exc).__name__,
+        "error": str(exc),
+    }
+
+
+def _exit_failure_result(
+    symbol: str,
+    strategy: str,
+    asset_class: str,
+    reason: str,
+    status: str,
+    error_type: str,
+    error: str,
+    qty="",
+    entry_price="",
+    current_price="",
+) -> dict:
+    result = {
+        "timestamp": _utc_now().isoformat(),
+        "mode": MODE,
+        "symbol": symbol,
+        "strategy": strategy,
+        "asset_class": asset_class,
+        "side": "sell",
+        "qty": qty,
+        "entry_price": entry_price,
+        "exit_price": current_price,
+        "pnl_pct": "",
+        "exit_reason": reason,
+        "order_id": "",
+        "status": status,
+        "error_type": error_type,
+        "error": error,
+    }
+    if entry_price not in ("", None) and current_price not in ("", None):
+        try:
+            entry = float(entry_price)
+            current = float(current_price)
+            if entry > 0 and current > 0:
+                result["pnl_pct"] = round((current - entry) / entry, 6)
+        except (TypeError, ValueError):
+            pass
+    return result
+
+
 # ── Entry Logic ─────────────────────────────────────────────────────────────
 
 def enter_position(
@@ -344,16 +401,28 @@ def enter_position(
 
     except Exception as e:
         log.error(f"Failed to enter {symbol}: {e}", exc_info=True)
-        return None
+        return _entry_failure_result(symbol, strategy, asset_class, e)
 
 
-def exit_position(symbol: str, reason: str, asset_class: str = "stock", dry_run: bool = False, open_trades_callback=None) -> Optional[dict]:
+def exit_position(
+    symbol: str,
+    reason: str,
+    asset_class: str = "stock",
+    dry_run: bool = False,
+    open_trades_callback=None,
+    force_market: bool = False,
+) -> Optional[dict]:
     """
     Close an open position fully.
       1. Check position exists
       2. Place sell order
       3. Log the trade
     """
+    strategy = "unknown"
+    trade_symbol = symbol
+    qty = ""
+    entry_price = ""
+    current_price = ""
     try:
         position = ac.get_position(symbol)
         if not position:
@@ -369,22 +438,48 @@ def exit_position(symbol: str, reason: str, asset_class: str = "stock", dry_run:
             return None
 
         if asset_class == "crypto":
-            current_price = ac.get_crypto_latest_price(symbol)
+            current_price = float(ac.get_crypto_latest_price(symbol))
         else:
-            current_price = ac.get_stock_latest_price(symbol)
+            current_price = float(ac.get_stock_latest_price(symbol))
+        if current_price <= 0:
+            log.error(f"Invalid current price for exit {symbol}: {current_price}. Skipping exit.")
+            return _exit_failure_result(
+                symbol=symbol,
+                strategy=strategy,
+                asset_class=asset_class,
+                reason=reason,
+                status="invalid_exit_price",
+                error_type="InvalidExitPrice",
+                error=f"Invalid current price: {current_price}",
+                qty=qty,
+                entry_price=getattr(position, "avg_entry_price", ""),
+                current_price=current_price,
+            )
 
         entry_price = float(position.avg_entry_price)
+        if entry_price <= 0:
+            log.error(f"Invalid entry price for exit {symbol}: {entry_price}. Skipping exit.")
+            return _exit_failure_result(
+                symbol=symbol,
+                strategy=strategy,
+                asset_class=asset_class,
+                reason=reason,
+                status="invalid_entry_price",
+                error_type="InvalidEntryPrice",
+                error=f"Invalid entry price: {entry_price}",
+                qty=qty,
+                entry_price=entry_price,
+                current_price=current_price,
+            )
         pnl_pct     = (current_price - entry_price) / entry_price
 
         # Retrieve strategy and canonical symbol from local open trades if possible.
-        strategy = "unknown"
         if open_trades_callback:
             open_trades = open_trades_callback()
         else:
             from tracking.trade_log import get_open_trades
             open_trades = get_open_trades()
 
-        trade_symbol = symbol
         for t in reversed(open_trades):
             if _symbols_match(t["symbol"], symbol):
                 strategy = t.get("strategy", "unknown")
@@ -452,7 +547,7 @@ def exit_position(symbol: str, reason: str, asset_class: str = "stock", dry_run:
                 "status": "pending_exit",
             }
 
-        if ORDER_TYPE == "market":
+        if force_market or ORDER_TYPE == "market":
             intent = _create_order_intent(order_symbol, "sell", strategy, asset_class, qty)
             try:
                 order = ac.place_market_order(
@@ -519,4 +614,15 @@ def exit_position(symbol: str, reason: str, asset_class: str = "stock", dry_run:
 
     except Exception as e:
         log.error(f"Failed to exit {symbol}: {e}", exc_info=True)
-        return None
+        return _exit_failure_result(
+            symbol=trade_symbol,
+            strategy=strategy,
+            asset_class=asset_class,
+            reason=reason,
+            status="exit_failed",
+            error_type=type(e).__name__,
+            error=str(e),
+            qty=qty,
+            entry_price=entry_price,
+            current_price=current_price,
+        )

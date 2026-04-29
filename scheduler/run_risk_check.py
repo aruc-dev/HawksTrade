@@ -80,6 +80,35 @@ def _mark_unhealthy_exit_result(marker: RunScope | None, result: dict | None, st
             error_type="PendingExitOrderCheckFailed",
             blocked_exit_symbol=result.get("symbol", ""),
         )
+    elif result.get("status") in {"exit_failed", "invalid_exit_price", "invalid_entry_price"}:
+        marker.mark_error(
+            stage=stage,
+            error_type=result.get("error_type", "ExitFailed"),
+            failed_exit_symbol=result.get("symbol", ""),
+            error=result.get("error", ""),
+        )
+
+
+def _emergency_exit_verified(result: dict | None, dry_run: bool) -> bool:
+    if not result:
+        return False
+    expected_status = "dry_run" if dry_run else "closed"
+    return result.get("status") == expected_status
+
+
+def _mark_unverified_emergency_exit(
+    marker: RunScope | None,
+    result: dict | None,
+    symbol: str,
+) -> None:
+    _mark_unhealthy_exit_result(marker, result, "emergency_exit")
+    if marker is not None and marker.status != "error":
+        marker.mark_error(
+            stage="emergency_exit",
+            error_type="EmergencyExitNotVerified",
+            failed_exit_symbol=(result or {}).get("symbol", symbol),
+            exit_status=(result or {}).get("status", "missing_result"),
+        )
 
 
 def _mark_alpaca_error(marker: RunScope | None, stage: str, exc: Exception):
@@ -355,6 +384,7 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
             )
             return
         open_trades = get_open_trades()
+        emergency_failed = False
         for pos in positions:
             symbol      = pos.symbol
             asset_class = (
@@ -369,9 +399,20 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
                 reason="Daily loss limit — emergency close",
                 asset_class=asset_class,
                 dry_run=dry_run,
+                force_market=True,
             )
-            _mark_unhealthy_exit_result(marker, result, "emergency_exit")
-        log.warning("All positions closed. Bot will not trade again today.")
+            if not _emergency_exit_verified(result, dry_run):
+                emergency_failed = True
+                log.error(
+                    "Emergency close for %s was not verified; status=%s",
+                    exit_symbol,
+                    (result or {}).get("status", "missing_result"),
+                )
+                _mark_unverified_emergency_exit(marker, result, exit_symbol)
+        if emergency_failed:
+            log.error("Emergency liquidation incomplete. Bot will not trade again today.")
+        else:
+            log.warning("All emergency exits verified. Bot will not trade again today.")
         _reconcile_trade_log_after_run(
             marker,
             dry_run,

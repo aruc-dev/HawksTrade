@@ -25,6 +25,17 @@ class LinuxRunnerTests(unittest.TestCase):
             self.assertNotIn("python3 scheduler/run_risk_check.py", text)
             self.assertNotIn("python3 scheduler/run_report.py", text)
 
+    def test_launchd_runner_routes_scheduled_jobs_through_runner(self):
+        text = (BASE_DIR / "scheduler" / "launchd" / "hawkstrade_launchd_runner.sh").read_text(encoding="utf-8")
+
+        self.assertIn('scripts/run_hawkstrade_job.sh" scheduler/run_scan.py --stocks-only', text)
+        self.assertIn('scripts/run_hawkstrade_job.sh" scheduler/run_scan.py', text)
+        self.assertIn('scripts/run_hawkstrade_job.sh" scheduler/run_risk_check.py', text)
+        self.assertIn('scripts/run_hawkstrade_job.sh" scheduler/run_report.py', text)
+        self.assertNotIn("/usr/bin/env python3 scheduler/run_scan.py", text)
+        self.assertNotIn("/usr/bin/env python3 scheduler/run_risk_check.py", text)
+        self.assertNotIn("/usr/bin/env python3 scheduler/run_report.py", text)
+
     def test_runner_uses_single_trade_mutation_lock(self):
         script = (BASE_DIR / "scripts" / "run_hawkstrade_job.sh").read_text(encoding="utf-8")
 

@@ -91,6 +91,38 @@ class SimpleBar:
         self.open = open_price; self.high = high_price; self.low = low_price
         self.close = close_price; self.volume = volume; self.timestamp = timestamp
 
+
+REGIME_HISTORY_LIMITS = {
+    "SPY": 255,
+    "QQQ": 55,
+    "BTC/USD": 60,
+}
+
+
+def _bars_from_frame(df: pd.DataFrame) -> list[SimpleBar]:
+    return [
+        SimpleBar(
+            open_price=float(row["open"]),
+            high_price=float(row["high"]),
+            low_price=float(row["low"]),
+            close_price=float(row["close"]),
+            volume=float(row["volume"]),
+            timestamp=idx,
+        )
+        for idx, row in df.iterrows()
+    ]
+
+
+def _build_regime_bars(historical_data: dict, current_date: datetime) -> dict:
+    regime_bars = {}
+    for symbol, limit in REGIME_HISTORY_LIMITS.items():
+        if symbol not in historical_data:
+            continue
+        hist_df = historical_data[symbol][historical_data[symbol].index <= current_date].tail(limit)
+        regime_bars[symbol] = _bars_from_frame(hist_df)
+    return regime_bars
+
+
 def _make_bar_fetcher(sim: "BacktestSimulator"):
     """Return a mock_get_bars function bound to the given simulator.
 
@@ -464,7 +496,9 @@ def run_backtest(
     else:
         end_dt = datetime.now(timezone.utc) - timedelta(days=2)
         
-    start_dt = end_dt - timedelta(days=days + 310) # 310 cal days ≈ 215 trading days — enough for SMA200 warmup
+    # 420 calendar days gives the RSI regime filters enough trading days for
+    # SPY's 252-day crash peak and 220-day realised-volatility window.
+    start_dt = end_dt - timedelta(days=days + 420)
     
     historical_data = fetch_all_data(symbols, start_dt, end_dt)
     sim = BacktestSimulator(initial_fund)
@@ -531,23 +565,7 @@ def run_backtest(
         
         for dt in all_dates:
             sim.current_date = dt
-            regime_bars = {
-                s: [
-                    SimpleBar(
-                        open_price=float(row["open"]),
-                        high_price=float(row["high"]),
-                        low_price=float(row["low"]),
-                        close_price=float(row["close"]),
-                        volume=float(row["volume"]),
-                        timestamp=idx,
-                    )
-                    for idx, row in (
-                        sim.historical_data[s][sim.historical_data[s].index <= sim.current_date].tail(60).iterrows()
-                    )
-                ]
-                for s in ("SPY", "QQQ", "BTC/USD")
-                if s in sim.historical_data
-            }
+            regime_bars = _build_regime_bars(sim.historical_data, sim.current_date)
             # Risk Check
             for symbol in list(sim.positions.keys()):
                 pos = sim.positions[symbol]; price = sim.get_current_price(symbol)

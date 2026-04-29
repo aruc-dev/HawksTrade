@@ -388,6 +388,95 @@ class RunScanTests(unittest.TestCase):
 
         enter_position.assert_called_once()
 
+    def test_pending_entry_lookup_failure_marks_scan_unhealthy_and_blocks_entries(self):
+        marker = FakeMarker()
+
+        with (
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(run_scan, "get_open_symbols", return_value=[]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan.ac, "get_open_orders", side_effect=RuntimeError("timeout")),
+            patch.object(run_scan.oe, "enter_position") as enter_position,
+            patch.object(run_scan, "print_snapshot"),
+        ):
+            run_scan.run(run_stocks=False, run_crypto=True, dry_run=False, marker=marker)
+
+        self.assertEqual(marker.status, "error")
+        self.assertEqual(marker.fields["stage"], "pending_entry_order_check")
+        self.assertEqual(marker.fields["error_type"], "PendingEntryOrderCheckFailed")
+        enter_position.assert_not_called()
+
+    def test_planned_crypto_entries_count_against_crypto_cap(self):
+        class FakeCrypto:
+            name = "ma_crossover"
+            asset_class = "crypto"
+
+            def scan(self, universe, **kwargs):
+                return [
+                    {"symbol": "BTC/USD", "action": "buy"},
+                    {"symbol": "SOL/USD", "action": "buy"},
+                ]
+
+        with (
+            patch.dict(run_scan.CFG["trading"], {"max_positions": 10, "max_crypto_positions": 1, "min_crypto_positions": 0}),
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(run_scan.ac, "get_crypto_bars", return_value={"BTC/USD": [object()] * 21}),
+            patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "CRYPTO_STRATEGIES", [FakeCrypto()]),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+            patch.object(run_scan.oe, "enter_position", return_value={"symbol": "BTC/USD", "status": "dry_run"}) as enter_position,
+        ):
+            run_scan.run(run_stocks=False, run_crypto=True, dry_run=True)
+
+        enter_position.assert_called_once()
+
+    def test_planned_stock_entries_reserve_crypto_slots(self):
+        planned = {"AAPL": "stock"}
+        with patch.dict(run_scan.CFG["trading"], {"max_positions": 2, "max_crypto_positions": 2, "min_crypto_positions": 1}):
+            self.assertTrue(run_scan._planned_asset_class_cap_reached("stock", planned))
+            self.assertFalse(run_scan._planned_asset_class_cap_reached("crypto", planned))
+
+    def test_entry_failure_marks_scan_marker_unhealthy(self):
+        class FakeMomentum:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def scan(self, universe, **kwargs):
+                return [{"symbol": "AAPL", "action": "buy"}]
+
+        marker = FakeMarker()
+        with (
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(
+                run_scan.ac,
+                "get_stock_bars",
+                return_value={"SPY": [object()] * 252, "QQQ": [object()] * 51},
+            ),
+            patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "get_stock_universe", return_value=["AAPL"]),
+            patch.object(run_scan, "STOCK_STRATEGIES", [FakeMomentum()]),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+            patch.object(
+                run_scan.oe,
+                "enter_position",
+                return_value={
+                    "symbol": "AAPL",
+                    "status": "entry_failed",
+                    "error_type": "RuntimeError",
+                    "error": "order rejected",
+                },
+            ),
+        ):
+            run_scan.run(run_stocks=True, run_crypto=False, dry_run=True, marker=marker)
+
+        self.assertEqual(marker.status, "error")
+        self.assertEqual(marker.fields["stage"], "stock_entry")
+        self.assertEqual(marker.fields["failed_entry_symbol"], "AAPL")
+
     def test_momentum_hold_extends_profitable_trade(self):
         open_trade = {
             "symbol": "AAPL",

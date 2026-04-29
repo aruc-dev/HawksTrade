@@ -241,6 +241,85 @@ class RunRiskCheckTests(unittest.TestCase):
         self.assertEqual(marker.fields["error_type"], "PendingExitOrderCheckFailed")
         self.assertEqual(marker.fields["blocked_exit_symbol"], "AAPL")
 
+    def test_run_marks_error_when_exit_submission_fails(self):
+        marker = FakeMarker()
+        position = SimpleNamespace(symbol="AAPL", avg_entry_price="100", asset_class="us_equity")
+
+        with (
+            patch.object(run_risk_check.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_risk_check, "get_open_trades", return_value=[]),
+            patch.object(run_risk_check.ac, "get_all_positions", return_value=[position]),
+            patch.object(run_risk_check.ac, "get_stock_latest_price", return_value=80),
+            patch.object(run_risk_check.rm, "should_exit_position", return_value=(True, "Stop-loss hit")),
+            patch.object(
+                run_risk_check.oe,
+                "exit_position",
+                return_value={
+                    "symbol": "AAPL",
+                    "status": "exit_failed",
+                    "error_type": "RuntimeError",
+                    "error": "order rejected",
+                },
+            ),
+        ):
+            run_risk_check.run(dry_run=True, marker=marker)
+
+        self.assertEqual(marker.status, "error")
+        self.assertEqual(marker.fields["stage"], "risk_exit")
+        self.assertEqual(marker.fields["error_type"], "RuntimeError")
+        self.assertEqual(marker.fields["failed_exit_symbol"], "AAPL")
+
+    def test_daily_loss_emergency_uses_market_exit_and_verifies_fill(self):
+        marker = FakeMarker()
+        position = SimpleNamespace(symbol="AAPL", avg_entry_price="100", asset_class="us_equity")
+
+        with (
+            patch.object(run_risk_check.rm, "daily_loss_exceeded", return_value=True),
+            patch.object(run_risk_check.ac, "get_all_positions", return_value=[position]),
+            patch.object(run_risk_check, "get_open_trades", return_value=[]),
+            patch.object(
+                run_risk_check.oe,
+                "exit_position",
+                return_value={"symbol": "AAPL", "status": "closed"},
+            ) as exit_position,
+            patch.object(run_risk_check.ac, "get_closed_orders", return_value=[]),
+            patch.object(run_risk_check, "safe_reconcile", return_value={"positions": 0}),
+        ):
+            run_risk_check.run(dry_run=False, marker=marker)
+
+        exit_position.assert_called_once_with(
+            "AAPL",
+            reason="Daily loss limit — emergency close",
+            asset_class="stock",
+            dry_run=False,
+            force_market=True,
+        )
+        self.assertEqual(marker.status, "ok")
+        self.assertEqual(marker.fields["outcome"], "emergency_close")
+
+    def test_daily_loss_emergency_marks_error_when_exit_not_filled(self):
+        marker = FakeMarker()
+        position = SimpleNamespace(symbol="AAPL", avg_entry_price="100", asset_class="us_equity")
+
+        with (
+            patch.object(run_risk_check.rm, "daily_loss_exceeded", return_value=True),
+            patch.object(run_risk_check.ac, "get_all_positions", return_value=[position]),
+            patch.object(run_risk_check, "get_open_trades", return_value=[]),
+            patch.object(
+                run_risk_check.oe,
+                "exit_position",
+                return_value={"symbol": "AAPL", "status": "submitted"},
+            ),
+            patch.object(run_risk_check.ac, "get_closed_orders", return_value=[]),
+            patch.object(run_risk_check, "safe_reconcile", return_value={"positions": 1}),
+        ):
+            run_risk_check.run(dry_run=False, marker=marker)
+
+        self.assertEqual(marker.status, "error")
+        self.assertEqual(marker.fields["stage"], "emergency_exit")
+        self.assertEqual(marker.fields["error_type"], "EmergencyExitNotVerified")
+        self.assertEqual(marker.fields["failed_exit_symbol"], "AAPL")
+
     def test_repeated_price_fetch_failures_mark_run_unhealthy(self):
         marker = FakeMarker()
         position = SimpleNamespace(symbol="AAPL", avg_entry_price="100", asset_class="us_equity")

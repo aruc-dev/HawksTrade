@@ -18,6 +18,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from zoneinfo import ZoneInfo
 
 from dashboard.config import cfg
+from tracking.trade_log import locked_trade_log
 
 log = logging.getLogger("dashboard.data_sources")
 
@@ -111,12 +112,13 @@ def enrich_positions_with_trade_metadata(
 def read_trades(trade_log_path: Optional[Path] = None) -> List[Dict[str, Any]]:
     """Read all rows from trades.csv. Returns [] if file is missing or unreadable."""
     path = trade_log_path or cfg().trade_log_path
-    if not path.exists():
-        return []
     try:
-        with open(path, "r", newline="") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
+        with locked_trade_log(path, exclusive=False) as locked_path:
+            if not locked_path.exists():
+                return []
+            with open(locked_path, "r", newline="") as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
     except Exception as e:
         log.warning("Could not read trade log at %s: %s", path, e)
         return []

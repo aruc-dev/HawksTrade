@@ -5,6 +5,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -29,6 +30,23 @@ class ReadTradesTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["symbol"], "AAPL")
             self.assertEqual(rows[0]["status"], "closed")
+
+    def test_uses_shared_trade_log_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trades.csv"
+            path.write_text("symbol,side,status\nAAPL,buy,open\n")
+            calls = []
+
+            @contextmanager
+            def fake_locked_trade_log(lock_path, *, exclusive=True):
+                calls.append((Path(lock_path), exclusive))
+                yield Path(lock_path)
+
+            with patch.object(data_sources, "locked_trade_log", fake_locked_trade_log):
+                rows = data_sources.read_trades(path)
+
+        self.assertEqual(rows, [{"symbol": "AAPL", "side": "buy", "status": "open"}])
+        self.assertEqual(calls, [(path, False)])
 
 
 class SplitTradesTests(unittest.TestCase):
