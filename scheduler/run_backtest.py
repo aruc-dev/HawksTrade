@@ -16,9 +16,10 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import contextlib
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 # Ensure project root is on path
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -123,6 +124,227 @@ def _build_regime_bars(historical_data: dict, current_date: datetime) -> dict:
     return regime_bars
 
 
+def _as_datetime(value) -> datetime:
+    if isinstance(value, pd.Timestamp):
+        value = value.to_pydatetime()
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, date):
+        return datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+    raise TypeError(f"Expected date/datetime-like value, got {type(value).__name__}")
+
+
+def _observed_fixed_holiday(year: int, month: int, day: int) -> date:
+    holiday = date(year, month, day)
+    if holiday.weekday() == 5:
+        return holiday - timedelta(days=1)
+    if holiday.weekday() == 6:
+        return holiday + timedelta(days=1)
+    return holiday
+
+
+def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+    current = date(year, month, 1)
+    offset = (weekday - current.weekday()) % 7
+    return current + timedelta(days=offset + (n - 1) * 7)
+
+
+def _last_weekday(year: int, month: int, weekday: int) -> date:
+    if month == 12:
+        current = date(year + 1, 1, 1) - timedelta(days=1)
+    else:
+        current = date(year, month + 1, 1) - timedelta(days=1)
+    return current - timedelta(days=(current.weekday() - weekday) % 7)
+
+
+def _easter_sunday(year: int) -> date:
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    return date(year, month, day)
+
+
+def _stock_market_holidays(year: int) -> set[date]:
+    holidays = {
+        _observed_fixed_holiday(year, 1, 1),
+        _nth_weekday(year, 1, 0, 3),
+        _nth_weekday(year, 2, 0, 3),
+        _easter_sunday(year) - timedelta(days=2),
+        _last_weekday(year, 5, 0),
+        _observed_fixed_holiday(year, 7, 4),
+        _nth_weekday(year, 9, 0, 1),
+        _nth_weekday(year, 11, 3, 4),
+        _observed_fixed_holiday(year, 12, 25),
+    }
+    if year >= 2022:
+        holidays.add(_observed_fixed_holiday(year, 6, 19))
+    return holidays
+
+
+def _stock_market_open_for_backtest(current_date) -> bool:
+    """Backtests use a standard NYSE weekday/holiday session calendar."""
+    session_date = _as_datetime(current_date).date()
+    if session_date.weekday() >= 5:
+        return False
+    return session_date not in _stock_market_holidays(session_date.year)
+
+
+def _stock_market_open_for_sim(sim: "BacktestSimulator") -> bool:
+    if sim.current_date is None:
+        return False
+    return _stock_market_open_for_backtest(sim.current_date)
+
+
+def _backtest_trading_session_date(sim: "BacktestSimulator") -> date:
+    """Return the simulated NY trading-session date for daily-loss baselines."""
+    if sim.current_date is None:
+        return rm._current_trading_session_date()
+    tz = ZoneInfo(rm.TRADING_SESSION_TIMEZONE)
+    return _as_datetime(sim.current_date).astimezone(tz).date()
+
+
+def _is_crypto_asset(asset_class: str, symbol: str = "") -> bool:
+    return "crypto" in str(asset_class or "").lower() or "/" in str(symbol or "")
+
+
+def _strategy_asset_class_matches(strategy_asset_class: str, position_asset_class: str) -> bool:
+    aliases = {
+        "stock": "stock",
+        "stocks": "stock",
+        "us_equity": "stock",
+        "crypto": "crypto",
+        "both": "both",
+    }
+    strategy_class = aliases.get(str(strategy_asset_class or "").lower(), str(strategy_asset_class or "").lower())
+    position_class = aliases.get(str(position_asset_class or "").lower(), str(position_asset_class or "").lower())
+    return strategy_class in (position_class, "both")
+
+
+def _run_backtest_risk_exits(sim: "BacktestSimulator", *, market_open: bool) -> None:
+    for symbol in list(sim.positions.keys()):
+        pos = sim.positions.get(symbol)
+        if not pos:
+            continue
+        if not _is_crypto_asset(pos.get("asset_class"), symbol) and not market_open:
+            continue
+        price = sim.get_current_price(symbol)
+        if price <= 0:
+            continue
+        update_high_water_price(pos, price)
+        should_exit, reason = rm.should_exit_position(
+            symbol,
+            pos["entry_price"],
+            price,
+            custom_stop_price=pos.get("custom_stop_price"),
+        )
+        if should_exit:
+            oe.exit_position(
+                symbol,
+                reason,
+                pos["asset_class"],
+                open_trades_callback=sim.get_open_trades_for_backtest,
+            )
+
+
+def _run_backtest_strategy_exits(
+    strategies: list,
+    sim: "BacktestSimulator",
+    *,
+    market_open: bool,
+    skip_symbols: set | None = None,
+) -> None:
+    skip_symbols = skip_symbols or set()
+    for symbol in list(sim.positions.keys()):
+        pos = sim.positions.get(symbol)
+        if not pos:
+            continue
+        asset_class = pos.get("asset_class", "stock")
+        if not _is_crypto_asset(asset_class, symbol) and not market_open:
+            continue
+        if ac.normalize_symbol(symbol) in skip_symbols:
+            continue
+        strat_name = pos.get("strategy", "")
+        for strat in strategies:
+            if strat.name != strat_name:
+                continue
+            if not _strategy_asset_class_matches(strat.asset_class, asset_class):
+                continue
+            should_exit, reason = strat.should_exit(symbol, pos["entry_price"])
+            if should_exit:
+                oe.exit_position(
+                    symbol,
+                    reason,
+                    asset_class,
+                    open_trades_callback=sim.get_open_trades_for_backtest,
+                )
+                break
+
+
+def _run_backtest_hold_exits(
+    sim: "BacktestSimulator",
+    cfg: dict,
+    *,
+    market_open: bool,
+) -> None:
+    for symbol in list(sim.positions.keys()):
+        pos = sim.positions.get(symbol)
+        if not pos:
+            continue
+        if not _is_crypto_asset(pos.get("asset_class"), symbol) and not market_open:
+            continue
+        strat_name = pos.get("strategy")
+        strategy_cfg = cfg["strategies"].get(strat_name, {})
+        if not strategy_cfg.get("hold_days"):
+            continue
+        age = sim.get_trade_age_days(symbol)
+        price = sim.get_current_price(symbol)
+        if price <= 0:
+            continue
+        peak = update_high_water_price(pos, price)
+        should_exit, reason = should_exit_for_hold(
+            strategy=strat_name,
+            age_days=age,
+            entry_price=pos["entry_price"],
+            current_price=price,
+            peak_price=peak,
+            strategy_cfg=strategy_cfg,
+        )
+        if should_exit:
+            oe.exit_position(
+                symbol,
+                reason,
+                pos["asset_class"],
+                open_trades_callback=sim.get_open_trades_for_backtest,
+            )
+
+
+def _backtest_scan_universe(
+    strat,
+    cfg: dict,
+    *,
+    screener,
+    screener_enabled: bool,
+    current_date,
+    market_open: bool,
+) -> list | None:
+    if strat.asset_class == "stocks":
+        if not market_open:
+            return None
+        return screener.get_universe(as_of_date=current_date) if screener_enabled else cfg["stocks"]["scan_universe"]
+    return cfg["crypto"]["scan_universe"]
+
+
 def _make_bar_fetcher(sim: "BacktestSimulator"):
     """Return a mock_get_bars function bound to the given simulator.
 
@@ -194,6 +416,7 @@ class BacktestSimulator:
             mock_pos.qty = p["qty"]
             mock_pos.avg_entry_price = p["entry_price"]
             mock_pos.market_value = p["qty"] * self.get_current_price(symbol)
+            mock_pos.asset_class = p.get("asset_class", "stock")
             pos_list.append(mock_pos)
         return pos_list
 
@@ -204,6 +427,7 @@ class BacktestSimulator:
             mock_pos.symbol = symbol
             mock_pos.qty = p["qty"]
             mock_pos.avg_entry_price = p["entry_price"]
+            mock_pos.asset_class = p.get("asset_class", "stock")
             return mock_pos
         return None
 
@@ -543,6 +767,10 @@ def run_backtest(
         _patch_runtime_risk_config(stack, cfg)
         stack.enter_context(patch("core.risk_manager._session_start_value", None))
         stack.enter_context(patch("core.risk_manager._session_date", None))
+        stack.enter_context(patch(
+            "core.risk_manager._current_trading_session_date",
+            side_effect=lambda now=None: _backtest_trading_session_date(sim),
+        ))
         stack.enter_context(patch("core.alpaca_client.get_portfolio_value", side_effect=sim.get_portfolio_value))
         stack.enter_context(patch("core.alpaca_client.get_cash", side_effect=sim.get_cash))
         stack.enter_context(patch("core.alpaca_client.get_all_positions", side_effect=sim.get_all_positions))
@@ -550,7 +778,7 @@ def run_backtest(
         stack.enter_context(patch("core.alpaca_client.get_stock_latest_price", side_effect=sim.get_current_price))
         stack.enter_context(patch("core.alpaca_client.get_crypto_latest_price", side_effect=sim.get_current_price))
         mock_trading_client = stack.enter_context(patch("core.alpaca_client.get_trading_client"))
-        stack.enter_context(patch("core.alpaca_client.is_market_open", side_effect=lambda: sim.current_date.weekday() < 5))
+        stack.enter_context(patch("core.alpaca_client.is_market_open", side_effect=lambda: _stock_market_open_for_sim(sim)))
         stack.enter_context(patch("tracking.trade_log.get_open_trades", side_effect=lambda: sim.get_open_trades_for_backtest()))
         stack.enter_context(patch("tracking.trade_log.get_trade_age_days", side_effect=lambda s: sim.get_trade_age_days(s)))
         stack.enter_context(patch("tracking.trade_log.log_trade"))
@@ -565,24 +793,24 @@ def run_backtest(
         
         for dt in all_dates:
             sim.current_date = dt
+            market_open = _stock_market_open_for_backtest(dt)
             regime_bars = _build_regime_bars(sim.historical_data, sim.current_date)
-            # Risk Check
-            for symbol in list(sim.positions.keys()):
-                pos = sim.positions[symbol]; price = sim.get_current_price(symbol)
-                if price <= 0: continue
-                update_high_water_price(pos, price)
-                should_exit, reason = rm.should_exit_position(
-                    symbol, pos["entry_price"], price,
-                    custom_stop_price=pos.get("custom_stop_price"),
-                )
-                if should_exit:
-                    oe.exit_position(symbol, reason, pos["asset_class"], open_trades_callback=sim.get_open_trades_for_backtest)
+
+            _run_backtest_risk_exits(sim, market_open=market_open)
+
             # Scan
+            new_entry_symbols = set()
             for strat in strategies:
-                if strat.asset_class == "stocks":
-                    universe = screener.get_universe(as_of_date=dt) if screener_enabled else cfg["stocks"]["scan_universe"]
-                else:
-                    universe = cfg["crypto"]["scan_universe"]
+                universe = _backtest_scan_universe(
+                    strat,
+                    cfg,
+                    screener=screener,
+                    screener_enabled=screener_enabled,
+                    current_date=dt,
+                    market_open=market_open,
+                )
+                if universe is None:
+                    continue
                 signals = strat.scan(universe, current_time=dt, regime_bars=regime_bars)
                 for sig in signals:
                     if sig["symbol"] not in sim.positions:
@@ -597,31 +825,20 @@ def run_backtest(
                         # enter_position returns status="open" (not "filled") — update strategy name on any non-None return
                         if order and sig["symbol"] in sim.positions:
                             sim.positions[sig["symbol"]]["strategy"] = strat.name
+                            new_entry_symbols.add(ac.normalize_symbol(sig["symbol"]))
                             # Store ATR stop so the risk-check loop uses it instead of the
                             # global fixed-percentage stop for this position.
                             if sig.get("atr_stop_price") is not None:
                                 sim.positions[sig["symbol"]]["custom_stop_price"] = sig["atr_stop_price"]
-            # Hold Day Check — delegates to sim.get_trade_age_days() (stocks=business days, crypto=calendar days)
-            for symbol in list(sim.positions.keys()):
-                pos = sim.positions[symbol]
-                strat_name = pos.get("strategy")
-                strategy_cfg = cfg["strategies"].get(strat_name, {})
-                if strategy_cfg.get("hold_days"):
-                    age = sim.get_trade_age_days(symbol)
-                    price = sim.get_current_price(symbol)
-                    if price <= 0:
-                        continue
-                    peak = update_high_water_price(pos, price)
-                    should_exit, reason = should_exit_for_hold(
-                        strategy=strat_name,
-                        age_days=age,
-                        entry_price=pos["entry_price"],
-                        current_price=price,
-                        peak_price=peak,
-                        strategy_cfg=strategy_cfg,
-                    )
-                    if should_exit:
-                        oe.exit_position(symbol, reason, pos["asset_class"], open_trades_callback=sim.get_open_trades_for_backtest)
+
+            skip_symbols = set() if cfg.get("intraday", {}).get("enabled", False) else new_entry_symbols
+            _run_backtest_strategy_exits(
+                strategies,
+                sim,
+                market_open=market_open,
+                skip_symbols=skip_symbols,
+            )
+            _run_backtest_hold_exits(sim, cfg, market_open=market_open)
             sim.equity_curve.append({"date": dt, "value": sim.get_portfolio_value()})
 
     # --- Reporting ---

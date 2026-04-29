@@ -109,8 +109,9 @@ All checks passed at the time this document was updated.
 
 ## Momentum Adaptive v2.0 — A/B Comparison (90 days, April 27 2026)
 
-Phase 1–3 of `todo.md` introduced ATR-based stops, 1% risk sizing, sector-neutral
-ranking, and a market breadth tiered regime guard into the Momentum strategy.
+The Momentum Adaptive v2.0 work introduced ATR-based stops, 1% risk sizing,
+sector-neutral ranking, and a market breadth tiered regime guard into the
+Momentum strategy.
 
 The table below compares a 90-day run (2026-01-27 to 2026-04-27) with and without
 the new filters. The "pure momentum" baseline disables sector and breadth filters

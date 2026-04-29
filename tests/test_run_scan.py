@@ -270,6 +270,97 @@ class RunScanTests(unittest.TestCase):
         self.assertEqual(marker.fields["error_type"], "PendingExitOrderCheckFailed")
         self.assertEqual(marker.fields["blocked_exit_symbol"], "AAPL")
 
+    def test_strategy_exit_invalid_entry_price_marks_error_and_continues(self):
+        class MomentumStrategy:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def should_exit(self, symbol, entry_price):
+                return True, f"exit {symbol}"
+
+        marker = FakeMarker()
+        open_trades = [
+            {
+                "symbol": "AAPL",
+                "side": "buy",
+                "strategy": "momentum",
+                "entry_price": "bad",
+                "asset_class": "stock",
+            },
+            {
+                "symbol": "MSFT",
+                "side": "buy",
+                "strategy": "momentum",
+                "entry_price": "100",
+                "asset_class": "stock",
+            },
+        ]
+
+        with (
+            patch.object(run_scan, "get_open_trades", return_value=open_trades),
+            patch.object(run_scan.oe, "exit_position", return_value={"symbol": "MSFT", "status": "dry_run"}) as exit_position,
+        ):
+            run_scan._check_strategy_exits(
+                [MomentumStrategy()],
+                ["AAPL", "MSFT"],
+                dry_run=True,
+                marker=marker,
+            )
+
+        self.assertEqual(marker.status, "error")
+        self.assertEqual(marker.fields["stage"], "strategy_exit")
+        self.assertEqual(marker.fields["failed_exit_symbol"], "AAPL")
+        exit_position.assert_called_once_with(
+            "MSFT", reason="exit MSFT", asset_class="stock", dry_run=True
+        )
+
+    def test_strategy_exit_exception_marks_error_and_continues(self):
+        class BrokenMomentum:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def should_exit(self, symbol, entry_price):
+                if symbol == "AAPL":
+                    raise RuntimeError("indicator failed")
+                return True, f"exit {symbol}"
+
+        marker = FakeMarker()
+        open_trades = [
+            {
+                "symbol": "AAPL",
+                "side": "buy",
+                "strategy": "momentum",
+                "entry_price": "100",
+                "asset_class": "stock",
+            },
+            {
+                "symbol": "MSFT",
+                "side": "buy",
+                "strategy": "momentum",
+                "entry_price": "100",
+                "asset_class": "stock",
+            },
+        ]
+
+        with (
+            patch.object(run_scan, "get_open_trades", return_value=open_trades),
+            patch.object(run_scan.oe, "exit_position", return_value={"symbol": "MSFT", "status": "dry_run"}) as exit_position,
+        ):
+            run_scan._check_strategy_exits(
+                [BrokenMomentum()],
+                ["AAPL", "MSFT"],
+                dry_run=True,
+                marker=marker,
+            )
+
+        self.assertEqual(marker.status, "error")
+        self.assertEqual(marker.fields["stage"], "strategy_exit")
+        self.assertEqual(marker.fields["failed_exit_symbol"], "AAPL")
+        self.assertEqual(marker.fields["error_type"], "RuntimeError")
+        exit_position.assert_called_once_with(
+            "MSFT", reason="exit MSFT", asset_class="stock", dry_run=True
+        )
+
     def test_run_skips_when_market_connection_fails(self):
         with (
             patch.object(run_scan.ac, "is_market_open", side_effect=RuntimeError("unauthorized")),
@@ -513,6 +604,43 @@ class RunScanTests(unittest.TestCase):
         ):
             run_scan._check_hold_day_exits([], dry_run=True)
 
+        exit_position.assert_called_once()
+
+    def test_momentum_hold_price_fetch_failure_marks_error_and_continues(self):
+        open_trades = [
+            {
+                "symbol": "AAPL",
+                "strategy": "momentum",
+                "asset_class": "stock",
+                "entry_price": "100",
+            },
+            {
+                "symbol": "MSFT",
+                "strategy": "momentum",
+                "asset_class": "stock",
+                "entry_price": "100",
+            },
+        ]
+        marker = FakeMarker()
+
+        def latest_price(symbol, asset_class):
+            if symbol == "AAPL":
+                raise RuntimeError("quote timeout")
+            return 99
+
+        with (
+            patch.object(run_scan, "get_open_trades", return_value=open_trades),
+            patch.object(run_scan, "get_trade_age_days", return_value=4),
+            patch.object(run_scan, "_latest_price_for_trade", side_effect=latest_price),
+            patch.object(run_scan, "_estimate_peak_price_since_entry", return_value=104),
+            patch.object(run_scan.oe, "exit_position", return_value={"symbol": "MSFT", "status": "dry_run"}) as exit_position,
+        ):
+            run_scan._check_hold_day_exits([], dry_run=True, marker=marker)
+
+        self.assertEqual(marker.status, "error")
+        self.assertEqual(marker.fields["stage"], "hold_day_exit")
+        self.assertEqual(marker.fields["failed_exit_symbol"], "AAPL")
+        self.assertEqual(marker.fields["error_type"], "RuntimeError")
         exit_position.assert_called_once()
 
     # ── Market-closed guard ───────────────────────────────────────────────────
