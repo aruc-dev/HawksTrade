@@ -19,8 +19,10 @@ import pandas as pd
 import numpy as np
 
 from strategies.base_strategy import BaseStrategy
+from strategies.rsi_reversion import _calc_atr
 from core import alpaca_client as ac
 from core import risk_manager as rm
+from core.risk_manager import _get_closes
 from core.config_loader import get_config
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -84,9 +86,6 @@ class RangeBreakoutStrategy(BaseStrategy):
                 if bars is None or len(bars) < max(52, atr_period + 1, vol_filter_period + 1):
                     continue
 
-                # Use risk_manager helper for safe attribute access
-                from core.risk_manager import _get_closes
-                
                 df = pd.DataFrame({
                     "high":   [float(b.high) if hasattr(b, "high") else float(b["high"]) for b in bars],
                     "low":    [float(b.low) if hasattr(b, "low") else float(b["low"]) for b in bars],
@@ -114,8 +113,6 @@ class RangeBreakoutStrategy(BaseStrategy):
 
                 # Condition: Price breakout, High Volume, long-term Uptrend, and Volatility
                 if today_cls >= breakout_level and today_vol >= avg_vol * vol_mult and today_cls > ema50 and is_volatile:
-                    from strategies.rsi_reversion import _calc_atr
-                    
                     price = float(today_cls)
                     atr = _calc_atr(bars, atr_period)
                     atr_stop = round(price - atr_mult * atr, 4)

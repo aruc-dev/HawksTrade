@@ -277,10 +277,12 @@ class RSIReversionStrategy(BaseStrategy):
                 ])
                 rsi    = _calc_rsi(closes, period)
                 sma200 = closes.rolling(window=200).mean().iloc[-1]
-                price  = float(bars[-1].close)
+                price  = float(bars[-1].close if hasattr(bars[-1], "close") else bars[-1]["close"])
 
-                avg_vol_20 = pd.Series([b.volume for b in bars]).iloc[-21:-1].mean()
-                today_vol  = float(bars[-1].volume)
+                avg_vol_20 = pd.Series([
+                    float(b.volume if hasattr(b, "volume") else b["volume"]) for b in bars
+                ]).iloc[-21:-1].mean()
+                today_vol  = float(bars[-1].volume if hasattr(bars[-1], "volume") else bars[-1]["volume"])
                 vol_ratio  = today_vol / avg_vol_20 if avg_vol_20 > 0 else 0.0
 
                 # SMA200 band: price must be within configurable buffers of SMA200.

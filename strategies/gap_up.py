@@ -21,8 +21,10 @@ import pandas as pd
 import numpy as np
 
 from strategies.base_strategy import BaseStrategy
+from strategies.rsi_reversion import _calc_atr
 from core import alpaca_client as ac
 from core import risk_manager as rm
+from core.risk_manager import _get_closes
 from core.config_loader import get_config
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -88,8 +90,6 @@ class GapUpStrategy(BaseStrategy):
                 if bars is None or len(bars) < sma_long + 1:
                     continue
 
-                from core.risk_manager import _get_closes
-                
                 df = pd.DataFrame({
                     "open":   [float(b.open) if hasattr(b, "open") else float(b["open"]) for b in bars],
                     "high":   [float(b.high) if hasattr(b, "high") else float(b["high"]) for b in bars],
@@ -118,9 +118,7 @@ class GapUpStrategy(BaseStrategy):
                     if (today_vol >= avg_vol_20 * vol_mult and
                         today_open > sma200 and
                         prev_close > prev_open):
-                        
-                        from strategies.rsi_reversion import _calc_atr
-                        
+
                         price = float(today_open) # Open-based entry for GapUp
                         atr = _calc_atr(bars, atr_period)
                         # For GapUp, we use today's open as entry for sizing
