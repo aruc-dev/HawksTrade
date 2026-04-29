@@ -103,18 +103,18 @@ class V4ImprovementsTests(unittest.TestCase):
              patch("core.alpaca_client.get_cash", return_value=5000):
             qty = rm.kelly_position_size(price=100)
             self.assertGreater(qty, 0)
-            # WR=0.66, b=3, Kelly_f=0.55, Half=0.275, capped by configured 7% max -> 7 shares
-            self.assertEqual(qty, 7.0)
+            # WR=0.66, b=3, Kelly_f=0.55, Half=0.275, capped by configured 8% max -> 8 shares
+            self.assertEqual(qty, 8.0)
 
     def test_kelly_fallback_v3_defaults(self):
         # When < 10 trades, use v3 defaults (WR=0.567, win=0.1398, loss=0.0543)
-        # b = 2.57, kelly_f = 0.398, half = 0.199, capped by configured 7% max
+        # b = 2.57, kelly_f = 0.398, half = 0.199, capped by configured 8% max
         with patch("tracking.trade_log.get_closed_trades", return_value=[]), \
              patch("core.alpaca_client.get_portfolio_value", return_value=10000), \
              patch("core.alpaca_client.get_cash", return_value=10000):
             qty = rm.kelly_position_size(price=100)
-            # 7% of 10000 = 700 USD -> 7 shares
-            self.assertEqual(qty, 7.0)
+            # 8% of 10000 = 800 USD -> 8 shares
+            self.assertEqual(qty, 8.0)
 
     def test_rsi_1bar_recovery_allows_rising(self):
         # 1-bar confirmation: last close higher than prior close → recovering

@@ -29,9 +29,9 @@ Latest recommended 12-month result:
 
 | Final Value | Return | Trades | Win Rate | Max Drawdown |
 |---:|---:|---:|---:|---:|
-| $11,066.32 | +10.66% | 72 | 44.4% | -2.27% |
+| $11,199.30 | +11.99% | 72 | 44.4% | -2.47% |
 
-These results enforce `trading.max_position_pct: 0.07` for all entries, including momentum/Kelly sizing, and include the hardened Range Breakout implementation. The only risk increase in the recommended profile is the max-position cap moving from 5% to 7%; stop-loss, take-profit, daily-loss halt, and mode remain unchanged.
+These results enforce `trading.max_position_pct: 0.08` for all entries, including momentum/Kelly sizing, and include the hardened Range Breakout implementation. The latest approved risk increase moves the max-position cap from 7% to 8%; stop-loss, take-profit, daily-loss halt, and mode remain unchanged.
 
 See [backtests.md](backtests.md) for the full comparison.
 
@@ -82,7 +82,7 @@ This bot is validated as a swing-trading system. Enabling intraday changes behav
 ```yaml
 trading:
   max_positions: 10
-  max_position_pct: 0.07
+  max_position_pct: 0.08
   stop_loss_pct: 0.035
   take_profit_pct: 0.12
   daily_loss_limit_pct: 0.05
@@ -94,7 +94,7 @@ trading:
 | Setting | Meaning | Current Default |
 |---|---|---:|
 | `max_positions` | Max concurrent open positions | 10 |
-| `max_position_pct` | Max portfolio allocation per trade | 7% |
+| `max_position_pct` | Max portfolio allocation per trade | 8% |
 | `stop_loss_pct` | Per-position stop-loss from entry | 3.5% |
 | `take_profit_pct` | Per-position take-profit from entry | 12% |
 | `daily_loss_limit_pct` | Daily account-level loss halt | 5% |

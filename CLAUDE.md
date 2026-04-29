@@ -223,7 +223,7 @@ These are set in `config/config.yaml → trading:` and enforced by `core/risk_ma
 
 | Rule | Value |
 |------|-------|
-| Max position size | 7% of portfolio per trade |
+| Max position size | 8% of portfolio per trade |
 | Stop-loss | 3.5% below entry |
 | Take-profit | 12% above entry |
 | Daily loss limit | 5% from first observed account value for the NY trading date → halt all trading |

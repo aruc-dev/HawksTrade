@@ -30,7 +30,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener
 
 ## Backtesting & Performance
 
-HawksTrade includes a high-fidelity historical simulator. The current profit-tuned default strategy set achieved **+10.66% annual return** in the 12-month backtest ending 2026-04-10 on $10,000 starting capital, with the configured 7% max-position risk cap enforced.
+HawksTrade includes a high-fidelity historical simulator. The current profit-tuned default strategy set achieved **+11.99% annual return** in the 12-month backtest ending 2026-04-10 on $10,000 starting capital, with the configured 8% max-position risk cap enforced.
 
 - **Backtest Summary**: [backtests.md](backtests.md)
 - **Configuration Guide**: [config.md](config.md)
@@ -59,7 +59,7 @@ Live/paper scans fail closed when regime data is unavailable or insufficient, bl
 
 ### Strategy Position Sizing
 
-Momentum, RSI Reversion, EMA Crossover, and Range Breakout emit ATR-risk quantities that target 1% account risk per trade before the global 7% max-position cap is applied. Momentum still has a Half-Kelly fallback in the executor if a signal does not include ATR sizing, but the current strategy path provides ATR-risk sizing by default.
+Momentum, RSI Reversion, EMA Crossover, and Range Breakout emit ATR-risk quantities that target 1% account risk per trade before the global 8% max-position cap is applied. Momentum still has a Half-Kelly fallback in the executor if a signal does not include ATR sizing, but the current strategy path provides ATR-risk sizing by default.
 
 ### Momentum Exit Policy
 
@@ -104,7 +104,7 @@ python3 scheduler/run_validation_gate.py --profile rsi
 - **Asymmetric Reward**: 3.5% stop-loss / 12% take-profit.
 - **Capital Protection**: SMA-based trend filters on all strategies.
 - **Strategy-Local Loss Defense**: MA Crossover exits on a daily close at least 1% below entry, reducing crypto trend-tail losses before the global stop layer is needed.
-- **Position Limits**: Max 7% of portfolio per trade, cap of 10 concurrent positions.
+- **Position Limits**: Max 8% of portfolio per trade, cap of 10 concurrent positions.
 - **Daily Guardrail**: 5% daily loss limit (hard stop for the day), keyed to the `America/New_York` trading-session date so UTC cloud hosts do not reset the baseline at UTC midnight. The baseline is the first observed account value for that trading date and is persisted in `data/daily_loss_baseline.json`; it is not reconstructed from the prior close.
 - **Broker Resilience**: Alpaca timeouts, rate limits, and 5xx outages use bounded retry; auth failures, not-found responses, and broker rejections are classified for fail-closed logging.
 - **Price-Fetch Visibility**: Risk checks track consecutive latest-price failures per open position and surface repeated failures as `[NOK]` in the Linux health dashboard.
