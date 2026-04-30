@@ -17,7 +17,7 @@ The current recommended configuration uses:
 - `rsi_reversion` enabled with crash and realised-volatility guards
 - `ma_crossover` enabled with a 1% daily-close max-loss exit
 - `range_breakout` disabled
-- `gap_up` disabled
+- `gap_up` disabled after standalone hardening
 
 These results enforce `trading.max_position_pct: 0.08` for every entry, including momentum/Kelly sizing. The active default now enables RSI Reversion as the stock mean-reversion sleeve and disables Range Breakout, leaving MA Crossover as the active crypto sleeve. The latest tuning raised the max-position cap from 7% to 8%; stop-loss, take-profit, daily-loss halt, and mode remain unchanged.
 
@@ -69,7 +69,8 @@ Interpretation:
 - RSI Reversion is enabled in the active profile but remains weak on its own: 2 trades, 0% win rate, -$211.30 total P&L in the 12-month run. Keep monitoring the dedicated RSI gate before scaling allocation.
 - Use the current row above for live/paper expectations and treat older rows as historical baselines only.
 - Raising the configured position cap from 7% to 8% increased return while keeping the costed production-gate drawdown below 2.7%. With `max_positions: 10`, this caps fully deployed gross long exposure at roughly 80% before cash, position, and asset-class constraints.
-- `gap_up` remains disabled because it did not improve the validated 12-month configuration.
+- `gap_up` remains disabled in the default profile, but its standalone hardened
+  sleeve now passes the dedicated cost-aware enablement gate.
 
 ---
 
@@ -115,6 +116,7 @@ python3 scheduler/run_report.py
 python3 scheduler/run_backtest.py --days 30 --fund 10000
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/10/2026 --exit-policy profit_trailing --screener
 python3 scheduler/run_validation_gate.py --profile production
+python3 scheduler/run_validation_gate.py --profile gap
 ```
 
 All checks passed at the time this document was updated.
@@ -147,6 +149,14 @@ allocation:
 |---|---|---:|---:|---:|---:|---:|---:|
 | `range_breakout_12m_costed` | PASS | +6.52% | -1.18% | 14 | 64.3% | 4.44 | 1.93 |
 | `range_breakout_recent_30d_watch` | WARN | -0.36% | -0.36% | 1 | 0.0% | 0.00 | -5.17 |
+
+Gap-Up remains disabled in the active profile. Its dedicated enablement gate
+validates the opening-minute implementation before any live allocation:
+
+| Gate | Result | Return | Max Drawdown | Trades | Win Rate | Profit Factor | Daily Sharpe |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `gap_up_12m_costed` | PASS | +1.57% | -1.02% | 13 | 76.9% | 2.73 | 0.55 |
+| `gap_up_recent_30d_watch` | PASS | +0.12% | -1.31% | 2 | 50.0% | 1.13 | 0.35 |
 
 ---
 

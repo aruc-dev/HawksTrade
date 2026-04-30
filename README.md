@@ -44,7 +44,7 @@ HawksTrade includes a high-fidelity historical simulator. The current default st
 |----------|--------|----------------|----------|
 | **Momentum** | US Stocks | Top 1 by 5-day return, min 10% momentum, 1.8x volume spike, 75% breadth coverage, profit-aware exit | Captures only high-conviction rallies, exits flat/losing trades after the minimum hold, and lets profitable trades run under trailing protection. |
 | **RSI Reversion** | US Stocks | Enabled; RSI < 30, %B < 20%, SMA-200 within +/-15%, vol spike 1.5x, 1-bar recovery | Conservative mean reversion with crash and realised-volatility regime guards. |
-| **Gap-Up** | US Stocks | Disabled by default; 3% gap, high volume, SMA-200 trend | Gap plays on strong trend confirmation. |
+| **Gap-Up** | US Stocks | Disabled; true 4-15% opening gap, 1.5x opening-volume pace, SMA-200 trend, top-1 ranked signal, 3-day hold | Opening momentum sleeve with completed-bar history, minute-bar entry confirmation, and ATR-risk sizing. |
 | **EMA Crossover** | Crypto | 9/21 EMA, 2-day recent-cross window, RSI 35-70, slope + volatility filters, 1% daily-close max-loss exit | Bullish EMA crossover with BTC regime gate and tighter strategy-level capital defense. |
 | **Range Breakout** | Crypto | Disabled; 20-day high close breakout, 2.0x volume, rising EMA-50, RSI/extension guards | Ranked Donchian-style breakout implementation remains available, but is not part of the active default strategy set. |
 
@@ -59,7 +59,7 @@ Live/paper scans fail closed when regime data is unavailable or insufficient, bl
 
 ### Strategy Position Sizing
 
-Momentum, RSI Reversion, and EMA Crossover emit ATR-risk quantities that target 1% account risk per trade before the global 8% max-position cap is applied. Range Breakout also emits ATR-risk quantities if re-enabled later. Momentum still has a Half-Kelly fallback in the executor if a signal does not include ATR sizing, but the current strategy path provides ATR-risk sizing by default.
+Momentum, RSI Reversion, Gap-Up, and EMA Crossover emit ATR-risk quantities that target 1% account risk per trade before the global 8% max-position cap is applied. Range Breakout also emits ATR-risk quantities if re-enabled later. Momentum still has a Half-Kelly fallback in the executor if a signal does not include ATR sizing, but the current strategy path provides ATR-risk sizing by default.
 
 ### Momentum Exit Policy
 
@@ -97,8 +97,12 @@ RSI Reversion is enabled in the active default profile. Use its dedicated gate a
 python3 scheduler/run_validation_gate.py --profile rsi
 ```
 
-Range Breakout remains disabled by default. Use its dedicated gate before
-enabling or allocating capital to that sleeve:
+Gap-Up and Range Breakout remain disabled by default. Use their dedicated gates
+before enabling or allocating capital to either sleeve:
+
+```bash
+python3 scheduler/run_validation_gate.py --profile gap
+```
 
 ```bash
 python3 scheduler/run_validation_gate.py --profile range

@@ -20,7 +20,7 @@ The latest validated default configuration is:
 | Screener | `screener.enabled: true` | The tightened screener improved 12-month return versus the old screener and recent fixed-universe test. |
 | Momentum | enabled, `top_n: 1`, `min_momentum_pct: 0.10`, `volume_spike_ratio: 1.8`, `min_breadth_coverage_pct: 0.75` | Focuses stock exposure on the single strongest high-volume momentum candidate and blocks entries when breadth data coverage is too thin. |
 | RSI Reversion | enabled | Active mean-reversion stock sleeve with crash and realised-volatility guards. The full profile passes production gates, but RSI itself had two losing 12-month trades, so monitor with the RSI validation profile before scaling allocation. |
-| Gap-Up | disabled | Did not improve the recommended 12-month configuration. |
+| Gap-Up | disabled | Hardened as a monitored opening-momentum sleeve, but still disabled until explicitly allocated. |
 | MA Crossover | enabled, `max_loss_exit_pct: 0.01` | Positive crypto contribution in the latest 12-month backtest with a tighter daily-close loss exit to preserve capital. |
 | Range Breakout | disabled | Implementation remains available, but the active crypto sleeve now uses MA Crossover only. |
 | Momentum exit policy | `profit_trailing` | Exits flat/losing trades after the minimum hold while allowing winners to run under trailing protection. |
@@ -253,16 +253,27 @@ candidate for higher allocation.
 ```yaml
 gap_up:
   enabled: false
-  min_gap_pct: 0.03
+  min_gap_pct: 0.04
+  max_gap_pct: 0.15
+  require_true_gap: true
   volume_multiplier: 1.5
+  volume_avg_period: 20
+  trend_sma_period: 200
   entry_window_minutes: 45
+  opening_timeframe: "1Min"
+  max_open_extension_pct: 0.03
+  max_open_fade_pct: 0.005
+  max_signals: 1
   intraday_exit: false
-  hold_days: 2
+  hold_days: 3
 ```
 
 Recommended: disabled.
 
-Keep available for experiments, but it is not part of the recommended default based on the latest backtests.
+Keep available for experiments, but it is not part of the recommended default.
+The implementation uses completed daily bars for trend/ATR/average volume and
+current-session minute bars for the actual opening gap and volume pace, avoiding
+current-day daily-bar lookahead in live scans.
 
 ### MA Crossover
 
@@ -421,3 +432,12 @@ python3 scheduler/run_validation_gate.py --profile range
 
 This checks the disabled breakout sleeve independently before it is considered
 for live allocation.
+
+Gap-Up has a separate enablement gate:
+
+```bash
+python3 scheduler/run_validation_gate.py --profile gap
+```
+
+This checks the disabled opening-momentum sleeve independently before it is
+considered for live allocation.

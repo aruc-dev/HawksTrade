@@ -15,9 +15,9 @@ re-reading the source.
 ## 1. Historical state of the book
 
 Note: this section records the pre-April 30, 2026 baseline used when the
-proposal was written. The current committed default enables `rsi_reversion` and
-disables `range_breakout`; see `config/config.yaml` and `strategies/strategy.md`
-for the live strategy state.
+proposal was written. The current committed default enables `rsi_reversion`,
+disables `range_breakout`, and keeps the hardened `gap_up` sleeve disabled; see
+`config/config.yaml` and `strategies/strategy.md` for the live strategy state.
 
 **Active strategies at proposal time**
 - `momentum` (stocks) — top-N by 5-day return, `profit_trailing` exit
@@ -26,7 +26,7 @@ for the live strategy state.
 
 **Disabled strategies at proposal time**
 - `rsi_reversion` (stocks) — over-filtered, rarely fires
-- `gap_up` (stocks) — needs tick-level fills the 30-min scheduler can't deliver
+- `gap_up` (stocks) — now hardened with minute-bar opening confirmation, but disabled
 
 **Portfolio-level observation.** All three active strategies are *correlated
 long-only trend-following*. When the market is in a sustained uptrend all
@@ -90,9 +90,10 @@ Likely why it's disabled.
 
 ### 2.5 Gap Up (stocks, disabled)
 
-Requires first 45 min of market open + 3–15% gap + 2× volume + above SMA200 +
-prior day green + true gap. Highly conditional, and the 30-min scheduler
-can't deliver the tick-level fills these setups need to be profitable.
+The hardened implementation uses completed daily history plus current-session
+minute bars: true 4–15% opening gap, 1.5× opening-volume pace, SMA200 trend,
+prior-day green close, one ranked signal per scan, and a 3-day hold cap. It
+remains disabled until explicitly allocated.
 
 ---
 
@@ -310,9 +311,11 @@ rate-limit issues and reduces the window between check time and action time.
 - **Daily loss limit (5%) and stop-loss (3.5%).** These are fine.
 - **`profit_trailing` exit policy for momentum.** The design is sound.
 - **`max_crypto_positions` cap.** Let it run before tuning.
-- **Disabling `gap_up`.** Opening-gap strategies need tick-level fills. Don't
-  re-enable unless the scheduler gets a 9:30:01 cron *and* orders move to
-  `market` type with aggressive slippage tolerance.
+- **Keeping `gap_up` disabled by default.** The implementation now avoids
+  daily-bar lookahead with minute-bar opening confirmation, but opening-gap
+  fills are still slippage-sensitive. Re-enable only after the dedicated
+  `--profile gap` gate passes and the production scheduler runs inside the
+  first 45 minutes.
 
 ---
 

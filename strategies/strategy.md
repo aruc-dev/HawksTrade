@@ -157,29 +157,38 @@ profit factor, +2% aggregate paper return, and max drawdown no worse than 4%.
 **Type:** Opening momentum, short swing trade.
 
 **Entry:** All of the following must be true at market open (within first 45 minutes):
-1. Today's open is 3–15% above the prior close (gap bounded to avoid exhaustion gaps).
-2. Volume ≥ 1.5× 20-day average.
-3. Price > SMA200 — stock is in a long-term uptrend.
-4. Prior day closed green (close > open) — pre-gap momentum confirmation.
-5. Entry within 45 minutes of the 9:30 ET open.
+1. Today's open is 4–15% above the prior close (gap bounded to avoid exhaustion gaps).
+2. Today's open is above the prior day's high (`require_true_gap: true`).
+3. Opening minute-bar volume pace is at least 1.5× the 20-day average daily pace.
+4. Price > SMA200 — stock is in a long-term uptrend.
+5. Prior day closed green (close > open) — pre-gap momentum confirmation.
+6. The latest opening-window price has not faded more than 0.5% below the session open
+   and is not already more than 3% above the session open.
+7. Entry within 45 minutes of the 9:30 ET open.
 
-A "true gap" bonus (today's open also above the prior day's high) raises the
-confidence score.
+Completed daily bars are used for SMA200, ATR, prior-day OHLC, and average
+volume. Current-session minute bars are used for the live opening gap and volume
+pace, so the strategy does not trade from the current day's completed daily
+volume or close. Signals are ranked by confidence and capped at one per scan.
 
-**Exit:** 2-day hold cap. No active strategy-level exit signal; stop-loss and
+**Exit:** 3-day hold cap. No active strategy-level exit signal; stop-loss and
 take-profit from the global risk manager apply throughout.
 
 **Key parameters:**
 
 | Parameter | Value |
 |---|---|
-| `min_gap_pct` | 3% |
-| `max_gap_pct` (code) | 15% (hard cap) |
-| `volume_multiplier` | 1.5× |
+| `min_gap_pct` | 4% |
+| `max_gap_pct` | 15% |
+| `volume_multiplier` | 1.5× opening volume pace |
 | `entry_window_minutes` | 45 min after open |
-| `hold_days` | 2 business days |
+| `max_signals` | 1 top-ranked candidate per scan |
+| `hold_days` | 3 business days |
 
 **Regime filter:** SPY > SMA50 (bull market required).
+
+**Monitoring gate:** Run `python3 scheduler/run_validation_gate.py --profile gap`
+before enabling or allocating capital to this disabled sleeve.
 
 ---
 
