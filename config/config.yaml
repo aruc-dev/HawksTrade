@@ -159,7 +159,7 @@ strategies:
     weight: 1.0
 
   gap_up:
-    enabled: false
+    enabled: true
     asset_class: stocks
     description: "Buy confirmed true-gap stocks gapping up 4-15% with opening-volume pace and trend confirmation"
     min_gap_pct: 0.04            # Minimum gap-up percentage
@@ -206,7 +206,7 @@ strategies:
     weight: 1.0
 
   range_breakout:
-    enabled: false
+    enabled: true
     asset_class: crypto
     description: "Enter long on confirmed daily close breakout above the configured Donchian high with volume, trend, volatility, RSI, and extension guards. Exit failed breakouts early before the hold cap."
     breakout_lookback_days: 20   # Close must break above the prior N-day high, excluding the current bar
@@ -232,7 +232,7 @@ strategies:
     weight: 0.9
 
 # --- VALIDATION GATES ---
-# Non-trading guardrails used before scaling live capital or enabling disabled alphas.
+# Non-trading guardrails used before scaling live capital or strategy sleeves.
 # These settings do not change order sizing or live/paper execution behavior.
 validation:
   cost_model:

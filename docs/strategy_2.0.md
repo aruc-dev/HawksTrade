@@ -15,8 +15,8 @@ re-reading the source.
 ## 1. Historical state of the book
 
 Note: this section records the pre-April 30, 2026 baseline used when the
-proposal was written. The current committed default enables `rsi_reversion`,
-disables `range_breakout`, and keeps the hardened `gap_up` sleeve disabled; see
+proposal was written. The current committed default enables all configured
+strategies, including `rsi_reversion`, `gap_up`, and `range_breakout`; see
 `config/config.yaml` and `strategies/strategy.md` for the live strategy state.
 
 **Active strategies at proposal time**
@@ -26,7 +26,7 @@ disables `range_breakout`, and keeps the hardened `gap_up` sleeve disabled; see
 
 **Disabled strategies at proposal time**
 - `rsi_reversion` (stocks) — over-filtered, rarely fires
-- `gap_up` (stocks) — now hardened with minute-bar opening confirmation, but disabled
+- `gap_up` (stocks) — now hardened with minute-bar opening confirmation
 
 **Portfolio-level observation.** All three active strategies are *correlated
 long-only trend-following*. When the market is in a sustained uptrend all
@@ -82,18 +82,19 @@ Buys above prior-day high + 1.8× volume + above EMA50 + volatility confirm.
 - **`hold_days: 3` is very short** for a breakout strategy. The premise of
   buying a breakout is that the new range tends to expand over 5–15 days.
 
-### 2.4 RSI Reversion (stocks, disabled)
+### 2.4 RSI Reversion (stocks, now enabled)
 
 Requires RSI < 38 *and* 2-bar recovery *and* 1.5× volume spike *and* price
 within 15% of SMA200. That many filters together means very rare signals.
 Likely why it's disabled.
 
-### 2.5 Gap Up (stocks, disabled)
+### 2.5 Gap Up (stocks, now enabled)
 
 The hardened implementation uses completed daily history plus current-session
 minute bars: true 4–15% opening gap, 1.5× opening-volume pace, SMA200 trend,
 prior-day green close, one ranked signal per scan, and a 3-day hold cap. It
-remains disabled until explicitly allocated.
+is enabled in the all-strategy profile, but remains a monitored sleeve because
+short-window backtests are weak.
 
 ---
 
@@ -311,11 +312,11 @@ rate-limit issues and reduces the window between check time and action time.
 - **Daily loss limit (5%) and stop-loss (3.5%).** These are fine.
 - **`profit_trailing` exit policy for momentum.** The design is sound.
 - **`max_crypto_positions` cap.** Let it run before tuning.
-- **Keeping `gap_up` disabled by default.** The implementation now avoids
-  daily-bar lookahead with minute-bar opening confirmation, but opening-gap
-  fills are still slippage-sensitive. Re-enable only after the dedicated
-  `--profile gap` gate passes and the production scheduler runs inside the
-  first 45 minutes.
+- **Scaling `gap_up` aggressively without more live/paper evidence.** The
+  implementation now avoids daily-bar lookahead with minute-bar opening
+  confirmation, but opening-gap fills are still slippage-sensitive. Keep using
+  the dedicated `--profile gap` gate and verify the production scheduler runs
+  inside the first 45 minutes.
 
 ---
 

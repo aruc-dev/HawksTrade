@@ -73,7 +73,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
   --set strategies.momentum.min_momentum_pct=0.06
 ```
 
-Run disabled-sleeve gates before enabling either Gap-Up or Range Breakout:
+Run sleeve-specific gates before scaling Gap-Up or Range Breakout:
 
 ```bash
 python3 scheduler/run_validation_gate.py --profile gap

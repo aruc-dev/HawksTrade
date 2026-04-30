@@ -15,16 +15,18 @@ The current recommended configuration uses:
 - Dynamic screener enabled with tightened liquidity, trend, volatility, and overextension filters
 - `momentum` enabled with `top_n: 1`, `min_momentum_pct: 0.10`, `volume_spike_ratio: 1.8`, and `min_breadth_coverage_pct: 0.75`
 - `rsi_reversion` enabled with crash and realised-volatility guards
+- `gap_up` enabled with true-gap, opening-volume pace, SMA200, and top-1 ranking guards
 - `ma_crossover` enabled with a 1% daily-close max-loss exit
-- `range_breakout` disabled
-- `gap_up` disabled after standalone hardening
+- `range_breakout` enabled with 20-day Donchian breakout, trend, volume, RSI, extension, and failed-breakout guards
 
-These results enforce `trading.max_position_pct: 0.08` for every entry, including momentum/Kelly sizing. The active default now enables RSI Reversion as the stock mean-reversion sleeve and disables Range Breakout, leaving MA Crossover as the active crypto sleeve. The latest tuning raised the max-position cap from 7% to 8%; stop-loss, take-profit, daily-loss halt, and mode remain unchanged.
+These results enforce `trading.max_position_pct: 0.08` for every entry, including momentum/Kelly sizing. The active default now enables every configured strategy. The latest tuning raised the max-position cap from 7% to 8%; stop-loss, take-profit, daily-loss halt, and mode remain unchanged.
 
 | Period | Final Value | Return | Trades | Win Rate | Max Drawdown |
 |---|---:|---:|---:|---:|---:|
-| 12 months | $11,211.57 | +12.12% | 56 | 42.9% | -2.09% |
-| 6 months | $10,118.17 | +1.18% | 20 | 35.0% | -2.03% |
+| 1 month | $9,846.53 | -1.53% | 9 | 11.1% | -2.97% |
+| 2 months | $9,785.03 | -2.15% | 12 | 8.3% | -2.97% |
+| 6 months | $9,664.13 | -3.36% | 30 | 20.0% | -3.74% |
+| 12 months | $10,942.77 | +9.43% | 91 | 40.7% | -5.11% |
 
 ---
 
@@ -32,19 +34,21 @@ These results enforce `trading.max_position_pct: 0.08` for every entry, includin
 
 | Strategy | Trades | Win Rate | Avg P&L % | Total P&L | Best | Worst |
 |---|---:|---:|---:|---:|---:|---:|
-| `ma_crossover` | 20 | 40.0% | +4.04% | $629.13 | +18.74% | -6.32% |
-| `momentum` | 34 | 47.1% | +2.52% | $751.74 | +17.34% | -9.79% |
-| `rsi_reversion` | 2 | 0.0% | -11.69% | -$211.30 | -11.37% | -12.01% |
+| `gap_up` | 29 | 48.3% | +0.50% | $108.17 | +12.53% | -8.04% |
+| `ma_crossover` | 20 | 35.0% | +3.24% | $547.83 | +18.74% | -6.32% |
+| `momentum` | 33 | 33.3% | +0.03% | $51.62 | +16.20% | -15.40% |
+| `range_breakout` | 7 | 71.4% | +8.49% | $481.77 | +26.50% | -4.44% |
+| `rsi_reversion` | 2 | 0.0% | -11.69% | -$210.98 | -11.37% | -12.01% |
 
 ## 12-Month Quarterly Breakdown
 
 | Quarter | Start Value | End Value | Return | Trades | Win Rate |
 |---|---:|---:|---:|---:|---:|
-| Q2 2025 | $10,000.00 | $10,050.45 | +0.50% | 11 | 36.4% |
-| Q3 2025 | $10,032.66 | $11,158.59 | +11.22% | 22 | 59.1% |
-| Q4 2025 | $11,177.20 | $11,061.49 | -1.04% | 9 | 22.2% |
-| Q1 2026 | $11,061.49 | $11,179.95 | +1.07% | 13 | 38.5% |
-| Q2 2026 | $11,179.95 | $11,211.57 | +0.28% | 1 | 0.0% |
+| Q2 2025 | $10,000.00 | $10,508.39 | +5.08% | 15 | 60.0% |
+| Q3 2025 | $10,500.19 | $11,428.31 | +8.84% | 36 | 50.0% |
+| Q4 2025 | $11,426.38 | $11,204.59 | -1.94% | 16 | 31.2% |
+| Q1 2026 | $11,204.59 | $11,113.33 | -0.81% | 15 | 26.7% |
+| Q2 2026 | $11,113.33 | $10,942.77 | -1.53% | 9 | 11.1% |
 
 ---
 
@@ -52,7 +56,8 @@ These results enforce `trading.max_position_pct: 0.08` for every entry, includin
 
 | Scenario | Screener | Strategies | Return | Trades | Win Rate | Max Drawdown |
 |---|---|---|---:|---:|---:|---:|
-| Current default strategy set | On | `momentum`, `rsi_reversion`, `ma_crossover` | +12.12% | 56 | 42.9% | -2.09% |
+| Current all-enabled strategy set | On | `momentum`, `rsi_reversion`, `gap_up`, `ma_crossover`, `range_breakout` | +9.43% | 91 | 40.7% | -5.11% |
+| Previous default strategy set | On | `momentum`, `rsi_reversion`, `ma_crossover` | +12.12% | 56 | 42.9% | -2.09% |
 | Previous range-breakout default strategy set | On | `momentum`, `ma_crossover`, `range_breakout` | +11.99% | 72 | 44.4% | -2.47% |
 | Previous 7% cap profit-tuned default strategy set | On | `momentum`, `ma_crossover`, `range_breakout` | +10.66% | 72 | 44.4% | -2.27% |
 | Previous 5% cap capital-preserving default strategy set | On | `momentum`, `ma_crossover`, `range_breakout` | +7.52% | 72 | 44.4% | -1.73% |
@@ -63,14 +68,12 @@ These results enforce `trading.max_position_pct: 0.08` for every entry, includin
 
 Interpretation:
 
-- The stricter Momentum profile cut churn materially: 98 previous trades fell to 36, win rate improved from 26.5% to 44.4%, and the sleeve remained profitable under the new 8% max-position cap.
-- The MA Crossover 1% daily-close max-loss exit reduced its worst observed 12-month loss from -19.25% to -6.32% while improving total contribution.
-- Disabling Range Breakout reduced total trade count from 72 to 56 while the 12-month return and drawdown improved slightly in this reproduction.
-- RSI Reversion is enabled in the active profile but remains weak on its own: 2 trades, 0% win rate, -$211.30 total P&L in the 12-month run. Keep monitoring the dedicated RSI gate before scaling allocation.
+- The all-enabled profile is positive over 12 months, but it is weaker than the previous default on return and drawdown. Treat this as a broader alpha-exposure profile, not a lower-risk profile.
+- Range Breakout and MA Crossover generated most of the 12-month profit. Range Breakout has only 7 closed trades, so its apparent edge needs continued forward validation.
+- Gap-Up was modestly profitable over 12 months but negative in the 6-month all-enabled window. Keep its dedicated gate in the monitoring loop before scaling allocation.
+- RSI Reversion remains weak on its own: 2 trades, 0% win rate, -$210.98 total P&L in the 12-month run. Keep monitoring the dedicated RSI gate before scaling allocation.
 - Use the current row above for live/paper expectations and treat older rows as historical baselines only.
 - Raising the configured position cap from 7% to 8% increased return while keeping the costed production-gate drawdown below 2.7%. With `max_positions: 10`, this caps fully deployed gross long exposure at roughly 80% before cash, position, and asset-class constraints.
-- `gap_up` remains disabled in the default profile, but its standalone hardened
-  sleeve now passes the dedicated cost-aware enablement gate.
 
 ---
 
@@ -92,7 +95,7 @@ Experiment-only overrides without editing `config/config.yaml`:
 
 ```bash
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/10/2026 --screener \
-  --strategies momentum,rsi_reversion,ma_crossover \
+  --strategies momentum,rsi_reversion,gap_up,ma_crossover,range_breakout \
   --set strategies.momentum.top_n=1 \
   --set strategies.momentum.min_momentum_pct=0.10 \
   --set strategies.momentum.volume_spike_ratio=1.8 \
@@ -103,6 +106,11 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/10/2026 
 ---
 
 ## Validation
+
+The production validation gate currently remains the conservative core-gate
+profile from before all strategies were enabled. The requested all-enabled
+profile is benchmarked above; do not assume the production gate fully validates
+the all-enabled book until the gate strategy lists and thresholds are revisited.
 
 The latest implementation was also checked with:
 
@@ -141,17 +149,16 @@ RSI Reversion is enabled in the active profile by configuration, but the dedicat
 `--profile rsi` gate should still be used before scaling its allocation. The
 latest default 12-month run had only 2 RSI trades and both lost money.
 
-Range Breakout remains disabled in the active profile. Its dedicated enablement
-gate now validates the hardened Donchian-style implementation before any live
-allocation:
+Range Breakout is enabled in the active profile. Its dedicated gate validates
+the hardened Donchian-style implementation before scaling allocation:
 
 | Gate | Result | Return | Max Drawdown | Trades | Win Rate | Profit Factor | Daily Sharpe |
 |---|---|---:|---:|---:|---:|---:|---:|
 | `range_breakout_12m_costed` | PASS | +6.52% | -1.18% | 14 | 64.3% | 4.44 | 1.93 |
 | `range_breakout_recent_30d_watch` | WARN | -0.36% | -0.36% | 1 | 0.0% | 0.00 | -5.17 |
 
-Gap-Up remains disabled in the active profile. Its dedicated enablement gate
-validates the opening-minute implementation before any live allocation:
+Gap-Up is enabled in the active profile. Its dedicated gate validates the
+opening-minute implementation before scaling allocation:
 
 | Gate | Result | Return | Max Drawdown | Trades | Win Rate | Profit Factor | Daily Sharpe |
 |---|---|---:|---:|---:|---:|---:|---:|

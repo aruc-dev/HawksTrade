@@ -12,9 +12,9 @@
 |---|---|---|---|
 | Momentum | Stocks | **Enabled** | `momentum.py` |
 | RSI Reversion | Stocks | **Enabled** | `rsi_reversion.py` |
-| Gap-Up | Stocks | Disabled | `gap_up.py` |
+| Gap-Up | Stocks | **Enabled** | `gap_up.py` |
 | MA Crossover | Crypto | **Enabled** | `ma_crossover.py` |
-| Range Breakout | Crypto | Disabled | `range_breakout.py` |
+| Range Breakout | Crypto | **Enabled** | `range_breakout.py` |
 
 All strategies share a common global risk layer (8% max position size,
 3.5% stop-loss, 12% take-profit, max 10 open positions, 5% daily-loss halt)
@@ -152,7 +152,7 @@ profit factor, +2% aggregate paper return, and max drawdown no worse than 4%.
 
 ---
 
-## 3. Gap-Up *(Stocks — Disabled)*
+## 3. Gap-Up *(Stocks — Enabled)*
 
 **Type:** Opening momentum, short swing trade.
 
@@ -188,7 +188,7 @@ take-profit from the global risk manager apply throughout.
 **Regime filter:** SPY > SMA50 (bull market required).
 
 **Monitoring gate:** Run `python3 scheduler/run_validation_gate.py --profile gap`
-before enabling or allocating capital to this disabled sleeve.
+before scaling capital allocated to this sleeve.
 
 ---
 
@@ -230,7 +230,7 @@ before enabling or allocating capital to this disabled sleeve.
 
 ---
 
-## 5. Range Breakout *(Crypto — Disabled)*
+## 5. Range Breakout *(Crypto — Enabled)*
 
 **Type:** Breakout, short swing trade. Runs 24/7 on daily bars.
 

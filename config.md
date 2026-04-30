@@ -20,18 +20,18 @@ The latest validated default configuration is:
 | Screener | `screener.enabled: true` | The tightened screener improved 12-month return versus the old screener and recent fixed-universe test. |
 | Momentum | enabled, `top_n: 1`, `min_momentum_pct: 0.10`, `volume_spike_ratio: 1.8`, `min_breadth_coverage_pct: 0.75` | Focuses stock exposure on the single strongest high-volume momentum candidate and blocks entries when breadth data coverage is too thin. |
 | RSI Reversion | enabled | Active mean-reversion stock sleeve with crash and realised-volatility guards. The full profile passes production gates, but RSI itself had two losing 12-month trades, so monitor with the RSI validation profile before scaling allocation. |
-| Gap-Up | disabled | Hardened as a monitored opening-momentum sleeve, but still disabled until explicitly allocated. |
+| Gap-Up | enabled | Opening-momentum sleeve with true-gap, opening-volume pace, trend, and top-1 ranking guards. |
 | MA Crossover | enabled, `max_loss_exit_pct: 0.01` | Positive crypto contribution in the latest 12-month backtest with a tighter daily-close loss exit to preserve capital. |
-| Range Breakout | disabled | Implementation remains available, but the active crypto sleeve now uses MA Crossover only. |
+| Range Breakout | enabled | Crypto Donchian breakout sleeve with volume, trend, RSI, extension, and failed-breakout guards. |
 | Momentum exit policy | `profit_trailing` | Exits flat/losing trades after the minimum hold while allowing winners to run under trailing protection. |
 
 Latest recommended 12-month result:
 
 | Final Value | Return | Trades | Win Rate | Max Drawdown |
 |---:|---:|---:|---:|---:|
-| $11,211.57 | +12.12% | 56 | 42.9% | -2.09% |
+| $10,942.77 | +9.43% | 91 | 40.7% | -5.11% |
 
-These results enforce `trading.max_position_pct: 0.08` for all entries, including momentum/Kelly sizing, with RSI Reversion enabled and Range Breakout disabled. The latest approved risk increase moves the max-position cap from 7% to 8%; stop-loss, take-profit, daily-loss halt, and mode remain unchanged.
+These results enforce `trading.max_position_pct: 0.08` for all entries, including momentum/Kelly sizing, with all configured strategies enabled. The latest approved risk increase moves the max-position cap from 7% to 8%; stop-loss, take-profit, daily-loss halt, and mode remain unchanged.
 
 See [backtests.md](backtests.md) for the full comparison.
 
@@ -252,7 +252,7 @@ candidate for higher allocation.
 
 ```yaml
 gap_up:
-  enabled: false
+  enabled: true
   min_gap_pct: 0.04
   max_gap_pct: 0.15
   require_true_gap: true
@@ -268,12 +268,13 @@ gap_up:
   hold_days: 3
 ```
 
-Recommended: disabled.
+Recommended: enabled in the all-strategy profile, with continued monitoring.
 
-Keep available for experiments, but it is not part of the recommended default.
 The implementation uses completed daily bars for trend/ATR/average volume and
 current-session minute bars for the actual opening gap and volume pace, avoiding
-current-day daily-bar lookahead in live scans.
+current-day daily-bar lookahead in live scans. The 12-month all-enabled
+backtest was profitable for this sleeve, but the shorter 6-month window was
+negative, so do not scale it without rerunning the gap validation profile.
 
 ### MA Crossover
 
@@ -296,7 +297,7 @@ This strategy contributed positively in the latest recommended 12-month backtest
 
 ```yaml
 range_breakout:
-  enabled: false
+  enabled: true
   asset_class: crypto
   breakout_lookback_days: 20
   breakout_pct: 0.008
@@ -320,12 +321,12 @@ range_breakout:
   trend_exit_enabled: true
 ```
 
-Recommended: disabled in the active profile.
+Recommended: enabled in the all-strategy profile, with continued monitoring.
 
-The implementation remains available for experiments. It uses confirmed daily
+The implementation uses confirmed daily
 20-day Donchian high breakouts, ranked signal selection, ATR-risk sizing, and
-explicit failed-breakout exits before the 14-day hold cap, but it is not part of
-the active default strategy set.
+explicit failed-breakout exits before the 14-day hold cap. Its 12-month
+all-enabled contribution was strong, but sample size remains low.
 
 ---
 
@@ -365,7 +366,7 @@ Use `--strategies` and repeated `--set` arguments to test configuration variants
 
 ```bash
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
-  --strategies momentum,rsi_reversion,ma_crossover \
+  --strategies momentum,rsi_reversion,gap_up,ma_crossover,range_breakout \
   --set strategies.momentum.top_n=1 \
   --set strategies.momentum.min_momentum_pct=0.10 \
   --set strategies.momentum.volume_spike_ratio=1.8 \
@@ -391,7 +392,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
 ## Production Validation Gates
 
 `validation:` defines non-trading gates used before scaling live capital or
-enabling disabled alpha sleeves. These settings do not change live order sizing,
+strategy sleeves. These settings do not change live order sizing,
 stops, take-profits, or mode.
 
 ```yaml
@@ -408,11 +409,13 @@ Run the default production gate with:
 python3 scheduler/run_validation_gate.py --profile production
 ```
 
-The production profile requires the costed default strategy set to pass the
-configured 12-month and 6-month windows, and requires the crypto sleeve to pass
-a 12-month window. The latest 30-day crypto sleeve is watch-only: it reports
-weak short-window behavior without blocking the full strategy set when the
-longer capital-preservation gates still pass.
+The production profile currently validates the costed core strategy subset used
+before the all-strategies enablement change. The all-enabled profile has higher
+observed drawdown in the latest requested backtests, so revisit the production
+gate strategy lists and thresholds before scaling live capital against the full
+all-enabled book. The latest 30-day crypto sleeve is watch-only: it reports
+weak short-window behavior without blocking the longer capital-preservation
+gates.
 
 RSI Reversion has a separate monitoring gate:
 
@@ -430,8 +433,7 @@ Range Breakout has a separate enablement gate:
 python3 scheduler/run_validation_gate.py --profile range
 ```
 
-This checks the disabled breakout sleeve independently before it is considered
-for live allocation.
+This checks the breakout sleeve independently before it is scaled.
 
 Gap-Up has a separate enablement gate:
 
@@ -439,5 +441,4 @@ Gap-Up has a separate enablement gate:
 python3 scheduler/run_validation_gate.py --profile gap
 ```
 
-This checks the disabled opening-momentum sleeve independently before it is
-considered for live allocation.
+This checks the opening-momentum sleeve independently before it is scaled.
