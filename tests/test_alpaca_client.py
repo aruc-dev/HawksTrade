@@ -203,7 +203,7 @@ class AlpacaClientTests(unittest.TestCase):
         with patch.object(alpaca_client, "get_stock_data_client", return_value=fake_client):
             alpaca_client.get_stock_bars(["AAPL", "MSFT"], timeframe="5Min", limit=60)
 
-        self.assertEqual(fake_client.req.limit, 10000)
+        self.assertEqual(fake_client.req.limit, 360)
 
     def test_get_crypto_bars_scales_limit_for_batch_request_and_pair_symbols(self):
         class FakeDataClient:
@@ -215,8 +215,39 @@ class AlpacaClientTests(unittest.TestCase):
         with patch.object(alpaca_client, "get_crypto_data_client", return_value=fake_client):
             alpaca_client.get_crypto_bars(["BTCUSD", "ETHUSD"], timeframe="5Min", limit=60)
 
-        self.assertEqual(fake_client.req.limit, 10000)
+        self.assertEqual(fake_client.req.limit, 240)
         self.assertEqual(fake_client.req.symbol_or_symbols, ["BTC/USD", "ETH/USD"])
+
+    def test_get_stock_bars_chunks_by_expanded_lookback_window(self):
+        class FakeDataClient:
+            def __init__(self):
+                self.reqs = []
+
+            def get_stock_bars(self, req):
+                self.reqs.append(req)
+                return {}
+
+        fake_client = FakeDataClient()
+        symbols = [f"SYM{i}" for i in range(60)]
+        with patch.object(alpaca_client, "get_stock_data_client", return_value=fake_client):
+            alpaca_client.get_stock_bars(symbols, timeframe="5Min", limit=60)
+
+        self.assertEqual([len(req.symbol_or_symbols) for req in fake_client.reqs], [55, 5])
+        self.assertEqual([req.limit for req in fake_client.reqs], [9900, 900])
+
+    def test_get_stock_bars_rejects_non_positive_limit_before_client_init(self):
+        with patch.object(alpaca_client, "get_stock_data_client") as get_client:
+            with self.assertRaisesRegex(ValueError, "positive integer"):
+                alpaca_client.get_stock_bars(["AAPL"], timeframe="1Day", limit=0)
+
+        get_client.assert_not_called()
+
+    def test_get_crypto_bars_rejects_non_positive_limit_before_client_init(self):
+        with patch.object(alpaca_client, "get_crypto_data_client") as get_client:
+            with self.assertRaisesRegex(ValueError, "positive integer"):
+                alpaca_client.get_crypto_bars(["BTCUSD"], timeframe="1Day", limit=-1)
+
+        get_client.assert_not_called()
 
     def test_completed_daily_stock_bars_drop_current_market_date(self):
         now = datetime(2026, 4, 29, 16, 0, tzinfo=timezone.utc)

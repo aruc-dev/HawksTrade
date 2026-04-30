@@ -22,6 +22,7 @@ from __future__ import annotations
 import sys
 import logging
 import argparse
+import math
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -472,13 +473,16 @@ def _check_hold_day_exits(
                     if current_price <= 0:
                         log.warning(f"Skipping momentum hold check for {symbol}: invalid current price {current_price}.")
                         continue
-                    high_water_raw = trade.get("high_water_price")
-                    if high_water_raw and str(high_water_raw).strip() not in ("", "nan"):
+                    peak_price = None
+                    high_water_text = str(trade.get("high_water_price") or "").strip()
+                    if high_water_text:
                         try:
-                            peak_price = float(high_water_raw)
+                            high_water_price = float(high_water_text)
                         except (ValueError, TypeError):
-                            peak_price = _estimate_peak_price_since_entry(symbol, asset_class, current_price, age_days)
-                    else:
+                            high_water_price = 0.0
+                        if math.isfinite(high_water_price) and high_water_price > 0:
+                            peak_price = high_water_price
+                    if peak_price is None:
                         peak_price = _estimate_peak_price_since_entry(symbol, asset_class, current_price, age_days)
                     should_exit, reason = should_exit_for_hold(
                         strategy=strategy,

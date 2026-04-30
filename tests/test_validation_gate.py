@@ -67,6 +67,7 @@ class ValidationGateTests(unittest.TestCase):
                 "timestamp": f"2026-01-{((day - 1) % 28) + 1:02d}T00:00:00+00:00",
                 "strategy": "rsi_reversion",
                 "status": "closed",
+                "side": "sell",
                 "pnl_pct": "0.01" if day % 3 else "-0.002",
             })
         rows[-1]["timestamp"] = "2026-03-01T00:00:00+00:00"
@@ -83,6 +84,37 @@ class ValidationGateTests(unittest.TestCase):
 
         self.assertTrue(result["passed"])
         self.assertEqual(result["stats"]["closed_trades"], 60)
+
+    def test_rsi_forward_gate_counts_only_closed_sell_rows(self):
+        rows = [
+            {
+                "timestamp": "2026-01-01T00:00:00+00:00",
+                "strategy": "rsi_reversion",
+                "status": "closed",
+                "side": "buy",
+                "pnl_pct": "0.10",
+            },
+            {
+                "timestamp": "2026-01-02T00:00:00+00:00",
+                "strategy": "rsi_reversion",
+                "status": "closed",
+                "side": "sell",
+                "pnl_pct": "-0.02",
+            },
+        ]
+        criteria = {
+            "required_paper_days": 0,
+            "min_closed_trades": 0,
+            "min_win_rate": 0.0,
+            "min_profit_factor": 0.0,
+            "min_total_return_pct": -1.0,
+            "max_drawdown_pct": 1.0,
+        }
+
+        result = evaluate_rsi_forward_gate(rows, criteria)
+
+        self.assertEqual(result["stats"]["closed_trades"], 1)
+        self.assertEqual(result["stats"]["total_return_pct"], -0.02)
 
 
 if __name__ == "__main__":

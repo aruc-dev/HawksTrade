@@ -153,7 +153,11 @@ def evaluate_rsi_forward_gate(rows: list[dict], criteria: dict) -> dict:
     """Evaluate RSI Reversion paper-trade history against enablement criteria."""
     rsi_rows = [
         row for row in rows
-        if row.get("strategy") == "rsi_reversion" and row.get("status") == "closed"
+        if (
+            row.get("strategy") == "rsi_reversion"
+            and row.get("status") == "closed"
+            and str(row.get("side", "")).strip().lower() == "sell"
+        )
     ]
     returns = [_float_value(row.get("pnl_pct")) for row in rsi_rows]
     timestamps = [

@@ -49,7 +49,7 @@ filtering:
    - **Yellow** (breadth 25–50%): reduced deployment, up to `yellow_max_positions: 1`.
    - **Green** (breadth ≥ 50%): full `top_n: 1` deployment.
 
-**Volume Confirmation (per-signal):** Each candidate must have entry-bar volume ≥ 180% of
+**Volume Confirmation (per-signal):** Each candidate must have entry-bar volume above 180% of
 its 20-day average volume (`volume_spike_ratio: 1.8`). Signals where today's volume is
 suspiciously thin — a common trait of exhaustion moves — are skipped. The screener
 provides a separate 20-day ADV baseline at universe construction time; this check adds
@@ -89,7 +89,7 @@ room while the global 3.5% stop remains the absolute floor.
 | `breadth_red_threshold` | 25% |
 | `min_breadth_coverage_pct` | 75% |
 | `yellow_max_positions` | 1 |
-| `volume_spike_ratio` | 1.8 (entry bar ≥ 180% of 20-day avg volume) |
+| `volume_spike_ratio` | 1.8 (entry bar > 180% of 20-day avg volume) |
 
 **Regime filters:**
 - SPY > SMA50 (hard requirement; Red if fails).

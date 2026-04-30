@@ -618,6 +618,27 @@ class RunScanTests(unittest.TestCase):
 
         exit_position.assert_not_called()
 
+    def test_momentum_hold_reestimates_nonfinite_high_water_price(self):
+        open_trade = {
+            "symbol": "AAPL",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "entry_price": "100",
+            "high_water_price": "NaN",
+        }
+
+        with (
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "get_trade_age_days", return_value=4),
+            patch.object(run_scan, "_latest_price_for_trade", return_value=103),
+            patch.object(run_scan, "_estimate_peak_price_since_entry", return_value=110) as estimate_peak,
+            patch.object(run_scan.oe, "exit_position", return_value={"symbol": "AAPL", "status": "dry_run"}) as exit_position,
+        ):
+            run_scan._check_hold_day_exits([], dry_run=True)
+
+        estimate_peak.assert_called_once()
+        exit_position.assert_called_once()
+
     def test_momentum_hold_exits_loser_after_min_hold(self):
         open_trade = {
             "symbol": "AAPL",

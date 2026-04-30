@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import logging
+import math
 import time
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta, timezone
@@ -504,6 +505,19 @@ def _symbol_lookup_variants(symbol: str) -> list:
     return variants
 
 
+MAX_BARS_PER_DATA_REQUEST = 10000
+
+
+def _normalise_bar_limit(limit: int) -> int:
+    try:
+        normalised = int(limit)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("bar limit must be a positive integer") from exc
+    if normalised <= 0:
+        raise ValueError("bar limit must be a positive integer")
+    return normalised
+
+
 def _lookback_delta(timeframe: str, limit: int, market: str) -> timedelta:
     """Return enough calendar lookback for strategies to receive recent bars."""
     multiplier = 3 if market == "stock" else 2
@@ -518,6 +532,35 @@ def _lookback_delta(timeframe: str, limit: int, market: str) -> timedelta:
     if timeframe == "4Hour":
         return timedelta(hours=max(limit * 4 * multiplier, 96))
     return timedelta(days=max(limit * multiplier, 30))
+
+
+def _timeframe_seconds(timeframe: str) -> int:
+    if timeframe == "1Min":
+        return 60
+    if timeframe == "5Min":
+        return 5 * 60
+    if timeframe == "15Min":
+        return 15 * 60
+    if timeframe == "1Hour":
+        return 60 * 60
+    if timeframe == "4Hour":
+        return 4 * 60 * 60
+    return 24 * 60 * 60
+
+
+def _estimated_bars_per_symbol(timeframe: str, limit: int, market: str) -> int:
+    lookback = _lookback_delta(timeframe, limit, market=market)
+    return max(1, math.ceil(lookback.total_seconds() / _timeframe_seconds(timeframe)))
+
+
+def _bar_request_chunk_size(timeframe: str, limit: int, market: str) -> int:
+    bars_per_symbol = _estimated_bars_per_symbol(timeframe, limit, market=market)
+    return max(1, MAX_BARS_PER_DATA_REQUEST // bars_per_symbol)
+
+
+def _bar_request_limit(timeframe: str, limit: int, market: str, batch_size: int) -> int:
+    bars_per_symbol = _estimated_bars_per_symbol(timeframe, limit, market=market)
+    return min(MAX_BARS_PER_DATA_REQUEST, max(1, bars_per_symbol * batch_size))
 
 
 def _bar_timestamp(bar):
@@ -581,6 +624,7 @@ def get_stock_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
     """
     if not symbols:
         return {}
+    limit = _normalise_bar_limit(limit)
 
     tf_map = {
         "1Min": TimeFrame(1, TimeFrameUnit.Minute),
@@ -590,23 +634,18 @@ def get_stock_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
         "1Day": TimeFrame.Day,
     }
     tf = tf_map.get(timeframe, TimeFrame.Day)
-    
-    # Chunking logic: Alpaca limits total bars per response (usually 10k).
-    # Total bars in one response = chunk_size * limit.
-    chunk_size = max(1, 10000 // limit)
-    
+
+    chunk_size = _bar_request_chunk_size(timeframe, limit, market="stock")
+
     all_bars = {}
     feed = DataFeed.SIP if MODE == "live" else DataFeed.IEX
-    
+    end = datetime.now(timezone.utc)
+    start = end - _lookback_delta(timeframe, limit, market="stock")
+
     for i in range(0, len(symbols), chunk_size):
         batch = symbols[i: i + chunk_size]
-        end = datetime.now(timezone.utc)
-        start = end - _lookback_delta(timeframe, limit, market="stock")
-        
-        # Use Alpaca's maximum allowed limit per request to avoid truncation.
-        # We handle symbols in chunks anyway to stay below this 10k limit.
-        request_limit = 10000
-        
+        request_limit = _bar_request_limit(timeframe, limit, market="stock", batch_size=len(batch))
+
         req = StockBarsRequest(
             symbol_or_symbols=batch,
             timeframe=tf,
@@ -683,6 +722,7 @@ def get_crypto_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
     """
     if not symbols:
         return {}
+    limit = _normalise_bar_limit(limit)
 
     request_symbols = [to_crypto_pair_symbol(symbol) for symbol in symbols]
     tf_map = {
@@ -694,20 +734,17 @@ def get_crypto_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
         "1Day": TimeFrame.Day,
     }
     tf = tf_map.get(timeframe, TimeFrame.Day)
-    
-    # Total bars in one response = chunk_size * limit.
-    chunk_size = max(1, 10000 // limit)
-    
+
+    chunk_size = _bar_request_chunk_size(timeframe, limit, market="crypto")
+
     all_bars = {}
-    
+    end = datetime.now(timezone.utc)
+    start = end - _lookback_delta(timeframe, limit, market="crypto")
+
     for i in range(0, len(request_symbols), chunk_size):
         batch = request_symbols[i: i + chunk_size]
-        end = datetime.now(timezone.utc)
-        start = end - _lookback_delta(timeframe, limit, market="crypto")
-        
-        # Use safe high limit
-        request_limit = 10000
-        
+        request_limit = _bar_request_limit(timeframe, limit, market="crypto", batch_size=len(batch))
+
         req = CryptoBarsRequest(
             symbol_or_symbols=batch,
             timeframe=tf,

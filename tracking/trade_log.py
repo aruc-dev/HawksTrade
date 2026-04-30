@@ -11,7 +11,7 @@ import csv
 import contextlib
 import logging
 from decimal import Decimal, InvalidOperation
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, Iterator
 
@@ -226,7 +226,7 @@ def locked_trade_log(path: Path | None = None, *, exclusive: bool = True) -> Ite
     lock_path = _lock_path(trade_log_path)
     lock_mode = "a+b"
     if not exclusive and lock_path.exists():
-        lock_mode = "rb"
+        lock_mode = "r+b"
     with open(lock_path, lock_mode) as lock_file:
         _lock_file(lock_file, exclusive=exclusive)
         try:
