@@ -1,9 +1,11 @@
 """
 HawksTrade - Range Breakout Strategy (Crypto)
 ==============================================
-Enters long when price breaks above the prior day's high
-with volume confirmation. Failed breakouts can exit before the
-hold_days cap.
+Enters long when price confirms a breakout above the configured
+prior N-bar Donchian high, excluding the current bar. The default
+profile requires a 20-day high breakout, 2.0x volume confirmation,
+trend, volatility, RSI, and extension guards. Failed breakouts can
+exit before the 14-day hold cap.
 
 Works 24/7 on crypto pairs.
 """
@@ -30,10 +32,17 @@ SCFG = CFG["strategies"]["range_breakout"]
 log  = logging.getLogger("strategy.range_breakout")
 
 
+def _symbol_lookup_keys(symbol: str):
+    """Return plausible crypto data keys for slashed and slashless symbols."""
+    raw_symbol = str(symbol or "").strip().upper()
+    pair_symbol = ac.to_crypto_pair_symbol(raw_symbol)
+    normalized_symbol = ac.normalize_symbol(pair_symbol)
+    return tuple(dict.fromkeys((pair_symbol, raw_symbol, normalized_symbol)))
+
+
 def _bars_for_symbol(bars_data, symbol: str):
     """Return bars for slashed or slashless crypto symbols without raising on missing data."""
-    lookup_symbol = ac.to_crypto_pair_symbol(symbol)
-    for key in dict.fromkeys((lookup_symbol, symbol)):
+    for key in _symbol_lookup_keys(symbol):
         try:
             bars = bars_data[key]
         except (AttributeError, KeyError, TypeError):
@@ -92,6 +101,7 @@ class RangeBreakoutStrategy(BaseStrategy):
             return []
 
         breakout_pct       = float(SCFG.get("breakout_pct", 0.008))
+        breakout_lookback  = max(1, int(SCFG.get("breakout_lookback_days", 1)))
         max_extension_pct  = float(SCFG.get("max_breakout_extension_pct", 0.08))
         vol_mult           = float(SCFG.get("volume_multiplier", 1.8))
         timeframe          = SCFG.get("timeframe", "1Day")
@@ -116,6 +126,7 @@ class RangeBreakoutStrategy(BaseStrategy):
             vol_avg_period + 1,
             vol_filter_period + 1,
             rsi_period + 1,
+            breakout_lookback + 1,
             52,
         )
 
@@ -147,7 +158,7 @@ class RangeBreakoutStrategy(BaseStrategy):
                     log.debug(f"[Breakout] {symbol} skipped: invalid or incomplete OHLCV window.")
                     continue
 
-                prev_high  = df["high"].iloc[-2]
+                breakout_high = float(df["high"].iloc[-(breakout_lookback + 1):-1].max())
                 today_cls  = df["close"].iloc[-1]
                 today_vol  = df["volume"].iloc[-1]
                 avg_vol    = df["volume"].iloc[-(vol_avg_period + 1):-1].mean()
@@ -168,7 +179,7 @@ class RangeBreakoutStrategy(BaseStrategy):
                     avg_vol > 0 and today_vol >= avg_vol * vol_mult
                 ) if vol_mult > 0 else True
 
-                breakout_level = prev_high * (1 + breakout_pct)
+                breakout_level = breakout_high * (1 + breakout_pct)
                 broke_out = today_cls >= breakout_level
                 extension_pct = _safe_ratio(today_cls - breakout_level, breakout_level)
                 extension_ok = max_extension_pct <= 0 or extension_pct <= max_extension_pct
@@ -202,7 +213,7 @@ class RangeBreakoutStrategy(BaseStrategy):
                         continue
                     atr_stop, atr_risk_qty = sized
 
-                    excess_pct = _safe_ratio(today_cls - prev_high, prev_high)
+                    excess_pct = _safe_ratio(today_cls - breakout_high, breakout_high)
                     confidence = min(
                         1.0,
                         (0.45 * min(excess_pct / max(breakout_pct, 0.001), 2.0) / 2.0)
@@ -219,6 +230,7 @@ class RangeBreakoutStrategy(BaseStrategy):
                         "atr_risk_qty":   atr_risk_qty,
                         "reason":         (
                             f"Breakout close {today_cls:.4f} above level {breakout_level:.4f} | "
+                            f"{breakout_lookback}d high={breakout_high:.4f} | "
                             f"vol={vol_ratio:.1f}x avg | EMA{trend_ema_period} rising | "
                             f"RSI={rsi_val:.1f} | ATR Stop={atr_stop}"
                         ),

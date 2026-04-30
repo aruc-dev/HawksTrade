@@ -159,17 +159,29 @@ strategies:
     weight: 1.0
 
   gap_up:
-    enabled: false
+    enabled: true
     asset_class: stocks
-    description: "Buy stocks gapping up >3% on above-average volume at open"
-    min_gap_pct: 0.03            # Minimum gap-up percentage
-    volume_multiplier: 1.5       # Volume must be 1.5x the 20-day average
+    description: "Buy confirmed true-gap stocks gapping up 4-15% with opening-volume pace and trend confirmation"
+    min_gap_pct: 0.04            # Minimum gap-up percentage
+    max_gap_pct: 0.15            # Avoid buying exhaustion gaps beyond this percentage
+    require_true_gap: true       # Today's open must also clear the prior day's high
+    volume_multiplier: 1.5       # Opening volume pace must be 1.5x the 20-day average daily pace
+    volume_avg_period: 20        # Lookback for average volume confirmation
+    trend_sma_period: 200        # Use completed closes only; current bar close is not known at entry
     entry_window_minutes: 45     # Only enter within first 45 min of market open
     intraday_exit: false         # Respect intraday.enabled setting above
-    hold_days: 2
+    hold_days: 3
+    timeframe: "1Day"
+    opening_timeframe: "1Min"
+    session_minutes: 390
+    max_open_extension_pct: 0.03 # Avoid chasing names already >3% above the session open
+    max_open_fade_pct: 0.005     # Skip if price has already faded >0.5% below the session open
+    max_signals: 1               # Take only the top-ranked opening gap per scan to avoid clustered event risk
     atr_period: 14
     atr_multiplier: 2.0
     risk_per_trade_pct: 0.01
+    breakdown_exit_pct: 0.0      # Optional failed-gap exit; disabled because the 3-day hold gate performed better
+    trend_exit_enabled: false    # Optional trend-loss exit; disabled because the 3-day hold gate performed better
     weight: 0.8
 
   ma_crossover:
@@ -194,15 +206,16 @@ strategies:
     weight: 1.0
 
   range_breakout:
-    enabled: false
+    enabled: true
     asset_class: crypto
-    description: "Enter long on confirmed daily close breakout above the prior day high with volume, trend, volatility, RSI, and extension guards. Exit failed breakouts early before the 3-day cap."
-    breakout_pct: 0.008          # Close must break 0.8% beyond prior day high
+    description: "Enter long on confirmed daily close breakout above the configured Donchian high with volume, trend, volatility, RSI, and extension guards. Exit failed breakouts early before the hold cap."
+    breakout_lookback_days: 20   # Close must break above the prior N-day high, excluding the current bar
+    breakout_pct: 0.008          # Close must break 0.8% beyond the Donchian high
     max_breakout_extension_pct: 0.08  # Avoid chasing closes >8% beyond the breakout level
-    volume_multiplier: 1.8       # Volume must be 1.8x average to confirm breakout
+    volume_multiplier: 2.0       # Volume must be 2.0x average to confirm breakout
     volume_avg_period: 20        # Lookback for average volume confirmation
     timeframe: "1Day"
-    hold_days: 3
+    hold_days: 14
     atr_period: 14
     atr_multiplier: 2.0
     risk_per_trade_pct: 0.01
@@ -219,7 +232,7 @@ strategies:
     weight: 0.9
 
 # --- VALIDATION GATES ---
-# Non-trading guardrails used before scaling live capital or enabling disabled alphas.
+# Non-trading guardrails used before scaling live capital or strategy sleeves.
 # These settings do not change order sizing or live/paper execution behavior.
 validation:
   cost_model:
@@ -285,6 +298,50 @@ validation:
         max_drawdown_pct: 0.04
         min_profit_factor: 1.10
         min_trades: 15
+
+  range_breakout_enablement:
+    backtest_windows:
+      - name: range_breakout_12m_costed
+        days: 365
+        end_date: "04/10/2026"
+        screener: false
+        strategies: [range_breakout]
+        required: true
+        min_return_pct: 0.04
+        max_drawdown_pct: 0.02
+        min_profit_factor: 1.50
+        min_trades: 10
+        min_win_rate: 0.50
+      - name: range_breakout_recent_30d_watch
+        days: 30
+        screener: false
+        strategies: [range_breakout]
+        required: false
+        min_return_pct: 0.0
+        max_drawdown_pct: 0.015
+        min_trades: 1
+
+  gap_up_enablement:
+    backtest_windows:
+      - name: gap_up_12m_costed
+        days: 365
+        end_date: "04/10/2026"
+        screener: false
+        strategies: [gap_up]
+        required: true
+        min_return_pct: 0.01
+        max_drawdown_pct: 0.015
+        min_profit_factor: 2.00
+        min_trades: 10
+        min_win_rate: 0.65
+      - name: gap_up_recent_30d_watch
+        days: 30
+        screener: false
+        strategies: [gap_up]
+        required: false
+        min_return_pct: 0.0
+        max_drawdown_pct: 0.015
+        min_trades: 1
 
 # --- SCHEDULING (reference only; OS scheduler templates live in scheduler/) ---
 schedule:

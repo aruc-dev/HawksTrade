@@ -117,5 +117,5 @@ class TestGetConfig(unittest.TestCase):
         self.assertTrue(strategies["momentum"]["enabled"])
         self.assertTrue(strategies["rsi_reversion"]["enabled"])
         self.assertTrue(strategies["ma_crossover"]["enabled"])
-        self.assertFalse(strategies["range_breakout"]["enabled"])
-        self.assertFalse(strategies["gap_up"]["enabled"])
+        self.assertTrue(strategies["range_breakout"]["enabled"])
+        self.assertTrue(strategies["gap_up"]["enabled"])
