@@ -16,35 +16,37 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import contextlib
-from datetime import datetime, timedelta, timezone
+import math
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 # Ensure project root is on path
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
-from core import alpaca_client as ac
-from core import risk_manager as rm
-from core import order_executor as oe
-from core.config_loader import get_config
-from core.exit_policy import (
+from core import alpaca_client as ac  # noqa: E402
+from core import risk_manager as rm  # noqa: E402
+from core import order_executor as oe  # noqa: E402
+from core.config_loader import get_config  # noqa: E402
+from core.exit_policy import (  # noqa: E402
     VALID_MOMENTUM_EXIT_POLICIES,
     normalize_momentum_exit_policy,
     should_exit_for_hold,
     update_high_water_price,
 )
-import strategies.momentum as momentum_module
-import strategies.rsi_reversion as rsi_module
-import strategies.gap_up as gap_up_module
-import strategies.ma_crossover as ma_crossover_module
-import strategies.range_breakout as range_breakout_module
-from strategies.momentum import MomentumStrategy
-from strategies.rsi_reversion import RSIReversionStrategy
-from strategies.gap_up import GapUpStrategy
-from strategies.ma_crossover import MACrossoverStrategy
-from strategies.range_breakout import RangeBreakoutStrategy
-from screener.universe_builder import UniverseBuilder
+import strategies.momentum as momentum_module  # noqa: E402
+import strategies.rsi_reversion as rsi_module  # noqa: E402
+import strategies.gap_up as gap_up_module  # noqa: E402
+import strategies.ma_crossover as ma_crossover_module  # noqa: E402
+import strategies.range_breakout as range_breakout_module  # noqa: E402
+from strategies.momentum import MomentumStrategy  # noqa: E402
+from strategies.rsi_reversion import RSIReversionStrategy  # noqa: E402
+from strategies.gap_up import GapUpStrategy  # noqa: E402
+from strategies.ma_crossover import MACrossoverStrategy  # noqa: E402
+from strategies.range_breakout import RangeBreakoutStrategy  # noqa: E402
+from screener.universe_builder import UniverseBuilder  # noqa: E402
 
 # Extended pool of ~110 high-liquidity symbols covering major sectors
 EXTENDED_POOL = [
@@ -91,6 +93,263 @@ class SimpleBar:
         self.open = open_price; self.high = high_price; self.low = low_price
         self.close = close_price; self.volume = volume; self.timestamp = timestamp
 
+
+REGIME_HISTORY_LIMITS = {
+    "SPY": 255,
+    "QQQ": 55,
+    "BTC/USD": 60,
+}
+
+
+def _bars_from_frame(df: pd.DataFrame) -> list[SimpleBar]:
+    return [
+        SimpleBar(
+            open_price=float(row["open"]),
+            high_price=float(row["high"]),
+            low_price=float(row["low"]),
+            close_price=float(row["close"]),
+            volume=float(row["volume"]),
+            timestamp=idx,
+        )
+        for idx, row in df.iterrows()
+    ]
+
+
+def _build_regime_bars(historical_data: dict, current_date: datetime) -> dict:
+    regime_bars = {}
+    for symbol, limit in REGIME_HISTORY_LIMITS.items():
+        if symbol not in historical_data:
+            continue
+        hist_df = historical_data[symbol][historical_data[symbol].index <= current_date].tail(limit)
+        regime_bars[symbol] = _bars_from_frame(hist_df)
+    return regime_bars
+
+
+def _as_datetime(value) -> datetime:
+    if isinstance(value, pd.Timestamp):
+        value = value.to_pydatetime()
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, date):
+        return datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+    raise TypeError(f"Expected date/datetime-like value, got {type(value).__name__}")
+
+
+def _observed_fixed_holiday(year: int, month: int, day: int) -> date:
+    holiday = date(year, month, day)
+    if holiday.weekday() == 5:
+        return holiday - timedelta(days=1)
+    if holiday.weekday() == 6:
+        return holiday + timedelta(days=1)
+    return holiday
+
+
+def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+    current = date(year, month, 1)
+    offset = (weekday - current.weekday()) % 7
+    return current + timedelta(days=offset + (n - 1) * 7)
+
+
+def _last_weekday(year: int, month: int, weekday: int) -> date:
+    if month == 12:
+        current = date(year + 1, 1, 1) - timedelta(days=1)
+    else:
+        current = date(year, month + 1, 1) - timedelta(days=1)
+    return current - timedelta(days=(current.weekday() - weekday) % 7)
+
+
+def _easter_sunday(year: int) -> date:
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    weekday_offset = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * weekday_offset) // 451
+    month = (h + weekday_offset - 7 * m + 114) // 31
+    day = ((h + weekday_offset - 7 * m + 114) % 31) + 1
+    return date(year, month, day)
+
+
+def _stock_market_holidays(year: int) -> set[date]:
+    holidays = {
+        _observed_fixed_holiday(year, 1, 1),
+        _nth_weekday(year, 1, 0, 3),
+        _nth_weekday(year, 2, 0, 3),
+        _easter_sunday(year) - timedelta(days=2),
+        _last_weekday(year, 5, 0),
+        _observed_fixed_holiday(year, 7, 4),
+        _nth_weekday(year, 9, 0, 1),
+        _nth_weekday(year, 11, 3, 4),
+        _observed_fixed_holiday(year, 12, 25),
+    }
+    if year >= 2022:
+        holidays.add(_observed_fixed_holiday(year, 6, 19))
+    return holidays
+
+
+def _stock_market_open_for_backtest(current_date) -> bool:
+    """Backtests use a standard NYSE weekday/holiday session calendar."""
+    session_date = _as_datetime(current_date).date()
+    if session_date.weekday() >= 5:
+        return False
+    holidays = (
+        _stock_market_holidays(session_date.year)
+        | _stock_market_holidays(session_date.year + 1)
+    )
+    return session_date not in holidays
+
+
+def _stock_market_open_for_sim(sim: "BacktestSimulator") -> bool:
+    if sim.current_date is None:
+        return False
+    return _stock_market_open_for_backtest(sim.current_date)
+
+
+def _backtest_trading_session_date(sim: "BacktestSimulator") -> date:
+    """Return the simulated NY trading-session date for daily-loss baselines."""
+    if sim.current_date is None:
+        return rm._current_trading_session_date()
+    tz = ZoneInfo(rm.TRADING_SESSION_TIMEZONE)
+    return _as_datetime(sim.current_date).astimezone(tz).date()
+
+
+def _is_crypto_asset(asset_class: str, symbol: str = "") -> bool:
+    return "crypto" in str(asset_class or "").lower() or "/" in str(symbol or "")
+
+
+def _strategy_asset_class_matches(strategy_asset_class: str, position_asset_class: str) -> bool:
+    aliases = {
+        "stock": "stock",
+        "stocks": "stock",
+        "us_equity": "stock",
+        "crypto": "crypto",
+        "both": "both",
+    }
+    strategy_class = aliases.get(str(strategy_asset_class or "").lower(), str(strategy_asset_class or "").lower())
+    position_class = aliases.get(str(position_asset_class or "").lower(), str(position_asset_class or "").lower())
+    return strategy_class in (position_class, "both")
+
+
+def _run_backtest_risk_exits(sim: "BacktestSimulator", *, market_open: bool) -> None:
+    for symbol in list(sim.positions.keys()):
+        pos = sim.positions.get(symbol)
+        if not pos:
+            continue
+        if not _is_crypto_asset(pos.get("asset_class"), symbol) and not market_open:
+            continue
+        price = sim.get_current_price(symbol)
+        if price <= 0:
+            continue
+        update_high_water_price(pos, price)
+        should_exit, reason = rm.should_exit_position(
+            symbol,
+            pos["entry_price"],
+            price,
+            custom_stop_price=pos.get("custom_stop_price"),
+        )
+        if should_exit:
+            oe.exit_position(
+                symbol,
+                reason,
+                pos["asset_class"],
+                open_trades_callback=sim.get_open_trades_for_backtest,
+            )
+
+
+def _run_backtest_strategy_exits(
+    strategies: list,
+    sim: "BacktestSimulator",
+    *,
+    market_open: bool,
+    skip_symbols: set | None = None,
+) -> None:
+    skip_symbols = skip_symbols or set()
+    for symbol in list(sim.positions.keys()):
+        pos = sim.positions.get(symbol)
+        if not pos:
+            continue
+        asset_class = pos.get("asset_class", "stock")
+        if not _is_crypto_asset(asset_class, symbol) and not market_open:
+            continue
+        if ac.normalize_symbol(symbol) in skip_symbols:
+            continue
+        strat_name = pos.get("strategy", "")
+        for strat in strategies:
+            if strat.name != strat_name:
+                continue
+            if not _strategy_asset_class_matches(strat.asset_class, asset_class):
+                continue
+            should_exit, reason = strat.should_exit(symbol, pos["entry_price"])
+            if should_exit:
+                oe.exit_position(
+                    symbol,
+                    reason,
+                    asset_class,
+                    open_trades_callback=sim.get_open_trades_for_backtest,
+                )
+                break
+
+
+def _run_backtest_hold_exits(
+    sim: "BacktestSimulator",
+    cfg: dict,
+    *,
+    market_open: bool,
+) -> None:
+    for symbol in list(sim.positions.keys()):
+        pos = sim.positions.get(symbol)
+        if not pos:
+            continue
+        if not _is_crypto_asset(pos.get("asset_class"), symbol) and not market_open:
+            continue
+        strat_name = pos.get("strategy")
+        strategy_cfg = cfg["strategies"].get(strat_name, {})
+        if not strategy_cfg.get("hold_days"):
+            continue
+        age = sim.get_trade_age_days(symbol)
+        price = sim.get_current_price(symbol)
+        if price <= 0:
+            continue
+        peak = update_high_water_price(pos, price)
+        should_exit, reason = should_exit_for_hold(
+            strategy=strat_name,
+            age_days=age,
+            entry_price=pos["entry_price"],
+            current_price=price,
+            peak_price=peak,
+            strategy_cfg=strategy_cfg,
+        )
+        if should_exit:
+            oe.exit_position(
+                symbol,
+                reason,
+                pos["asset_class"],
+                open_trades_callback=sim.get_open_trades_for_backtest,
+            )
+
+
+def _backtest_scan_universe(
+    strat,
+    cfg: dict,
+    *,
+    screener,
+    screener_enabled: bool,
+    current_date,
+    market_open: bool,
+) -> list | None:
+    if strat.asset_class == "stocks":
+        if not market_open:
+            return None
+        return screener.get_universe(as_of_date=current_date) if screener_enabled else cfg["stocks"]["scan_universe"]
+    return cfg["crypto"]["scan_universe"]
+
+
 def _make_bar_fetcher(sim: "BacktestSimulator"):
     """Return a mock_get_bars function bound to the given simulator.
 
@@ -134,8 +393,45 @@ def _make_bar_fetcher(sim: "BacktestSimulator"):
 
 # ── Simulation State ─────────────────────────────────────────────────────────
 
+def _normalise_cost_model(cost_model: dict | None = None) -> dict:
+    cost_model = cost_model or {}
+    return {
+        "slippage_bps": float(cost_model.get("slippage_bps", 0.0) or 0.0),
+        "fee_bps": float(cost_model.get("fee_bps", 0.0) or 0.0),
+        "min_fee_usd": float(cost_model.get("min_fee_usd", 0.0) or 0.0),
+    }
+
+
+def _format_ratio(value: float) -> str:
+    if math.isinf(value):
+        return "inf"
+    return f"{value:.2f}"
+
+
+def _compute_profit_factor(df_trades: pd.DataFrame) -> float:
+    if df_trades.empty or "pnl" not in df_trades:
+        return 0.0
+    gross_profit = float(df_trades.loc[df_trades["pnl"] > 0, "pnl"].sum())
+    gross_loss = abs(float(df_trades.loc[df_trades["pnl"] < 0, "pnl"].sum()))
+    if gross_loss == 0:
+        return math.inf if gross_profit > 0 else 0.0
+    return gross_profit / gross_loss
+
+
+def _compute_daily_sharpe(df_curve: pd.DataFrame) -> float:
+    if df_curve.empty or "value" not in df_curve or len(df_curve) < 3:
+        return 0.0
+    returns = df_curve["value"].astype(float).pct_change().dropna()
+    if returns.empty:
+        return 0.0
+    std = float(returns.std(ddof=0))
+    if std <= 0 or not math.isfinite(std):
+        return 0.0
+    return float((returns.mean() / std) * math.sqrt(365))
+
+
 class BacktestSimulator:
-    def __init__(self, initial_fund=10000.0):
+    def __init__(self, initial_fund=10000.0, cost_model: dict | None = None):
         self.portfolio_value = initial_fund
         self.cash = initial_fund
         self.positions = {}  # symbol -> {qty, entry_price, entry_date, asset_class, strategy}
@@ -143,6 +439,7 @@ class BacktestSimulator:
         self.current_date = None
         self.historical_data = {}  # symbol -> df
         self.equity_curve = []
+        self.cost_model = _normalise_cost_model(cost_model)
 
     def get_portfolio_value(self):
         pos_value = 0
@@ -162,6 +459,7 @@ class BacktestSimulator:
             mock_pos.qty = p["qty"]
             mock_pos.avg_entry_price = p["entry_price"]
             mock_pos.market_value = p["qty"] * self.get_current_price(symbol)
+            mock_pos.asset_class = p.get("asset_class", "stock")
             pos_list.append(mock_pos)
         return pos_list
 
@@ -172,6 +470,7 @@ class BacktestSimulator:
             mock_pos.symbol = symbol
             mock_pos.qty = p["qty"]
             mock_pos.avg_entry_price = p["entry_price"]
+            mock_pos.asset_class = p.get("asset_class", "stock")
             return mock_pos
         return None
 
@@ -219,25 +518,44 @@ class BacktestSimulator:
         if valid_bars.empty: return 0.0
         return float(valid_bars.iloc[-1]["close"])
 
+    def _execution_price(self, price: float, side: str) -> float:
+        slippage = self.cost_model["slippage_bps"] / 10000.0
+        if side == "buy":
+            return price * (1 + slippage)
+        return price * (1 - slippage)
+
+    def _fee_for_notional(self, notional: float) -> float:
+        if notional <= 0:
+            return 0.0
+        fee = notional * self.cost_model["fee_bps"] / 10000.0
+        min_fee = self.cost_model["min_fee_usd"]
+        if fee <= 0 and min_fee <= 0:
+            return 0.0
+        return max(fee, min_fee)
+
     def submit_order(self, req):
         symbol = req.symbol
         side = req.side.value.lower()
         qty = float(req.qty)
-        price = self.get_current_price(symbol)
+        market_price = self.get_current_price(symbol)
+        price = self._execution_price(market_price, side)
         
         # Pull strategy from the request object (Alpaca SDK Request mock)
         strategy = getattr(req, "strategy", "unknown")
 
         if side == "buy":
-            cost = qty * price
+            notional = qty * price
+            fee = self._fee_for_notional(notional)
+            cost = notional + fee
             if cost > self.cash: return MagicMock(id="failed")
             self.cash -= cost
             if symbol in self.positions:
                 old_pos = self.positions[symbol]
                 total_qty = old_pos["qty"] + qty
-                avg_price = (old_pos["qty"] * old_pos["entry_price"] + cost) / total_qty
+                avg_price = (old_pos["qty"] * old_pos["entry_price"] + notional) / total_qty
                 self.positions[symbol]["qty"] = total_qty
                 self.positions[symbol]["entry_price"] = avg_price
+                self.positions[symbol]["entry_fee"] = old_pos.get("entry_fee", 0.0) + fee
                 self.positions[symbol]["high_water_price"] = max(
                     old_pos.get("high_water_price", old_pos["entry_price"]),
                     price,
@@ -249,23 +567,30 @@ class BacktestSimulator:
                     "high_water_price": price,
                     "entry_date": self.current_date, 
                     "asset_class": "stock" if "/" not in symbol else "crypto", 
-                    "strategy": strategy
+                    "strategy": strategy,
+                    "entry_fee": fee,
                 }
         else:
             if symbol not in self.positions: return MagicMock(id="failed")
             pos = self.positions[symbol]
             sell_qty = min(qty, pos["qty"])
-            proceeds = sell_qty * price
+            notional = sell_qty * price
+            fee = self._fee_for_notional(notional)
+            proceeds = notional - fee
             self.cash += proceeds
-            pnl = (price - pos["entry_price"]) * sell_qty
-            pnl_pct = (price / pos["entry_price"]) - 1
+            entry_fee_share = pos.get("entry_fee", 0.0) * (sell_qty / pos["qty"]) if pos["qty"] > 0 else 0.0
+            pnl = (price - pos["entry_price"]) * sell_qty - entry_fee_share - fee
+            cost_basis = (pos["entry_price"] * sell_qty) + entry_fee_share
+            pnl_pct = pnl / cost_basis if cost_basis > 0 else 0.0
             self.trades_log.append({
                 "symbol": symbol, "entry_date": pos["entry_date"], "exit_date": self.current_date,
                 "entry_price": pos["entry_price"], "exit_price": price, "qty": sell_qty,
                 "pnl": pnl, "pnl_pct": pnl_pct, "strategy": pos.get("strategy", "unknown")
             })
             if sell_qty >= pos["qty"]: del self.positions[symbol]
-            else: self.positions[symbol]["qty"] -= sell_qty
+            else:
+                self.positions[symbol]["qty"] -= sell_qty
+                self.positions[symbol]["entry_fee"] = pos.get("entry_fee", 0.0) - entry_fee_share
         
         # Return a mock order object
         order = MagicMock()
@@ -408,6 +733,8 @@ def run_backtest(
     use_screener=None,
     enabled_strategies=None,
     config_overrides=None,
+    cost_model=None,
+    return_result=False,
 ):
     cfg = get_config()
 
@@ -464,10 +791,12 @@ def run_backtest(
     else:
         end_dt = datetime.now(timezone.utc) - timedelta(days=2)
         
-    start_dt = end_dt - timedelta(days=days + 210) # 210 for SMA200
+    # 420 calendar days gives the RSI regime filters enough trading days for
+    # SPY's 252-day crash peak and 220-day realised-volatility window.
+    start_dt = end_dt - timedelta(days=days + 420)
     
     historical_data = fetch_all_data(symbols, start_dt, end_dt)
-    sim = BacktestSimulator(initial_fund)
+    sim = BacktestSimulator(initial_fund, cost_model=cost_model)
     sim.historical_data = historical_data
 
     # Initialize screener with backtest bars for point-in-time accuracy only when enabled.
@@ -509,6 +838,10 @@ def run_backtest(
         _patch_runtime_risk_config(stack, cfg)
         stack.enter_context(patch("core.risk_manager._session_start_value", None))
         stack.enter_context(patch("core.risk_manager._session_date", None))
+        stack.enter_context(patch(
+            "core.risk_manager._current_trading_session_date",
+            side_effect=lambda now=None: _backtest_trading_session_date(sim),
+        ))
         stack.enter_context(patch("core.alpaca_client.get_portfolio_value", side_effect=sim.get_portfolio_value))
         stack.enter_context(patch("core.alpaca_client.get_cash", side_effect=sim.get_cash))
         stack.enter_context(patch("core.alpaca_client.get_all_positions", side_effect=sim.get_all_positions))
@@ -516,7 +849,7 @@ def run_backtest(
         stack.enter_context(patch("core.alpaca_client.get_stock_latest_price", side_effect=sim.get_current_price))
         stack.enter_context(patch("core.alpaca_client.get_crypto_latest_price", side_effect=sim.get_current_price))
         mock_trading_client = stack.enter_context(patch("core.alpaca_client.get_trading_client"))
-        stack.enter_context(patch("core.alpaca_client.is_market_open", side_effect=lambda: sim.current_date.weekday() < 5))
+        stack.enter_context(patch("core.alpaca_client.is_market_open", side_effect=lambda: _stock_market_open_for_sim(sim)))
         stack.enter_context(patch("tracking.trade_log.get_open_trades", side_effect=lambda: sim.get_open_trades_for_backtest()))
         stack.enter_context(patch("tracking.trade_log.get_trade_age_days", side_effect=lambda s: sim.get_trade_age_days(s)))
         stack.enter_context(patch("tracking.trade_log.log_trade"))
@@ -531,78 +864,62 @@ def run_backtest(
         
         for dt in all_dates:
             sim.current_date = dt
-            regime_bars = {
-                s: [
-                    SimpleBar(
-                        open_price=float(row["open"]),
-                        high_price=float(row["high"]),
-                        low_price=float(row["low"]),
-                        close_price=float(row["close"]),
-                        volume=float(row["volume"]),
-                        timestamp=idx,
-                    )
-                    for idx, row in (
-                        sim.historical_data[s][sim.historical_data[s].index <= sim.current_date].tail(60).iterrows()
-                    )
-                ]
-                for s in ("SPY", "BTC/USD")
-                if s in sim.historical_data
-            }
-            # Risk Check
-            for symbol in list(sim.positions.keys()):
-                pos = sim.positions[symbol]; price = sim.get_current_price(symbol)
-                if price <= 0: continue
-                update_high_water_price(pos, price)
-                should_exit, reason = rm.should_exit_position(
-                    symbol, pos["entry_price"], price,
-                    custom_stop_price=pos.get("custom_stop_price"),
-                )
-                if should_exit:
-                    oe.exit_position(symbol, reason, pos["asset_class"], open_trades_callback=sim.get_open_trades_for_backtest)
+            market_open = _stock_market_open_for_backtest(dt)
+            regime_bars = _build_regime_bars(sim.historical_data, sim.current_date)
+
+            _run_backtest_risk_exits(sim, market_open=market_open)
+
             # Scan
+            new_entry_symbols = set()
             for strat in strategies:
-                if strat.asset_class == "stocks":
-                    universe = screener.get_universe(as_of_date=dt) if screener_enabled else cfg["stocks"]["scan_universe"]
-                else:
-                    universe = cfg["crypto"]["scan_universe"]
-                signals = strat.scan(universe, current_time=dt, regime_bars=regime_bars)
+                universe = _backtest_scan_universe(
+                    strat,
+                    cfg,
+                    screener=screener,
+                    screener_enabled=screener_enabled,
+                    current_date=dt,
+                    market_open=market_open,
+                )
+                if universe is None:
+                    continue
+                scan_kwargs = {
+                    "current_time": dt,
+                    "regime_bars": regime_bars,
+                    "allow_regime_warmup": True,
+                }
+                if strat.name == "momentum":
+                    scan_kwargs["existing_symbols"] = [
+                        symbol for symbol, pos in sim.positions.items()
+                        if pos.get("asset_class", "stock") == "stock"
+                    ]
+                signals = strat.scan(universe, **scan_kwargs)
                 for sig in signals:
                     if sig["symbol"] not in sim.positions:
+                        asset_class = "crypto" if strat.asset_class == "crypto" else "stock"
                         order = oe.enter_position(
                             sig["symbol"],
                             strat.name,
-                            strat.asset_class,
+                            asset_class,
                             suggested_qty=sig.get("atr_risk_qty"),
                             atr_stop_price=sig.get("atr_stop_price"),
                         )
                         # enter_position returns status="open" (not "filled") — update strategy name on any non-None return
                         if order and sig["symbol"] in sim.positions:
                             sim.positions[sig["symbol"]]["strategy"] = strat.name
+                            new_entry_symbols.add(ac.normalize_symbol(sig["symbol"]))
                             # Store ATR stop so the risk-check loop uses it instead of the
                             # global fixed-percentage stop for this position.
                             if sig.get("atr_stop_price") is not None:
                                 sim.positions[sig["symbol"]]["custom_stop_price"] = sig["atr_stop_price"]
-            # Hold Day Check — delegates to sim.get_trade_age_days() (stocks=business days, crypto=calendar days)
-            for symbol in list(sim.positions.keys()):
-                pos = sim.positions[symbol]
-                strat_name = pos.get("strategy")
-                strategy_cfg = cfg["strategies"].get(strat_name, {})
-                if strategy_cfg.get("hold_days"):
-                    age = sim.get_trade_age_days(symbol)
-                    price = sim.get_current_price(symbol)
-                    if price <= 0:
-                        continue
-                    peak = update_high_water_price(pos, price)
-                    should_exit, reason = should_exit_for_hold(
-                        strategy=strat_name,
-                        age_days=age,
-                        entry_price=pos["entry_price"],
-                        current_price=price,
-                        peak_price=peak,
-                        strategy_cfg=strategy_cfg,
-                    )
-                    if should_exit:
-                        oe.exit_position(symbol, reason, pos["asset_class"], open_trades_callback=sim.get_open_trades_for_backtest)
+
+            skip_symbols = set() if cfg.get("intraday", {}).get("enabled", False) else new_entry_symbols
+            _run_backtest_strategy_exits(
+                strategies,
+                sim,
+                market_open=market_open,
+                skip_symbols=skip_symbols,
+            )
+            _run_backtest_hold_exits(sim, cfg, market_open=market_open)
             sim.equity_curve.append({"date": dt, "value": sim.get_portfolio_value()})
 
     # --- Reporting ---
@@ -635,14 +952,26 @@ def run_backtest(
         final_val = sim.get_portfolio_value()
         total_win_rate = (df["pnl"] > 0).mean()
         max_drawdown = _compute_max_drawdown(df_curve)
+        profit_factor = _compute_profit_factor(df)
+        daily_sharpe = _compute_daily_sharpe(df_curve)
+        return_pct = (final_val / initial_fund) - 1
+
         report = f"### Backtest Results ({days} Days)\n"
         report += f"- **Final Value**: ${final_val:,.2f} ({ (final_val/initial_fund-1):+.2%})\n"
         report += f"- **Total Trades**: {len(df)}\n\n"
         report += f"- **Win Rate**: {total_win_rate:.1%}\n"
         report += f"- **Max Drawdown**: {max_drawdown:.2%}\n"
+        report += f"- **Profit Factor**: {_format_ratio(profit_factor)}\n"
+        report += f"- **Daily Sharpe**: {daily_sharpe:.2f}\n"
         report += f"- **Momentum Exit Policy**: {cfg['strategies']['momentum']['exit_policy']}\n"
         report += f"- **Screener**: {'enabled' if screener_enabled else 'disabled'}\n\n"
         report += f"- **Enabled Strategies**: {', '.join(_enabled_strategy_names(cfg))}\n\n"
+        if any(sim.cost_model.values()):
+            report += (
+                f"- **Cost Model**: slippage={sim.cost_model['slippage_bps']:.2f} bps, "
+                f"fee={sim.cost_model['fee_bps']:.2f} bps, "
+                f"min_fee=${sim.cost_model['min_fee_usd']:.2f}\n\n"
+            )
         report += summary.to_markdown() + "\n\n"
         if graph_file: report += f"![Equity Curve]({graph_file})\n\n"
 
@@ -664,8 +993,46 @@ def run_backtest(
 
         if output_file:
             with open(output_file, "a") as f: f.write(report)
-        return report
-    return "No trades executed."
+        result = {
+            "report": report,
+            "stats": {
+                "days": days,
+                "initial_fund": initial_fund,
+                "final_value": final_val,
+                "return_pct": return_pct,
+                "trades": len(df),
+                "win_rate": total_win_rate,
+                "max_drawdown": max_drawdown,
+                "profit_factor": profit_factor,
+                "daily_sharpe": daily_sharpe,
+                "screener_enabled": screener_enabled,
+                "enabled_strategies": _enabled_strategy_names(cfg),
+                "cost_model": dict(sim.cost_model),
+            },
+            "quarterly": quarterly_data,
+        }
+        return result if return_result else report
+
+    final_val = sim.get_portfolio_value()
+    result = {
+        "report": "No trades executed.",
+        "stats": {
+            "days": days,
+            "initial_fund": initial_fund,
+            "final_value": final_val,
+            "return_pct": (final_val / initial_fund) - 1,
+            "trades": 0,
+            "win_rate": 0.0,
+            "max_drawdown": _compute_max_drawdown(df_curve),
+            "profit_factor": 0.0,
+            "daily_sharpe": _compute_daily_sharpe(df_curve),
+            "screener_enabled": screener_enabled,
+            "enabled_strategies": _enabled_strategy_names(cfg),
+            "cost_model": dict(sim.cost_model),
+        },
+        "quarterly": [],
+    }
+    return result if return_result else result["report"]
 
 
 def _compute_quarterly_performance(sim, df_curve):
@@ -742,7 +1109,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--strategies",
         type=str,
-        help="Comma-separated strategy allowlist for experiments, e.g. momentum,ma_crossover,range_breakout",
+        help="Comma-separated strategy allowlist for experiments, e.g. momentum,rsi_reversion,ma_crossover",
     )
     parser.add_argument(
         "--set",
@@ -750,6 +1117,9 @@ if __name__ == "__main__":
         action="append",
         help="Backtest-only config override, e.g. --set strategies.momentum.top_n=3",
     )
+    parser.add_argument("--slippage-bps", type=float, default=0.0, help="Backtest execution slippage in basis points per side")
+    parser.add_argument("--fee-bps", type=float, default=0.0, help="Backtest fee/commission in basis points per side")
+    parser.add_argument("--min-fee", type=float, default=0.0, help="Minimum fee per simulated order")
     args = parser.parse_args()
     enabled_strategies = None
     if args.strategies:
@@ -764,4 +1134,9 @@ if __name__ == "__main__":
         use_screener=args.use_screener,
         enabled_strategies=enabled_strategies,
         config_overrides=args.config_overrides,
+        cost_model={
+            "slippage_bps": args.slippage_bps,
+            "fee_bps": args.fee_bps,
+            "min_fee_usd": args.min_fee,
+        },
     ))

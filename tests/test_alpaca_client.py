@@ -1,7 +1,7 @@
 import json
 import os
 import unittest
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -56,6 +56,28 @@ class AlpacaClientTests(unittest.TestCase):
             )
         return fake_client.req
 
+    def _capture_market_order(
+        self,
+        symbol,
+        asset_class=None,
+        time_in_force="day",
+    ):
+        class FakeClient:
+            def submit_order(self, req):
+                self.req = req
+                return SimpleNamespace(id="order-1")
+
+        fake_client = FakeClient()
+        with patch.object(alpaca_client, "get_trading_client", return_value=fake_client):
+            alpaca_client.place_market_order(
+                symbol,
+                1,
+                "buy",
+                time_in_force=time_in_force,
+                asset_class=asset_class,
+            )
+        return fake_client.req
+
     def test_market_order_rejects_invalid_side_before_client_init(self):
         with patch.object(alpaca_client, "get_trading_client") as get_client:
             with self.assertRaises(ValueError):
@@ -69,6 +91,25 @@ class AlpacaClientTests(unittest.TestCase):
                 alpaca_client.place_limit_order("AAPL", 1, "hold", 100)
 
         get_client.assert_not_called()
+
+    def test_stock_market_order_defaults_to_day_time_in_force(self):
+        req = self._capture_market_order("AAPL", asset_class="stock")
+
+        self.assertEqual(req.time_in_force, TimeInForce.DAY)
+
+    def test_crypto_market_order_defaults_to_supported_time_in_force(self):
+        req = self._capture_market_order("DOGE/USD", asset_class="crypto")
+
+        self.assertEqual(req.time_in_force, TimeInForce.GTC)
+
+    def test_crypto_market_order_allows_ioc_time_in_force(self):
+        req = self._capture_market_order(
+            "DOGE/USD",
+            asset_class="crypto",
+            time_in_force="ioc",
+        )
+
+        self.assertEqual(req.time_in_force, TimeInForce.IOC)
 
     def test_limit_order_rounds_stock_over_one_dollar_to_cents(self):
         req = self._capture_limit_order("TQQQ", 51.9369, asset_class="stock")
@@ -162,7 +203,7 @@ class AlpacaClientTests(unittest.TestCase):
         with patch.object(alpaca_client, "get_stock_data_client", return_value=fake_client):
             alpaca_client.get_stock_bars(["AAPL", "MSFT"], timeframe="5Min", limit=60)
 
-        self.assertEqual(fake_client.req.limit, 120)
+        self.assertEqual(fake_client.req.limit, 360)
 
     def test_get_crypto_bars_scales_limit_for_batch_request_and_pair_symbols(self):
         class FakeDataClient:
@@ -174,8 +215,61 @@ class AlpacaClientTests(unittest.TestCase):
         with patch.object(alpaca_client, "get_crypto_data_client", return_value=fake_client):
             alpaca_client.get_crypto_bars(["BTCUSD", "ETHUSD"], timeframe="5Min", limit=60)
 
-        self.assertEqual(fake_client.req.limit, 120)
+        self.assertEqual(fake_client.req.limit, 240)
         self.assertEqual(fake_client.req.symbol_or_symbols, ["BTC/USD", "ETH/USD"])
+
+    def test_get_stock_bars_chunks_by_expanded_lookback_window(self):
+        class FakeDataClient:
+            def __init__(self):
+                self.reqs = []
+
+            def get_stock_bars(self, req):
+                self.reqs.append(req)
+                return {}
+
+        fake_client = FakeDataClient()
+        symbols = [f"SYM{i}" for i in range(60)]
+        with patch.object(alpaca_client, "get_stock_data_client", return_value=fake_client):
+            alpaca_client.get_stock_bars(symbols, timeframe="5Min", limit=60)
+
+        self.assertEqual([len(req.symbol_or_symbols) for req in fake_client.reqs], [55, 5])
+        self.assertEqual([req.limit for req in fake_client.reqs], [9900, 900])
+
+    def test_get_stock_bars_rejects_non_positive_limit_before_client_init(self):
+        with patch.object(alpaca_client, "get_stock_data_client") as get_client:
+            with self.assertRaisesRegex(ValueError, "positive integer"):
+                alpaca_client.get_stock_bars(["AAPL"], timeframe="1Day", limit=0)
+
+        get_client.assert_not_called()
+
+    def test_get_crypto_bars_rejects_non_positive_limit_before_client_init(self):
+        with patch.object(alpaca_client, "get_crypto_data_client") as get_client:
+            with self.assertRaisesRegex(ValueError, "positive integer"):
+                alpaca_client.get_crypto_bars(["BTCUSD"], timeframe="1Day", limit=-1)
+
+        get_client.assert_not_called()
+
+    def test_completed_daily_stock_bars_drop_current_market_date(self):
+        now = datetime(2026, 4, 29, 16, 0, tzinfo=timezone.utc)
+        bars = [
+            SimpleNamespace(timestamp=datetime(2026, 4, 28, 20, 0, tzinfo=timezone.utc), close=100),
+            SimpleNamespace(timestamp=datetime(2026, 4, 29, 15, 0, tzinfo=timezone.utc), close=101),
+        ]
+
+        completed = alpaca_client._completed_daily_bars(bars, market="stock", now=now)
+
+        self.assertEqual([bar.close for bar in completed], [100])
+
+    def test_completed_daily_crypto_bars_drop_current_utc_date(self):
+        now = datetime(2026, 4, 29, 16, 0, tzinfo=timezone.utc)
+        bars = [
+            SimpleNamespace(timestamp=datetime(2026, 4, 28, 0, 0, tzinfo=timezone.utc), close=100),
+            SimpleNamespace(timestamp=datetime(2026, 4, 29, 0, 0, tzinfo=timezone.utc), close=101),
+        ]
+
+        completed = alpaca_client._completed_daily_bars(bars, market="crypto", now=now)
+
+        self.assertEqual([bar.close for bar in completed], [100])
 
     def test_normalize_symbol_removes_crypto_slash(self):
         self.assertEqual(alpaca_client.normalize_symbol("BTC/USD"), "BTCUSD")

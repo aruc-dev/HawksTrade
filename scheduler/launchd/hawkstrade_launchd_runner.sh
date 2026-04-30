@@ -20,27 +20,27 @@ is_weekday() {
 case "$TASK" in
   stock-scan)
     is_weekday || exit 0
-    exec /usr/bin/env python3 scheduler/run_scan.py --stocks-only
+    exec "$PROJECT_DIR/scripts/run_hawkstrade_job.sh" scheduler/run_scan.py --stocks-only
     ;;
   full-scan)
     is_weekday || exit 0
-    exec /usr/bin/env python3 scheduler/run_scan.py
+    exec "$PROJECT_DIR/scripts/run_hawkstrade_job.sh" scheduler/run_scan.py
     ;;
   risk-check)
     is_weekday || exit 0
     [[ 10#$hhmm -ge 645 && 10#$hhmm -le 1245 ]] || exit 0
-    exec /usr/bin/env python3 scheduler/run_risk_check.py
+    exec "$PROJECT_DIR/scripts/run_hawkstrade_job.sh" scheduler/run_risk_check.py
     ;;
   crypto-scan)
-    exec /usr/bin/env python3 scheduler/run_scan.py --crypto-only
+    exec "$PROJECT_DIR/scripts/run_hawkstrade_job.sh" scheduler/run_scan.py --crypto-only
     ;;
   daily-report)
     is_weekday || exit 0
-    exec /usr/bin/env python3 scheduler/run_report.py
+    exec "$PROJECT_DIR/scripts/run_hawkstrade_job.sh" scheduler/run_report.py
     ;;
   weekly-report)
     [[ "$weekday" -eq 1 ]] || exit 0
-    exec /usr/bin/env python3 scheduler/run_report.py --weekly
+    exec "$PROJECT_DIR/scripts/run_hawkstrade_job.sh" scheduler/run_report.py --weekly
     ;;
   *)
     echo "Unknown HawksTrade launchd task: $TASK" >&2

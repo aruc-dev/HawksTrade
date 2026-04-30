@@ -93,7 +93,7 @@ class RiskManagerTests(unittest.TestCase):
                 price=100,
             )
 
-        self.assertEqual(qty, 50)
+        self.assertEqual(qty, 80)
 
     def test_cap_position_qty_clamps_requested_quantity(self):
         with (
@@ -102,7 +102,7 @@ class RiskManagerTests(unittest.TestCase):
         ):
             qty = risk_manager.cap_position_qty(price=100, qty=80)
 
-        self.assertEqual(qty, 50)
+        self.assertEqual(qty, 80)
 
 
 class _FakePosition:

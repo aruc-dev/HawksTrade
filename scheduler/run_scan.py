@@ -22,6 +22,7 @@ from __future__ import annotations
 import sys
 import logging
 import argparse
+import math
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -87,6 +88,7 @@ HOLD_DAYS = {
     "gap_up":         CFG["strategies"]["gap_up"]["hold_days"],
     "range_breakout": CFG["strategies"]["range_breakout"]["hold_days"],
     "rsi_reversion":  CFG["strategies"]["rsi_reversion"]["hold_days"],
+    "ma_crossover":   CFG["strategies"]["ma_crossover"]["hold_days"],
 }
 
 # ── Strategy Registry ─────────────────────────────────────────────────────────
@@ -96,6 +98,10 @@ CRYPTO_STRATEGIES = [MACrossoverStrategy(), RangeBreakoutStrategy()]
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+class PendingEntryOrderCheckFailed(RuntimeError):
+    """Raised when broker buy orders cannot be inspected safely."""
+
 
 def _already_holding(symbol: str, open_symbols: list) -> bool:
     return any(_symbols_match(symbol, open_symbol) for open_symbol in open_symbols)
@@ -107,6 +113,26 @@ def _normalized_symbol_set(symbols) -> set:
 
 def _symbols_match(left: str, right: str) -> bool:
     return ac.normalize_symbol(left) == ac.normalize_symbol(right)
+
+
+def _asset_class_value(value) -> str:
+    raw = str(getattr(value, "value", value) or "").strip().lower()
+    if "crypto" in raw:
+        return "crypto"
+    if raw in {"stock", "stocks", "equity", "us_equity"}:
+        return "stock"
+    return ""
+
+
+def _planned_asset_class(symbol: str, explicit_asset_class=None) -> str:
+    asset_class = _asset_class_value(explicit_asset_class)
+    if asset_class:
+        return asset_class
+    normalized = ac.normalize_symbol(str(symbol))
+    crypto_symbols = _normalized_symbol_set(CRYPTO_UNIVERSE)
+    if normalized in crypto_symbols or "/" in str(symbol):
+        return "crypto"
+    return "stock"
 
 
 def _strategy_enabled(strategy) -> bool:
@@ -130,21 +156,63 @@ def _order_side(order) -> str | None:
     return str(getattr(side, "value", side)).lower()
 
 
-def _pending_entry_symbols() -> set:
-    """Return symbols with open broker buy orders so entries are not duplicated."""
+def _pending_entry_symbols() -> dict:
+    """Return normalized symbols with open broker buy orders and asset classes."""
     try:
         orders = ac.get_open_orders()
     except Exception as e:
-        log.warning(f"Could not check pending entry orders; continuing with position snapshot only: {e}")
-        return set()
+        log.error(f"Could not check pending entry orders; blocking new entries fail-closed: {e}")
+        raise PendingEntryOrderCheckFailed("Could not check pending entry orders") from e
 
-    symbols = []
+    pending = {}
     for order in orders or []:
         if _order_side(order) == "buy":
             symbol = _order_value(order, "symbol")
             if symbol:
-                symbols.append(symbol)
-    return _normalized_symbol_set(symbols)
+                pending[ac.normalize_symbol(str(symbol))] = _planned_asset_class(
+                    str(symbol),
+                    _order_value(order, "asset_class"),
+                )
+    return pending
+
+
+def _coerce_pending_entry_symbols(pending_entries) -> dict:
+    if isinstance(pending_entries, dict):
+        return {
+            ac.normalize_symbol(str(symbol)): _planned_asset_class(str(symbol), asset_class)
+            for symbol, asset_class in pending_entries.items()
+            if str(symbol or "").strip()
+        }
+    return {
+        ac.normalize_symbol(str(symbol)): _planned_asset_class(str(symbol))
+        for symbol in (pending_entries or set())
+        if str(symbol or "").strip()
+    }
+
+
+def _planned_asset_classes(open_symbols: list, pending_entries) -> dict:
+    planned = {
+        ac.normalize_symbol(str(symbol)): _planned_asset_class(str(symbol))
+        for symbol in open_symbols
+        if str(symbol or "").strip()
+    }
+    planned.update(_coerce_pending_entry_symbols(pending_entries))
+    return planned
+
+
+def _planned_position_counts(planned_asset_classes: dict) -> tuple[int, int, int]:
+    total = len(planned_asset_classes)
+    crypto_count = sum(1 for asset_class in planned_asset_classes.values() if asset_class == "crypto")
+    stock_count = total - crypto_count
+    return total, crypto_count, stock_count
+
+
+def _planned_symbols_for_asset_class(planned_asset_classes: dict, asset_class: str) -> list[str]:
+    return [
+        symbol
+        for symbol, planned_asset_class in planned_asset_classes.items()
+        if planned_asset_class == asset_class
+    ]
 
 
 def _max_positions_planned(planned_symbols: set) -> bool:
@@ -155,11 +223,53 @@ def _max_positions_planned(planned_symbols: set) -> bool:
     return False
 
 
-def _register_entry_result(result, symbol: str, open_symbols: list, planned_symbols: set, new_entry_symbols: set):
+def _planned_asset_class_cap_reached(asset_class: str, planned_asset_classes: dict) -> bool:
+    if _max_positions_planned(planned_asset_classes):
+        return True
+
+    max_total = int(CFG["trading"]["max_positions"])
+    max_crypto = int(CFG["trading"].get("max_crypto_positions", max_total))
+    min_crypto = int(CFG["trading"].get("min_crypto_positions", 0))
+    max_crypto = max(0, min(max_crypto, max_total))
+    min_crypto = max(0, min(min_crypto, max_crypto))
+    _, crypto_count, stock_count = _planned_position_counts(planned_asset_classes)
+
+    if asset_class == "crypto":
+        if max_crypto <= 0:
+            log.info("Crypto entries disabled by planned cap (max_crypto_positions=0).")
+            return True
+        if crypto_count >= max_crypto:
+            log.info(f"Max planned crypto positions reached: {crypto_count}/{max_crypto}")
+            return True
+        return False
+
+    stock_slots_available = max_total - min_crypto
+    if stock_count >= stock_slots_available:
+        log.info(
+            f"Planned stock slots exhausted: {stock_count}/{stock_slots_available} "
+            f"({min_crypto} reserved for crypto)"
+        )
+        return True
+    return False
+
+
+def _register_entry_result(
+    result,
+    symbol: str,
+    open_symbols: list,
+    planned_symbols: set,
+    new_entry_symbols: set,
+    asset_class: str = "stock",
+    planned_asset_classes: dict | None = None,
+):
     if not result:
+        return
+    if result.get("status") == "entry_failed":
         return
     normalized = ac.normalize_symbol(symbol)
     planned_symbols.add(normalized)
+    if planned_asset_classes is not None:
+        planned_asset_classes[normalized] = _planned_asset_class(symbol, asset_class)
     if result.get("status") not in {"open", "partially_filled", "dry_run"}:
         return
     new_entry_symbols.add(normalized)
@@ -194,6 +304,40 @@ def _mark_unhealthy_exit_result(marker: RunScope | None, result: dict | None, st
             error_type="PendingExitOrderCheckFailed",
             blocked_exit_symbol=result.get("symbol", ""),
         )
+    elif result.get("status") in {"exit_failed", "invalid_exit_price", "invalid_entry_price"}:
+        marker.mark_error(
+            stage=stage,
+            error_type=result.get("error_type", "ExitFailed"),
+            failed_exit_symbol=result.get("symbol", ""),
+            error=result.get("error", ""),
+        )
+
+
+def _mark_unhealthy_entry_result(marker: RunScope | None, result: dict | None, stage: str):
+    if marker is None or not result:
+        return
+    if result.get("status") == "entry_failed":
+        marker.mark_error(
+            stage=stage,
+            error_type=result.get("error_type", "EntryFailed"),
+            failed_entry_symbol=result.get("symbol", ""),
+            error=result.get("error", ""),
+        )
+
+
+def _mark_exit_check_exception(marker: RunScope | None, stage: str, symbol: str, exc: Exception):
+    info = ac.classify_alpaca_error(exc)
+    if marker is not None:
+        marker.mark_error(
+            stage=stage,
+            error_type=type(exc).__name__,
+            failed_exit_symbol=symbol,
+            error=str(exc),
+            error_category=info.category,
+            retryable=info.retryable,
+            status_code=info.status_code,
+        )
+    return info
 
 
 def _mark_alpaca_error(marker: RunScope | None, stage: str, exc: Exception):
@@ -201,6 +345,20 @@ def _mark_alpaca_error(marker: RunScope | None, stage: str, exc: Exception):
     if marker is not None:
         marker.mark_error(
             stage=stage,
+            error_type=type(exc).__name__,
+            error_category=info.category,
+            retryable=info.retryable,
+            status_code=info.status_code,
+        )
+    return info
+
+
+def _mark_strategy_error(marker: RunScope | None, stage: str, strategy_name: str, exc: Exception):
+    info = ac.classify_alpaca_error(exc)
+    if marker is not None:
+        marker.mark_error(
+            stage=stage,
+            strategy=strategy_name,
             error_type=type(exc).__name__,
             error_category=info.category,
             retryable=info.retryable,
@@ -221,6 +379,19 @@ def _reconcile_trade_log_after_run(marker: RunScope | None, dry_run: bool) -> No
         )
 
 
+def _prefetched_bars_are_sufficient(bars_data, required: dict[str, int]) -> bool:
+    if not bars_data:
+        return False
+    for symbol, min_count in required.items():
+        try:
+            bars = bars_data[symbol]
+        except Exception:
+            return False
+        if bars is None or len(bars) < min_count:
+            return False
+    return True
+
+
 def _estimate_peak_price_since_entry(symbol: str, asset_class: str, current_price: float, age_days: float) -> float:
     """Estimate high-water price for trailing exits from recent daily bars."""
     limit = max(int(age_days) + 5, 15)
@@ -239,54 +410,118 @@ def _estimate_peak_price_since_entry(symbol: str, asset_class: str, current_pric
         return current_price
 
 
-def _check_hold_day_exits(open_symbols: list, dry_run: bool = False, marker: RunScope | None = None):
-    """Exit any swing trade that has been held beyond its target hold_days."""
+def _check_hold_day_exits(
+    open_symbols: list,
+    dry_run: bool = False,
+    marker: RunScope | None = None,
+    market_open: bool = True,
+):
+    """Exit any swing trade that has been held beyond its target hold_days.
+
+    market_open: when False, stock (non-crypto) exits are skipped so that
+    crypto-only overnight scans cannot submit stock sell orders outside
+    regular market hours.
+    """
     open_trades = get_open_trades()
     for trade in open_trades:
-        symbol   = trade["symbol"]
-        strategy = trade["strategy"]
-        if strategy not in HOLD_DAYS:
-            continue
-        target_days = HOLD_DAYS[strategy]
-        age_days    = get_trade_age_days(symbol)
-        if age_days >= target_days:
-            if strategy == "momentum":
-                asset_class = trade.get("asset_class", "stock")
-                entry_price = float(trade.get("entry_price") or 0)
-                if entry_price <= 0:
-                    log.warning(f"Skipping momentum hold check for {symbol}: missing entry price.")
-                    continue
-                current_price = _latest_price_for_trade(symbol, asset_class)
-                if current_price <= 0:
-                    log.warning(f"Skipping momentum hold check for {symbol}: invalid current price {current_price}.")
-                    continue
-                peak_price = _estimate_peak_price_since_entry(symbol, asset_class, current_price, age_days)
-                should_exit, reason = should_exit_for_hold(
-                    strategy=strategy,
-                    age_days=age_days,
-                    entry_price=entry_price,
-                    current_price=current_price,
-                    peak_price=peak_price,
-                    strategy_cfg=CFG["strategies"][strategy],
-                )
-                if not should_exit:
-                    log.info(
-                        f"Momentum hold extended for {symbol}: "
-                        f"age={age_days:.1f}d pnl={(current_price / entry_price - 1):+.2%}"
-                    )
-                    continue
-                log.info(f"Momentum hold exit for {symbol}: {reason}")
-                result = oe.exit_position(symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
-                _mark_unhealthy_exit_result(marker, result, "hold_day_exit")
+        symbol = str(trade.get("symbol", "") or "")
+        strategy = str(trade.get("strategy", "") or "")
+        try:
+            if not symbol:
+                log.warning("Skipping hold-day check for trade row without symbol.")
+                continue
+            if strategy not in HOLD_DAYS:
                 continue
 
-            log.info(
-                f"Hold period expired for {symbol} ({strategy}): "
-                f"{age_days:.1f}d >= {target_days}d — exiting."
-            )
             asset_class = trade.get("asset_class", "stock")
-            result = oe.exit_position(symbol, reason="Hold period expired", asset_class=asset_class, dry_run=dry_run)
-            _mark_unhealthy_exit_result(marker, result, "hold_day_exit")
+            is_crypto = "crypto" in str(asset_class).lower()
+            if not is_crypto and not market_open:
+                log.debug(
+                    f"Market closed; deferring hold-day check for stock position {symbol}."
+                )
+                continue
+
+            target_days = HOLD_DAYS[strategy]
+            age_days    = get_trade_age_days(symbol)
+            if age_days >= target_days:
+                if strategy == "momentum":
+                    asset_class = trade.get("asset_class", "stock")
+                    try:
+                        entry_price = float(trade.get("entry_price") or 0)
+                    except (TypeError, ValueError) as e:
+                        log.error(f"Invalid entry price for hold-day check {symbol}: {trade.get('entry_price')}")
+                        _mark_exit_check_exception(marker, "hold_day_exit", symbol, e)
+                        continue
+                    if entry_price <= 0:
+                        log.warning(f"Skipping momentum hold check for {symbol}: missing entry price.")
+                        continue
+                    try:
+                        current_price = _latest_price_for_trade(symbol, asset_class)
+                    except Exception as e:
+                        info = _mark_exit_check_exception(marker, "hold_day_exit", symbol, e)
+                        log.error(
+                            "Hold-day price fetch failed for %s; deferring exit check: %s "
+                            "| category=%s retryable=%s status_code=%s",
+                            symbol,
+                            e,
+                            info.category,
+                            info.retryable,
+                            info.status_code or "",
+                            exc_info=True,
+                        )
+                        continue
+                    if current_price <= 0:
+                        log.warning(f"Skipping momentum hold check for {symbol}: invalid current price {current_price}.")
+                        continue
+                    peak_price = None
+                    high_water_text = str(trade.get("high_water_price") or "").strip()
+                    if high_water_text:
+                        try:
+                            high_water_price = float(high_water_text)
+                        except (ValueError, TypeError):
+                            high_water_price = 0.0
+                        if math.isfinite(high_water_price) and high_water_price > 0:
+                            peak_price = high_water_price
+                    if peak_price is None:
+                        peak_price = _estimate_peak_price_since_entry(symbol, asset_class, current_price, age_days)
+                    should_exit, reason = should_exit_for_hold(
+                        strategy=strategy,
+                        age_days=age_days,
+                        entry_price=entry_price,
+                        current_price=current_price,
+                        peak_price=peak_price,
+                        strategy_cfg=CFG["strategies"][strategy],
+                    )
+                    if not should_exit:
+                        log.info(
+                            f"Momentum hold extended for {symbol}: "
+                            f"age={age_days:.1f}d pnl={(current_price / entry_price - 1):+.2%}"
+                        )
+                        continue
+                    log.info(f"Momentum hold exit for {symbol}: {reason}")
+                    result = oe.exit_position(symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
+                    _mark_unhealthy_exit_result(marker, result, "hold_day_exit")
+                    continue
+
+                log.info(
+                    f"Hold period expired for {symbol} ({strategy}): "
+                    f"{age_days:.1f}d >= {target_days}d — exiting."
+                )
+                asset_class = trade.get("asset_class", "stock")
+                result = oe.exit_position(symbol, reason="Hold period expired", asset_class=asset_class, dry_run=dry_run)
+                _mark_unhealthy_exit_result(marker, result, "hold_day_exit")
+        except Exception as e:
+            info = _mark_exit_check_exception(marker, "hold_day_exit", symbol, e)
+            log.error(
+                "Hold-day exit check failed for %s; continuing with remaining positions: %s "
+                "| category=%s retryable=%s status_code=%s",
+                symbol,
+                e,
+                info.category,
+                info.retryable,
+                info.status_code or "",
+                exc_info=True,
+            )
 
 
 def _check_strategy_exits(
@@ -300,35 +535,71 @@ def _check_strategy_exits(
     skip_symbols = skip_symbols or set()
     open_trades = get_open_trades()
     for symbol in open_symbols:
-        normalized_symbol = ac.normalize_symbol(symbol)
-        if normalized_symbol in skip_symbols:
-            log.info(f"Skipping same-scan strategy exit for new entry {symbol}.")
-            continue
-        matching    = [
-            t for t in open_trades
-            if _symbols_match(t["symbol"], symbol) and t["side"] == "buy"
-        ]
-        if not matching:
-            continue
-        trade = matching[-1]
-        entry_price = float(trade["entry_price"])
-        asset_class = trade.get("asset_class", "stock")
-        trade_strategy = trade.get("strategy", "")
-        if not CFG["strategies"].get(trade_strategy, {}).get("enabled", False):
-            log.debug(f"Strategy {trade_strategy} disabled; skipping strategy exit for {symbol}.")
-            continue
-        strategy_symbol = trade.get("symbol", symbol) if asset_class == "crypto" else symbol
-        relevant = [
-            s for s in strategies
-            if s.name == trade_strategy and _asset_class_matches(s.asset_class, asset_class)
-        ]
-        for strategy in relevant:
-            should_exit, reason = strategy.should_exit(strategy_symbol, entry_price)
-            if should_exit:
-                log.info(f"Strategy exit signal for {strategy_symbol}: {reason}")
-                result = oe.exit_position(strategy_symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
-                _mark_unhealthy_exit_result(marker, result, "strategy_exit")
-                break  # position closed, no need to check further
+        try:
+            normalized_symbol = ac.normalize_symbol(symbol)
+            if normalized_symbol in skip_symbols:
+                log.info(f"Skipping same-scan strategy exit for new entry {symbol}.")
+                continue
+            matching    = [
+                t for t in open_trades
+                if _symbols_match(t["symbol"], symbol) and t["side"] == "buy"
+            ]
+            if not matching:
+                continue
+            trade = matching[-1]
+            try:
+                entry_price = float(trade["entry_price"])
+            except (TypeError, ValueError) as e:
+                log.error(f"Invalid entry price for strategy exit {symbol}: {trade.get('entry_price')}")
+                _mark_exit_check_exception(marker, "strategy_exit", symbol, e)
+                continue
+            if entry_price <= 0:
+                log.warning(f"Skipping strategy exit for {symbol}: non-positive entry price {entry_price}.")
+                continue
+            asset_class = trade.get("asset_class", "stock")
+            trade_strategy = trade.get("strategy", "")
+            if not CFG["strategies"].get(trade_strategy, {}).get("enabled", False):
+                log.debug(f"Strategy {trade_strategy} disabled; skipping strategy exit for {symbol}.")
+                continue
+            strategy_symbol = trade.get("symbol", symbol) if asset_class == "crypto" else symbol
+            relevant = [
+                s for s in strategies
+                if s.name == trade_strategy and _asset_class_matches(s.asset_class, asset_class)
+            ]
+            for strategy in relevant:
+                try:
+                    should_exit, reason = strategy.should_exit(strategy_symbol, entry_price)
+                except Exception as e:
+                    info = _mark_exit_check_exception(marker, "strategy_exit", strategy_symbol, e)
+                    log.error(
+                        "Strategy exit check failed for %s via %s: %s "
+                        "| category=%s retryable=%s status_code=%s",
+                        strategy_symbol,
+                        strategy.name,
+                        e,
+                        info.category,
+                        info.retryable,
+                        info.status_code or "",
+                        exc_info=True,
+                    )
+                    break
+                if should_exit:
+                    log.info(f"Strategy exit signal for {strategy_symbol}: {reason}")
+                    result = oe.exit_position(strategy_symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
+                    _mark_unhealthy_exit_result(marker, result, "strategy_exit")
+                    break  # position closed, no need to check further
+        except Exception as e:
+            info = _mark_exit_check_exception(marker, "strategy_exit", symbol, e)
+            log.error(
+                "Strategy exit phase failed for %s; continuing with remaining positions: %s "
+                "| category=%s retryable=%s status_code=%s",
+                symbol,
+                e,
+                info.category,
+                info.retryable,
+                info.status_code or "",
+                exc_info=True,
+            )
 
 
 # ── Main Scan ─────────────────────────────────────────────────────────────────
@@ -386,11 +657,46 @@ def run(
             marker.mark_status("ok", outcome="halted_by_daily_loss_limit")
         return
 
-    pending_entry_symbols = set() if dry_run else _pending_entry_symbols()
-    planned_symbols = _normalized_symbol_set(open_symbols) | pending_entry_symbols
+    try:
+        pending_entry_symbols = {} if dry_run else _coerce_pending_entry_symbols(_pending_entry_symbols())
+    except PendingEntryOrderCheckFailed as e:
+        if marker is not None:
+            marker.mark_error(
+                stage="pending_entry_order_check",
+                error_type="PendingEntryOrderCheckFailed",
+                error=str(e),
+            )
+        log.error("Pending entry order check failed; skipping scan to avoid duplicate entries.", exc_info=True)
+        return
+
+    planned_asset_classes = _planned_asset_classes(open_symbols, pending_entry_symbols)
+    planned_symbols = set(planned_asset_classes)
     new_entry_symbols = set()
     if pending_entry_symbols:
         log.info(f"Pending entry orders counted as planned positions: {len(pending_entry_symbols)}")
+
+    # --- Pre-fetch regime bars to share across strategies (reduces API calls) ---
+    stock_regime_bars = None
+    crypto_regime_bars = None
+    if run_stocks and market_open:
+        try:
+            fetched = ac.get_stock_bars(["SPY", "QQQ"], timeframe="1Day", limit=255)
+            if _prefetched_bars_are_sufficient(fetched, {"SPY": 252, "QQQ": 51}):
+                stock_regime_bars = fetched
+            else:
+                log.warning("Stock regime prefetch missing required SPY/QQQ history; strategies will fetch live and fail closed if unavailable.")
+        except Exception as e:
+            log.warning(f"Could not pre-fetch stock regime bars: {e}")
+
+    if run_crypto:
+        try:
+            fetched = ac.get_crypto_bars(["BTC/USD"], timeframe="1Day", limit=60)
+            if _prefetched_bars_are_sufficient(fetched, {"BTC/USD": 21}):
+                crypto_regime_bars = fetched
+            else:
+                log.warning("Crypto regime prefetch missing required BTC/USD history; strategies will fetch live and fail closed if unavailable.")
+        except Exception as e:
+            log.warning(f"Could not pre-fetch crypto regime bars: {e}")
 
     all_strategies = []
 
@@ -401,14 +707,20 @@ def run(
         enabled_stock_strategies = _enabled_strategies(STOCK_STRATEGIES)
         for strategy in enabled_stock_strategies:
             try:
-                signals = strategy.scan(stock_universe)
+                scan_kwargs = {"regime_bars": stock_regime_bars}
+                if strategy.name == "momentum":
+                    scan_kwargs["existing_symbols"] = _planned_symbols_for_asset_class(
+                        planned_asset_classes,
+                        "stock",
+                    )
+                signals = strategy.scan(stock_universe, **scan_kwargs)
                 for sig in signals:
                     sym = sig["symbol"]
                     normalized = ac.normalize_symbol(sym)
                     if normalized in planned_symbols:
                         log.debug(f"Already holding {sym}, skipping entry.")
                         continue
-                    if _max_positions_planned(planned_symbols):
+                    if _planned_asset_class_cap_reached("stock", planned_asset_classes):
                         break
                     if sig["action"] == "buy":
                         result = oe.enter_position(
@@ -419,8 +731,18 @@ def run(
                             suggested_qty=sig.get("atr_risk_qty"),
                             atr_stop_price=sig.get("atr_stop_price"),
                         )
-                        _register_entry_result(result, sym, open_symbols, planned_symbols, new_entry_symbols)
+                        _mark_unhealthy_entry_result(marker, result, "stock_entry")
+                        _register_entry_result(
+                            result,
+                            sym,
+                            open_symbols,
+                            planned_symbols,
+                            new_entry_symbols,
+                            asset_class="stock",
+                            planned_asset_classes=planned_asset_classes,
+                        )
             except Exception as e:
+                _mark_strategy_error(marker, "stock_strategy", strategy.name, e)
                 log.error(f"Strategy {strategy.name} failed: {e}", exc_info=True)
         all_strategies.extend(enabled_stock_strategies)
 
@@ -433,19 +755,36 @@ def run(
         enabled_crypto_strategies = _enabled_strategies(CRYPTO_STRATEGIES)
         for strategy in enabled_crypto_strategies:
             try:
-                signals = strategy.scan(CRYPTO_UNIVERSE)
+                signals = strategy.scan(CRYPTO_UNIVERSE, regime_bars=crypto_regime_bars)
                 for sig in signals:
                     sym = sig["symbol"]
                     normalized = ac.normalize_symbol(sym)
                     if normalized in planned_symbols:
                         log.debug(f"Already holding {sym}, skipping entry.")
                         continue
-                    if _max_positions_planned(planned_symbols):
+                    if _planned_asset_class_cap_reached("crypto", planned_asset_classes):
                         break
                     if sig["action"] == "buy":
-                        result = oe.enter_position(sym, strategy=strategy.name, asset_class="crypto", dry_run=dry_run)
-                        _register_entry_result(result, sym, open_symbols, planned_symbols, new_entry_symbols)
+                        result = oe.enter_position(
+                            sym,
+                            strategy=strategy.name,
+                            asset_class="crypto",
+                            dry_run=dry_run,
+                            suggested_qty=sig.get("atr_risk_qty"),
+                            atr_stop_price=sig.get("atr_stop_price"),
+                        )
+                        _mark_unhealthy_entry_result(marker, result, "crypto_entry")
+                        _register_entry_result(
+                            result,
+                            sym,
+                            open_symbols,
+                            planned_symbols,
+                            new_entry_symbols,
+                            asset_class="crypto",
+                            planned_asset_classes=planned_asset_classes,
+                        )
             except Exception as e:
+                _mark_strategy_error(marker, "crypto_strategy", strategy.name, e)
                 log.error(f"Strategy {strategy.name} failed: {e}", exc_info=True)
         all_strategies.extend(enabled_crypto_strategies)
 
@@ -476,7 +815,7 @@ def run(
 
     # --- Hold-day expiry exits ---
     log.info("--- Checking hold-day expiry ---")
-    _check_hold_day_exits(open_symbols, dry_run=dry_run, marker=marker)
+    _check_hold_day_exits(open_symbols, dry_run=dry_run, marker=marker, market_open=market_open)
 
     _reconcile_trade_log_after_run(marker, dry_run)
 

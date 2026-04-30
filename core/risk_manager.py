@@ -339,7 +339,24 @@ def should_exit_position(
 
 # ── Market Regime Filter ─────────────────────────────────────────────────────
 
-def market_regime_ok(bars_data=None) -> bool:
+def _get_closes(bars: list) -> pd.Series:
+    """Safely extract close prices from a list of bar objects (Alpaca SDK, SimpleNamespace, or dict)."""
+    vals = []
+    for b in bars:
+        if hasattr(b, "close"):
+            vals.append(float(b.close))
+        elif isinstance(b, dict) and "close" in b:
+            vals.append(float(b["close"]))
+        else:
+            # Fallback for other object types that might have close as a property but not seen by hasattr
+            try:
+                vals.append(float(b.close))
+            except Exception:
+                vals.append(np.nan)
+    return pd.Series(vals)
+
+
+def market_regime_ok(bars_data=None, allow_warmup: bool = False) -> bool:
     """
     Returns True if SPY is above its 50-day SMA — indicates bull market regime.
     If SPY is below SMA50 but QQQ is above SMA50, it also returns True (Bifurcation Detection).
@@ -347,23 +364,31 @@ def market_regime_ok(bars_data=None) -> bool:
     When bars_data is provided (backtest), uses pre-fetched bars dict.
     In live trading, fetches from Alpaca directly.
 
-    Backtest mode: insufficient bars (early warmup) returns True.
+    When allow_warmup=True: insufficient supplied bars return True for
+    backtest warmup only.
     Live mode: any exception or insufficient bars returns False (fail closed).
     """
     try:
+        if bars_data is not None and not bars_data:
+            log.warning("[RegimeFilter] Empty regime bars supplied; blocking new entries (fail closed).")
+            return False
+
         def _is_above_sma50(symbol: str) -> bool:
             if bars_data is not None:
                 bars = bars_data.get(symbol)
                 if bars is None or len(bars) < 51:
-                    return True
-                closes = pd.Series([float(b.close) if hasattr(b, 'close') else float(b['close']) for b in bars])
+                    if allow_warmup:
+                        return True
+                    log.warning(f"[RegimeFilter] Insufficient supplied {symbol} bars for SMA50; fail closed.")
+                    return False
+                closes = _get_closes(bars)
             else:
                 raw = ac.get_stock_bars([symbol], timeframe="1Day", limit=55)
                 bars = raw[symbol]
                 if bars is None or len(bars) < 51:
                     log.warning(f"[RegimeFilter] Insufficient {symbol} bars for SMA50; fail closed.")
                     return False
-                closes = pd.Series([b.close for b in bars])
+                closes = _get_closes(bars)
             
             sma50 = closes.rolling(50).mean().iloc[-1]
             current = float(closes.iloc[-1])
@@ -437,26 +462,32 @@ def market_breadth_pct(universe: list, bars_data: dict | None = None) -> float:
         return 0.5
 
 
-def crypto_regime_ok(bars_data=None) -> bool:
+def crypto_regime_ok(bars_data=None, allow_warmup: bool = False) -> bool:
     """
     Returns True if BTC/USD is above its 20-day EMA — indicates crypto bull regime.
     When bars_data is provided (backtest), uses pre-fetched BTC bars.
     In live trading, fetches from Alpaca directly.
 
-    Backtest mode: insufficient bars (early warmup) returns True so the
-    simulation can begin trading before the full 20-bar window is available.
+    When allow_warmup=True: insufficient supplied bars return True so backtests
+    can begin before the full 20-bar window is available.
 
     Live mode: any exception or insufficient bars returns False (fail closed).
     A regime filter is a safety control — when we cannot confirm conditions are
     favourable, we should block new entries rather than assume they are.
     """
     try:
+        if bars_data is not None and not bars_data:
+            log.warning("[CryptoRegime] Empty regime bars supplied; blocking new entries (fail closed).")
+            return False
+
         if bars_data is not None:
             btc_bars = bars_data.get("BTC/USD")
             if btc_bars is None or len(btc_bars) < 21:
-                # Early in the simulation — not enough history yet; allow trading.
-                return True
-            closes = pd.Series([float(b.close) if hasattr(b, 'close') else float(b['close']) for b in btc_bars])
+                if allow_warmup:
+                    return True
+                log.warning("[CryptoRegime] Insufficient supplied BTC/USD bars for EMA20; blocking new entries (fail closed).")
+                return False
+            closes = _get_closes(btc_bars)
         else:
             # live mode — fail closed if data is unavailable or insufficient
             raw = ac.get_crypto_bars(["BTC/USD"], timeframe="1Day", limit=25)
@@ -468,7 +499,7 @@ def crypto_regime_ok(bars_data=None) -> bool:
                     len(btc_bars) if btc_bars is not None else 0,
                 )
                 return False
-            closes = pd.Series([b.close for b in btc_bars])
+            closes = _get_closes(btc_bars)
         ema20 = closes.ewm(span=20, adjust=False).mean().iloc[-1]
         current = float(closes.iloc[-1])
         is_bull = current > ema20

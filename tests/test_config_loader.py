@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 import tempfile
+import yaml
 
 from core.config_loader import get_config_path, get_config, _deep_merge, BASE_DIR
 
@@ -107,3 +108,14 @@ class TestGetConfig(unittest.TestCase):
             (root / "config" / "config.local.yaml").write_text("")
             result = get_config(base_dir=root)
         self.assertEqual(result["mode"], "paper")
+
+    def test_default_strategy_enablement_profile(self):
+        config_path = BASE_DIR / "config" / "config.yaml"
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+        strategies = cfg["strategies"]
+        self.assertTrue(strategies["momentum"]["enabled"])
+        self.assertTrue(strategies["rsi_reversion"]["enabled"])
+        self.assertTrue(strategies["ma_crossover"]["enabled"])
+        self.assertFalse(strategies["range_breakout"]["enabled"])
+        self.assertFalse(strategies["gap_up"]["enabled"])

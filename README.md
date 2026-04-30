@@ -30,7 +30,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener
 
 ## Backtesting & Performance
 
-HawksTrade includes a high-fidelity historical simulator. The current default strategy set achieved **+19.00% annual return** in the 12-month backtest ending 2026-04-10 on $10,000 starting capital, with the configured 5% max-position risk cap enforced.
+HawksTrade includes a high-fidelity historical simulator. The current default strategy set achieved **+12.12% annual return** in the 12-month backtest ending 2026-04-10 on $10,000 starting capital, with the configured 8% max-position risk cap enforced.
 
 - **Backtest Summary**: [backtests.md](backtests.md)
 - **Configuration Guide**: [config.md](config.md)
@@ -42,24 +42,24 @@ HawksTrade includes a high-fidelity historical simulator. The current default st
 
 | Strategy | Market | Key Parameters | Approach |
 |----------|--------|----------------|----------|
-| **Momentum** | US Stocks | Top 3 by 5-day return, min 6% momentum, profit-aware exit | Captures high-velocity rallies, exits flat/losing trades after the minimum hold, and lets profitable trades run under trailing protection. |
-| **RSI Reversion** | US Stocks | Disabled by default; RSI < 38, SMA-200 within 15%, vol spike 1.5x, 2-bar recovery | Mean reversion with volume confirmation and consecutive higher-close gate. |
+| **Momentum** | US Stocks | Top 1 by 5-day return, min 10% momentum, 1.8x volume spike, 75% breadth coverage, profit-aware exit | Captures only high-conviction rallies, exits flat/losing trades after the minimum hold, and lets profitable trades run under trailing protection. |
+| **RSI Reversion** | US Stocks | Enabled; RSI < 30, %B < 20%, SMA-200 within +/-15%, vol spike 1.5x, 1-bar recovery | Conservative mean reversion with crash and realised-volatility regime guards. |
 | **Gap-Up** | US Stocks | Disabled by default; 3% gap, high volume, SMA-200 trend | Gap plays on strong trend confirmation. |
-| **EMA Crossover** | Crypto | 9/21 EMA, RSI 35-70, slope + volatility filters | Bullish EMA crossover with BTC regime gate. |
-| **Range Breakout** | Crypto | Prior-day high breakout, 1.8x volume, EMA-50 trend | Breakout entries with BTC regime gate and volume confirmation. |
+| **EMA Crossover** | Crypto | 9/21 EMA, 2-day recent-cross window, RSI 35-70, slope + volatility filters, 1% daily-close max-loss exit | Bullish EMA crossover with BTC regime gate and tighter strategy-level capital defense. |
+| **Range Breakout** | Crypto | Disabled; prior-day high close breakout, 1.8x volume, rising EMA-50, RSI/extension guards | Ranked breakout implementation remains available, but is not part of the active default strategy set. |
 
 **Crypto Universe**: `BTC/USD`, `SOL/USD`, `LINK/USD`, `DOGE/USD`, `LTC/USD`, `DOT/USD`.
 
 ### Market Regime Filters
 
-- **SPY SMA-50 (Stocks)**: All stock strategies (Momentum, RSI Reversion, Gap-Up) are gated by SPY trading above its 50-day SMA. When SPY is below SMA-50 (bear regime), stock scans are skipped.
-- **BTC EMA-20 (Crypto)**: EMA Crossover and Range Breakout strategies are gated by BTC/USD trading above its 20-day EMA. When BTC is below EMA-20 (crypto bear regime), crypto scans are skipped.
+- **Stock Regime Guards**: Momentum and Gap-Up use the SPY/QQQ SMA-50 regime gate. RSI Reversion has separate crash and realised-volatility filters.
+- **BTC EMA-20 (Crypto)**: The active EMA Crossover crypto strategy is gated by BTC/USD trading above its 20-day EMA. Range Breakout shares this gate if re-enabled later.
 
-Both filters fail open (return True) if data is unavailable, ensuring the system doesn't halt on data issues.
+Live/paper scans fail closed when regime data is unavailable or insufficient, blocking new entries until the bot can confirm market conditions. Backtests still allow early warmup periods with insufficient bars so simulations can start before every long-window filter is populated.
 
-### Kelly Criterion Dynamic Position Sizing
+### Strategy Position Sizing
 
-Momentum strategy uses Half-Kelly position sizing with parameters derived dynamically from the last 30 closed momentum trades. When fewer than 10 trades are available, it falls back to hardcoded defaults (WR=0.567, avg_win=14.0%, avg_loss=5.4%). Position size is capped by `trading.max_position_pct` and currently cannot exceed 5% of portfolio.
+Momentum, RSI Reversion, and EMA Crossover emit ATR-risk quantities that target 1% account risk per trade before the global 8% max-position cap is applied. Range Breakout also emits ATR-risk quantities if re-enabled later. Momentum still has a Half-Kelly fallback in the executor if a signal does not include ATR sizing, but the current strategy path provides ATR-risk sizing by default.
 
 ### Momentum Exit Policy
 
@@ -75,9 +75,26 @@ Use `--no-screener` to backtest only the fixed configured stock universe, or `--
 
 ```bash
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
-  --strategies momentum,ma_crossover,range_breakout \
-  --set strategies.momentum.top_n=3 \
-  --set strategies.momentum.min_momentum_pct=0.06
+  --strategies momentum,rsi_reversion,ma_crossover \
+  --set strategies.momentum.top_n=1 \
+  --set strategies.momentum.min_momentum_pct=0.10 \
+  --set strategies.momentum.volume_spike_ratio=1.8 \
+  --set strategies.momentum.min_breadth_coverage_pct=0.75 \
+  --set strategies.ma_crossover.max_loss_exit_pct=0.01
+```
+
+Before scaling live capital, run the cost-aware validation gate. It applies the
+configured slippage/fee assumptions, checks 12-month, 6-month, and crypto-sleeve
+windows, and reports watch-only warnings for weak recent crypto windows:
+
+```bash
+python3 scheduler/run_validation_gate.py --profile production
+```
+
+RSI Reversion is enabled in the active default profile. Use its dedicated gate as an ongoing monitoring check before scaling its capital allocation:
+
+```bash
+python3 scheduler/run_validation_gate.py --profile rsi
 ```
 
 ---
@@ -86,7 +103,8 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
 
 - **Asymmetric Reward**: 3.5% stop-loss / 12% take-profit.
 - **Capital Protection**: SMA-based trend filters on all strategies.
-- **Position Limits**: Max 5% of portfolio per trade, cap of 10 concurrent positions.
+- **Strategy-Local Loss Defense**: MA Crossover exits on a daily close at least 1% below entry, reducing crypto trend-tail losses before the global stop layer is needed.
+- **Position Limits**: Max 8% of portfolio per trade, cap of 10 concurrent positions.
 - **Daily Guardrail**: 5% daily loss limit (hard stop for the day), keyed to the `America/New_York` trading-session date so UTC cloud hosts do not reset the baseline at UTC midnight. The baseline is the first observed account value for that trading date and is persisted in `data/daily_loss_baseline.json`; it is not reconstructed from the prior close.
 - **Broker Resilience**: Alpaca timeouts, rate limits, and 5xx outages use bounded retry; auth failures, not-found responses, and broker rejections are classified for fail-closed logging.
 - **Price-Fetch Visibility**: Risk checks track consecutive latest-price failures per open position and surface repeated failures as `[NOK]` in the Linux health dashboard.
@@ -100,7 +118,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
 
 All settings are in `config/config.yaml`. See [config.md](config.md) for the available configuration options and the recommended backtest-backed profile. Toggle strategies, adjust risk, or switch between `paper` and `live` modes only when you intend to revalidate those changes.
 
-For machine-local configuration (e.g. switching to `live` on a specific host without touching the committed file), create `config/config.local.yaml`. When present it is used **in full** in place of `config/config.yaml` — it must contain the complete configuration. This file is gitignored and never committed.
+For machine-local configuration (e.g. switching to `live` on a specific host without touching the committed file), create `config/config.local.yaml`. When present it is deep-merged over `config/config.yaml`, so it only needs the keys you want to override. This file is gitignored and never committed.
 
 ---
 

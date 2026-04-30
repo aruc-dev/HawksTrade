@@ -17,8 +17,8 @@ Exit:  FIRST of:
 Regime filters (both must pass):
   1. Crash filter  — skip if SPY >20% below its 252-day peak.
   2. VIX proxy     — skip if SPY realised HV(20) > its 200-day MA × 1.2.
-                     Falls back gracefully; backtest regime_bars (60 bars)
-                     are too short for this filter → always passes through.
+                     Backtests pass enough SPY history after warmup for both
+                     filters to run; early warmup still passes through.
 
 ATR stop price is stored in each signal dict as "atr_stop_price". In both
 backtest and live/paper modes it flows through order_executor.enter_position
@@ -30,32 +30,34 @@ from __future__ import annotations
 
 import logging
 from typing import List, Dict
-from pathlib import Path
 
 import pandas as pd
 import numpy as np
 
 from strategies.base_strategy import BaseStrategy
+from strategies.atr_sizing import atr_stop_and_qty
 from core import alpaca_client as ac
 from core.config_loader import get_config
 
-BASE_DIR = Path(__file__).resolve().parent.parent
 CFG = get_config()
-
 SCFG = CFG["strategies"]["rsi_reversion"]
 log  = logging.getLogger("strategy.rsi_reversion")
 
 
-def _in_severe_crash(bars_data=None) -> bool:
+def _in_severe_crash(bars_data=None, allow_warmup: bool = False) -> bool:
     """
     Returns True if SPY is more than 20% below its 252-day peak.
-    Backtest warmup (< 20 bars) returns False. Live errors return True (fail closed).
+    With allow_warmup=True, insufficient supplied bars return False for
+    backtest warmup. Live/paper errors and insufficient supplied bars fail closed.
     """
     try:
         if bars_data is not None:
             spy_bars = bars_data.get("SPY")
             if spy_bars is None or len(spy_bars) < 252:
-                return False
+                if allow_warmup:
+                    return False
+                log.warning("[RSI] Insufficient supplied SPY bars for crash check — blocking (fail closed).")
+                return True
             closes = pd.Series([
                 float(b.close) if hasattr(b, "close") else float(b["close"])
                 for b in spy_bars
@@ -66,7 +68,10 @@ def _in_severe_crash(bars_data=None) -> bool:
             if spy_bars is None or len(spy_bars) < 252:
                 log.warning("[RSI] Insufficient SPY bars for crash check — blocking (fail closed).")
                 return True
-            closes = pd.Series([b.close for b in spy_bars])
+            closes = pd.Series([
+                float(b.close) if hasattr(b, "close") else float(b["close"])
+                for b in spy_bars
+            ])
 
         peak = closes.rolling(252).max().iloc[-1]
         current = float(closes.iloc[-1])
@@ -87,10 +92,12 @@ def _in_high_volatility_regime(
     hv_period: int = 20,
     ma_period: int = 200,
     multiplier: float = 1.2,
+    allow_warmup: bool = False,
 ) -> bool:
     """
     Returns True if SPY realised HV(hv_period) exceeds its ma_period-day MA × multiplier.
-    Backtest regime_bars (60 bars) are insufficient for a 200-day MA → returns False.
+    With allow_warmup=True, insufficient supplied bars return False for
+    backtest warmup.
     Live mode fetches SPY history directly; errors return True (fail closed).
     """
     required = hv_period + ma_period
@@ -98,7 +105,10 @@ def _in_high_volatility_regime(
         if bars_data is not None:
             spy_bars = bars_data.get("SPY")
             if spy_bars is None or len(spy_bars) < required:
-                return False
+                if allow_warmup:
+                    return False
+                log.warning("[RSI] Insufficient supplied SPY bars for VIX filter — blocking (fail closed).")
+                return True
             closes = pd.Series([
                 float(b.close) if hasattr(b, "close") else float(b["close"])
                 for b in spy_bars
@@ -109,7 +119,10 @@ def _in_high_volatility_regime(
             if spy_bars is None or len(spy_bars) < required:
                 log.warning("[RSI] Insufficient SPY bars for VIX filter — blocking (fail closed).")
                 return True
-            closes = pd.Series([b.close for b in spy_bars])
+            closes = pd.Series([
+                float(b.close) if hasattr(b, "close") else float(b["close"])
+                for b in spy_bars
+            ])
 
         returns   = closes.pct_change().dropna()
         hv_series = returns.rolling(hv_period).std() * np.sqrt(252)
@@ -140,8 +153,17 @@ def _calc_rsi(closes: pd.Series, period: int = 14) -> float:
     avg_l  = loss.ewm(com=period - 1, min_periods=period).mean()
     with np.errstate(divide="ignore", invalid="ignore"):
         rs  = avg_g / avg_l
-        rsi = 100 - (100 / (1 + rs))
-    return float(rsi.iloc[-1])
+        # Fix BUG-008: Handle NaN RS in flat markets
+        rs_filled = np.nan_to_num(rs, nan=1.0, posinf=np.inf)
+        rsi = 100 - (100 / (1 + rs_filled))
+
+    # rsi is a Series here because rs_filled (from Series / Series) is likely a Series
+    # But np.nan_to_num on a Series returns a numpy array.
+    if isinstance(rsi, np.ndarray):
+        val = float(rsi[-1])
+    else:
+        val = float(rsi.iloc[-1])
+    return val if not np.isnan(val) else 50.0
 
 
 def _calc_atr(bars, period: int = 14) -> float:
@@ -199,17 +221,21 @@ class RSIReversionStrategy(BaseStrategy):
         if not SCFG["enabled"]:
             return []
 
-        period       = SCFG["rsi_period"]
-        oversold     = SCFG["oversold_threshold"]
-        bb_period    = SCFG.get("bb_period", 20)
-        bb_std       = SCFG.get("bb_std", 2.0)
-        vix_mult     = SCFG.get("vix_multiplier", 1.2)
-        atr_period   = SCFG.get("atr_period", 14)
-        atr_mult     = SCFG.get("atr_multiplier", 2.0)
+        period        = SCFG["rsi_period"]
+        oversold      = SCFG["oversold_threshold"]
+        bb_period     = SCFG.get("bb_period", 20)
+        bb_std        = SCFG.get("bb_std", 2.0)
+        vix_mult      = SCFG.get("vix_multiplier", 1.2)
+        atr_period    = SCFG.get("atr_period", 14)
+        atr_mult      = SCFG.get("atr_multiplier", 2.0)
+        risk_pct      = float(SCFG.get("risk_per_trade_pct", 0.01))
+        sma200_upper  = float(SCFG.get("sma200_upper_buffer_pct", 0.15))
+        sma200_lower  = float(SCFG.get("sma200_lower_buffer_pct", 0.15))
+        volume_spike_ratio = float(SCFG.get("volume_spike_ratio", 1.5))
 
         log.info(
             f"[RSI] Scanning {len(universe)} symbols "
-            f"(RSI<{oversold}, %B<20%, vol>1.5×, 1-bar recovery, SMA200±15%, "
+            f"(RSI<{oversold}, %B<20%, vol>{volume_spike_ratio:.1f}x, 1-bar recovery, SMA200 -{sma200_lower:.0%}/+{sma200_upper:.0%}, "
             f"2×ATR stop, exit@SMA20 or RSI>50)..."
         )
 
@@ -221,34 +247,67 @@ class RSIReversionStrategy(BaseStrategy):
 
         regime_bars = kwargs.get("regime_bars")
 
-        if _in_severe_crash(bars_data=regime_bars):
+        # Pre-fetch SPY once and share between both regime filters to avoid double API call.
+        if regime_bars is None or "SPY" not in (regime_bars or {}):
+            try:
+                raw_spy = ac.get_stock_bars(["SPY"], timeframe="1Day", limit=255)
+                spy_bars = raw_spy.get("SPY")
+                if spy_bars:
+                    combined = dict(regime_bars) if regime_bars else {}
+                    combined["SPY"] = spy_bars
+                    regime_bars = combined
+            except Exception as e:
+                log.warning(f"[RSI] Failed to pre-fetch SPY for regime filters: {e}")
+
+        allow_regime_warmup = bool(kwargs.get("allow_regime_warmup", False))
+
+        if _in_severe_crash(bars_data=regime_bars, allow_warmup=allow_regime_warmup):
             log.info("[RSI] Severe crash (SPY >20% below 252d peak) — skipping scan.")
             return []
 
-        if _in_high_volatility_regime(bars_data=regime_bars, multiplier=vix_mult):
+        if _in_high_volatility_regime(
+            bars_data=regime_bars,
+            multiplier=vix_mult,
+            allow_warmup=allow_regime_warmup,
+        ):
             log.info(f"[RSI] Elevated volatility regime (HV20 > HV_MA×{vix_mult}) — skipping scan.")
+            return []
+
+        min_trade_value = float(CFG["trading"].get("min_trade_value_usd", 100))
+        try:
+            portfolio_equity = ac.get_portfolio_value()
+        except Exception as e:
+            log.error(f"[RSI] Could not fetch portfolio value for ATR-risk sizing; skipping signals: {e}")
             return []
 
         signals = []
 
         for symbol in universe:
             try:
-                bars = bars_data[symbol]
+                bars = self._get_symbol_bars(bars_data, symbol)
                 if bars is None or len(bars) < 201:
                     continue
 
-                closes = pd.Series([b.close for b in bars])
+                closes = pd.Series([
+                    float(b.close) if hasattr(b, "close") else float(b["close"])
+                    for b in bars
+                ])
                 rsi    = _calc_rsi(closes, period)
                 sma200 = closes.rolling(window=200).mean().iloc[-1]
-                price  = float(bars[-1].close)
+                price  = float(bars[-1].close if hasattr(bars[-1], "close") else bars[-1]["close"])
 
-                avg_vol_20 = pd.Series([b.volume for b in bars]).iloc[-21:-1].mean()
-                today_vol  = float(bars[-1].volume)
+                avg_vol_20 = pd.Series([
+                    float(b.volume if hasattr(b, "volume") else b["volume"]) for b in bars
+                ]).iloc[-21:-1].mean()
+                today_vol  = float(bars[-1].volume if hasattr(bars[-1], "volume") else bars[-1]["volume"])
                 vol_ratio  = today_vol / avg_vol_20 if avg_vol_20 > 0 else 0.0
 
-                not_broken_down = price > sma200 * 0.85
+                # SMA200 band: price must be within configurable buffers of SMA200.
+                # Lower bound prevents buying broken-down stocks; upper bound prevents
+                # buying already-extended stocks that are not genuinely oversold.
+                in_sma200_band = sma200 * (1 - sma200_lower) < price < sma200 * (1 + sma200_upper)
 
-                if not (rsi < oversold and not_broken_down and vol_ratio >= 1.5):
+                if not (rsi < oversold and in_sma200_band and vol_ratio >= volume_spike_ratio):
                     continue
 
                 if len(closes) >= bb_period:
@@ -276,12 +335,25 @@ class RSIReversionStrategy(BaseStrategy):
                     log.debug(f"[RSI] {symbol} skipped — no 1-bar recovery (last close not above prior)")
                     continue
 
-                # ATR-based stop: gives the trade room to breathe in high-vol conditions
-                atr           = _calc_atr(bars, atr_period)
-                atr_stop      = round(price - atr_mult * atr, 4)
-                lower_band    = _bollinger_lower(closes, bb_period, bb_std)
+                # ATR-based stop and 1%-risk position sizing
+                atr        = _calc_atr(bars, atr_period)
+                lower_band = _bollinger_lower(closes, bb_period, bb_std)
+                sized = atr_stop_and_qty(
+                    symbol=symbol,
+                    price=price,
+                    atr=atr,
+                    atr_multiplier=atr_mult,
+                    portfolio_equity=portfolio_equity,
+                    risk_per_trade_pct=risk_pct,
+                    min_trade_value=min_trade_value,
+                    logger=log,
+                    prefix="[RSI]",
+                )
+                if sized is None:
+                    continue
+                atr_stop, atr_risk_qty = sized
 
-                signals.append({
+                sig = {
                     "symbol":         symbol,
                     "action":         "buy",
                     "strategy":       self.name,
@@ -292,10 +364,14 @@ class RSIReversionStrategy(BaseStrategy):
                         f"RSI={rsi:.1f}<{oversold}, %B={pct_b:.2%} (lower-BB={lower_band:.2f}), "
                         f"vol={vol_ratio:.1f}×, ATR={atr:.2f} stop@{atr_stop:.2f}"
                     ),
-                })
+                }
+                sig["atr_risk_qty"] = atr_risk_qty
+
+                signals.append(sig)
                 log.info(
                     f"[RSI] Signal: BUY {symbol} | RSI={rsi:.1f} | "
-                    f"%B={pct_b:.2%} | vol={vol_ratio:.1f}× | ATR={atr:.2f} | stop@{atr_stop:.2f}"
+                    f"%B={pct_b:.2%} | vol={vol_ratio:.1f}× | ATR={atr:.2f} | "
+                    f"stop@{atr_stop:.2f} | risk_qty={atr_risk_qty}"
                 )
 
             except Exception as e:
@@ -318,23 +394,25 @@ class RSIReversionStrategy(BaseStrategy):
         limit = max(period + 10, bb_period + 5)
         try:
             bars_data  = ac.get_stock_bars([symbol], timeframe="1Day", limit=limit)
-            bars       = bars_data[symbol]
+            bars       = self._get_symbol_bars(bars_data, symbol)
             if bars is None or len(bars) < period + 1:
                 return False, ""
 
-            closes     = pd.Series([b.close for b in bars])
+            closes = pd.Series([
+                float(b.close) if hasattr(b, "close") else float(b["close"])
+                for b in bars
+            ])
             price      = float(closes.iloc[-1])
             rsi        = _calc_rsi(closes, period)
             sma_target = float(closes.rolling(bb_period).mean().iloc[-1])
             
-            # Profit Floor: ensure we cover slippage/commissions before hitting SMA target
-            profit_floor_mult = 1.015 # 1.5% minimum gain
-            effective_target = max(sma_target, entry_price * profit_floor_mult)
+            profit_floor_pct  = float(SCFG.get("profit_floor_pct", 0.015))
+            effective_target  = max(sma_target, entry_price * (1 + profit_floor_pct))
 
             if price >= effective_target:
                 reason = f"Mean target reached: {price:.2f} >= {effective_target:.2f}"
                 if effective_target > sma_target:
-                    reason += f" (SMA{bb_period}={sma_target:.2f}, boosted by 1.5% floor)"
+                    reason += f" (SMA{bb_period}={sma_target:.2f}, boosted by {profit_floor_pct:.1%} floor)"
                 return True, reason
 
             if rsi > overbought:

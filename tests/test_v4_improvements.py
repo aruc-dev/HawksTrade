@@ -33,7 +33,15 @@ class V4ImprovementsTests(unittest.TestCase):
     def test_crypto_regime_ok_backtest_insufficient_data_returns_true(self):
         # Backtest warmup: not enough history yet — allow trading so simulation starts.
         mock_bars = {"BTC/USD": [MagicMock(close=100) for _ in range(5)]}
-        self.assertTrue(rm.crypto_regime_ok(bars_data=mock_bars))
+        self.assertTrue(rm.crypto_regime_ok(bars_data=mock_bars, allow_warmup=True))
+
+    def test_crypto_regime_ok_supplied_insufficient_data_fails_closed_by_default(self):
+        mock_bars = {"BTC/USD": [MagicMock(close=100) for _ in range(5)]}
+        self.assertFalse(rm.crypto_regime_ok(bars_data=mock_bars))
+
+    def test_crypto_regime_ok_empty_prefetch_returns_false(self):
+        # Empty supplied data means a live prefetch failed before any usable BTC bars arrived.
+        self.assertFalse(rm.crypto_regime_ok(bars_data={}))
 
     # ── crypto_regime_ok (live path — fail closed) ────────────────────────────
 
@@ -73,7 +81,15 @@ class V4ImprovementsTests(unittest.TestCase):
     def test_market_regime_ok_backtest_insufficient_data_returns_true(self):
         # Backtest warmup: not enough SPY history yet — allow trading so simulation starts.
         mock_bars = {"SPY": [MagicMock(close=100) for _ in range(10)]}
-        self.assertTrue(rm.market_regime_ok(bars_data=mock_bars))
+        self.assertTrue(rm.market_regime_ok(bars_data=mock_bars, allow_warmup=True))
+
+    def test_market_regime_ok_supplied_insufficient_data_fails_closed_by_default(self):
+        mock_bars = {"SPY": [MagicMock(close=100) for _ in range(10)]}
+        self.assertFalse(rm.market_regime_ok(bars_data=mock_bars))
+
+    def test_market_regime_ok_empty_prefetch_returns_false(self):
+        # Empty supplied data means a live prefetch failed before any usable SPY/QQQ bars arrived.
+        self.assertFalse(rm.market_regime_ok(bars_data={}))
 
     def test_kelly_dynamic_params(self):
         # Mock 15 trades
@@ -87,18 +103,18 @@ class V4ImprovementsTests(unittest.TestCase):
              patch("core.alpaca_client.get_cash", return_value=5000):
             qty = rm.kelly_position_size(price=100)
             self.assertGreater(qty, 0)
-            # WR=0.66, b=3, Kelly_f=0.55, Half=0.275, capped by configured 5% max -> 5 shares
-            self.assertEqual(qty, 5.0)
+            # WR=0.66, b=3, Kelly_f=0.55, Half=0.275, capped by configured 8% max -> 8 shares
+            self.assertEqual(qty, 8.0)
 
     def test_kelly_fallback_v3_defaults(self):
         # When < 10 trades, use v3 defaults (WR=0.567, win=0.1398, loss=0.0543)
-        # b = 2.57, kelly_f = 0.398, half = 0.199, capped by configured 5% max
+        # b = 2.57, kelly_f = 0.398, half = 0.199, capped by configured 8% max
         with patch("tracking.trade_log.get_closed_trades", return_value=[]), \
              patch("core.alpaca_client.get_portfolio_value", return_value=10000), \
              patch("core.alpaca_client.get_cash", return_value=10000):
             qty = rm.kelly_position_size(price=100)
-            # 5% of 10000 = 500 USD -> 5 shares
-            self.assertEqual(qty, 5.0)
+            # 8% of 10000 = 800 USD -> 8 shares
+            self.assertEqual(qty, 8.0)
 
     def test_rsi_1bar_recovery_allows_rising(self):
         # 1-bar confirmation: last close higher than prior close → recovering
@@ -148,11 +164,18 @@ class V4ImprovementsTests(unittest.TestCase):
     def test_crash_filter_backtest_warmup_allows_trading(self):
         # Fewer than 20 bars in backtest warmup → allow (return False)
         spy_bars = [MagicMock(close=100.0) for _ in range(10)]
-        self.assertFalse(_in_severe_crash(bars_data={"SPY": spy_bars}))
+        self.assertFalse(_in_severe_crash(bars_data={"SPY": spy_bars}, allow_warmup=True))
+
+    def test_crash_filter_supplied_insufficient_bars_fails_closed_by_default(self):
+        spy_bars = [MagicMock(close=100.0) for _ in range(10)]
+        self.assertTrue(_in_severe_crash(bars_data={"SPY": spy_bars}))
 
     def test_crash_filter_missing_spy_allows_trading(self):
         # No SPY key in bars_data → backtest warmup → allow
-        self.assertFalse(_in_severe_crash(bars_data={}))
+        self.assertFalse(_in_severe_crash(bars_data={}, allow_warmup=True))
+
+    def test_crash_filter_missing_spy_fails_closed_by_default(self):
+        self.assertTrue(_in_severe_crash(bars_data={}))
 
     # ── Bollinger Band helpers ────────────────────────────────────────────────
 
@@ -223,8 +246,13 @@ class V4ImprovementsTests(unittest.TestCase):
     def test_vix_filter_backtest_warmup_allows_trading(self):
         # Fewer bars than required (hv_period + ma_period = 220) → allow
         spy_bars = [MagicMock(close=100.0) for _ in range(60)]
-        result = _in_high_volatility_regime(bars_data={"SPY": spy_bars})
+        result = _in_high_volatility_regime(bars_data={"SPY": spy_bars}, allow_warmup=True)
         self.assertFalse(result)
+
+    def test_vix_filter_supplied_insufficient_bars_fails_closed_by_default(self):
+        spy_bars = [MagicMock(close=100.0) for _ in range(60)]
+        result = _in_high_volatility_regime(bars_data={"SPY": spy_bars})
+        self.assertTrue(result)
 
     def test_rsi_all_gain_window_returns_100_without_runtime_warning(self):
         closes = pd.Series(range(1, 40), dtype=float)

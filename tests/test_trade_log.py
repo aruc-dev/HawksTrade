@@ -100,6 +100,24 @@ class TradeLogTests(unittest.TestCase):
     def test_locked_trade_log_docstring_describes_generic_csv_lock(self):
         self.assertIn("CSV file path", trade_log.locked_trade_log.__doc__)
 
+    def test_shared_locked_trade_log_reuses_existing_lock_read_write(self):
+        lock_path = trade_log._lock_path(trade_log.TRADE_LOG)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path.write_bytes(b"\0")
+        real_open = open
+        lock_open_modes = []
+
+        def recording_open(path, mode="r", *args, **kwargs):
+            if Path(path) == lock_path:
+                lock_open_modes.append(mode)
+            return real_open(path, mode, *args, **kwargs)
+
+        with mock.patch("builtins.open", recording_open):
+            with trade_log.locked_trade_log(exclusive=False):
+                pass
+
+        self.assertEqual(lock_open_modes, ["r+b"])
+
     def test_read_rows_unlocked_opens_csv_with_newline_empty(self):
         path = Path(self.tmpdir.name) / "rows.csv"
         path.write_text("symbol,status\nAAPL,open\n")
@@ -376,11 +394,13 @@ class TradeLogTests(unittest.TestCase):
         self.assertEqual(rows[1]["entry_price"], "0")
         self.assertEqual(rows[1]["pnl_pct"], "")
 
-    def test_get_trade_age_days_accepts_timezone_aware_timestamp(self):
-        timestamp = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    def test_get_trade_age_days_returns_business_days_for_stocks(self):
+        # Entry Monday 2024-01-08, "today" = Wednesday 2024-01-10 → 2 business days
+        fixed_now = datetime(2024, 1, 10, 12, 0, 0, tzinfo=timezone.utc)
+        entry_ts  = datetime(2024, 1,  8,  9, 0, 0, tzinfo=timezone.utc).isoformat()
 
         trade_log.log_trade({
-            "timestamp": timestamp,
+            "timestamp": entry_ts,
             "mode": "paper",
             "symbol": "AAPL",
             "strategy": "momentum",
@@ -388,14 +408,38 @@ class TradeLogTests(unittest.TestCase):
             "side": "buy",
             "qty": 1,
             "entry_price": 100,
-            "order_id": "aware",
+            "order_id": "bday-test",
             "status": "open",
         })
 
-        age = trade_log.get_trade_age_days("AAPL")
+        with mock.patch("tracking.trade_log._utc_now", return_value=fixed_now):
+            age = trade_log.get_trade_age_days("AAPL")
 
-        self.assertGreater(age, 1.9)
-        self.assertLess(age, 2.1)
+        self.assertEqual(age, 2.0)
+
+    def test_get_trade_age_days_weekends_not_counted_for_stocks(self):
+        # Entry Thursday 2024-01-04, "today" = Monday 2024-01-08 → 2 business days (Thu, Fri)
+        fixed_now = datetime(2024, 1,  8, 12, 0, 0, tzinfo=timezone.utc)
+        entry_ts  = datetime(2024, 1,  4,  9, 0, 0, tzinfo=timezone.utc).isoformat()
+
+        trade_log.log_trade({
+            "timestamp": entry_ts,
+            "mode": "paper",
+            "symbol": "MSFT",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "side": "buy",
+            "qty": 1,
+            "entry_price": 200,
+            "order_id": "weekend-test",
+            "status": "open",
+        })
+
+        with mock.patch("tracking.trade_log._utc_now", return_value=fixed_now):
+            age = trade_log.get_trade_age_days("MSFT")
+
+        # 4 calendar days but only 2 business days (Sat+Sun excluded)
+        self.assertEqual(age, 2.0)
 
     def test_get_trade_age_days_matches_crypto_symbol_variants(self):
         timestamp = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
@@ -441,6 +485,26 @@ class TradeLogTests(unittest.TestCase):
         symbols = {row["symbol"] for row in trade_log.get_open_trades()}
 
         self.assertEqual(symbols, {"PARTIAL", "OPEN"})
+
+    def test_update_high_water_prices_recovers_from_nan_existing_value(self):
+        trade_log.log_trade({
+            "timestamp": "2026-04-17T12:00:00+00:00",
+            "mode": "paper",
+            "symbol": "AAPL",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "side": "buy",
+            "qty": 1,
+            "entry_price": "100",
+            "high_water_price": "NaN",
+            "order_id": "nan-hwp",
+            "status": "open",
+        })
+
+        trade_log.update_high_water_prices({"AAPL": 105})
+
+        rows = trade_log.read_trade_rows()
+        self.assertEqual(float(rows[0]["high_water_price"]), 105.0)
 
     def test_log_trade_preserves_rows_with_concurrent_process_writers(self):
         worker_count = 4

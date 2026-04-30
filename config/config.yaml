@@ -35,7 +35,7 @@ trading:
                                  # Crypto is NOT required to use them; reservation only blocks stocks
                                  # from saturating the portfolio. Set both max and min to 0 to disable crypto.
                                  # Invariant: min_crypto_positions <= max_crypto_positions <= max_positions
-  max_position_pct: 0.05         # Max % of portfolio per position (5%)
+  max_position_pct: 0.08         # Max % of portfolio per position (8%)
   stop_loss_pct: 0.035           # Stop-loss at 3.5% below entry
   take_profit_pct: 0.12          # Take-profit at 12% above entry
   daily_loss_limit_pct: 0.05     # Hard stop from first observed account value for the NY trading date
@@ -114,15 +114,16 @@ strategies:
   momentum:
     enabled: true
     asset_class: stocks          # stocks | crypto | both
-    description: "Adaptive momentum: ATR-adjusted stops, 1% risk sizing, sector-neutral ranking, breadth-tiered regime"
-    top_n: 3                     # Pick top 3 stocks by momentum
+    description: "Adaptive momentum: top-1 high-conviction ranking with ATR-adjusted stops, 1% risk sizing, sector-neutral ranking, breadth coverage guard, breadth-tiered regime, and volume-spike entry (>1.8x 20d avg volume required)"
+    top_n: 1                     # Pick only the strongest stock by momentum
     hold_days: 4                 # Minimum hold before profit-aware exit checks
     exit_policy: "profit_trailing" # fixed_hold | profit_trailing | risk_only_baseline
     profit_floor_pct: 0.0        # After hold_days, exit if P&L is flat/negative
     trail_activation_pct: 0.06   # Enable trailing stop once peak gain reaches 6%
     trailing_stop_pct: 0.04      # Exit if price falls 4% from post-entry peak
     max_hold_days: 20            # Cap stale momentum positions even if still green
-    min_momentum_pct: 0.06       # Minimum 6% 5-day gain to qualify
+    min_momentum_pct: 0.10       # Minimum 10% 5-day gain to qualify
+    min_alpha_pct: 0.0           # Optional excess 5-day return over SPY; 0 disables this stricter gate
     weight: 1.0                  # Signal weight (relative to other strategies)
     # Phase 1: Volatility-adjusted risk management
     atr_period: 14               # ATR lookback for dynamic stop computation
@@ -131,15 +132,16 @@ strategies:
     # Phase 2: Sector-neutral ranking
     max_positions_per_sector: 1  # Max concurrent positions in any single GICS sector
     # Phase 3: Market breadth tiered regime guard
-    breadth_green_threshold: 0.50  # >= 50% above SMA50 → "Green" label (full top_n deployed)
-    breadth_yellow_threshold: 0.40 # >= 40% above SMA50 → full top_n deployed; < 40% → reduced deployment
-    breadth_red_threshold: 0.25    # < 25% above SMA50 → no new entries
-    yellow_max_positions: 3        # Max new positions entered when breadth < yellow_threshold
+    breadth_green_threshold: 0.50  # >= 50% above SMA50 → Green (full top_n deployed)
+    breadth_red_threshold: 0.25    # < 25% above SMA50 → Red (no new entries)
+    min_breadth_coverage_pct: 0.75 # Require valid SMA50 coverage for at least 75% of the scan universe
+    yellow_max_positions: 1        # Max positions in Yellow regime (breadth 25–50%)
+    volume_spike_ratio: 1.8        # Entry bar volume must exceed this multiple of the 20-day average
 
   rsi_reversion:
     enabled: true
     asset_class: stocks
-    description: "Conservative RSI mean reversion. Entry: RSI<30, %B<20%, vol≥1.5×, 1-bar recovery, within 15% of SMA200. Stop: 2×ATR(14) — volatility-adjusted, widens the stop in high-vol capitulation conditions. Exit: price reaches SMA20 OR RSI>50 (edge gone) OR 10-day cap. Regime: skip on severe crash (SPY >20% below 252d peak) or elevated VIX proxy."
+    description: "Conservative RSI mean reversion. Entry: RSI<30, %B<20%, vol≥1.5×, 1-bar recovery, price within 15% below and 15% above SMA200. Stop: 2×ATR(14). Exit: price reaches SMA20 OR RSI>50 OR 10-day cap. Regime: skip on severe crash (SPY >20% below 252d peak) or elevated VIX proxy."
     rsi_period: 14
     oversold_threshold: 30          # Entry: RSI below this level (deeply oversold)
     overbought_threshold: 50        # Exit: RSI above this (momentum neutral = edge evaporated)
@@ -149,6 +151,11 @@ strategies:
     vix_multiplier: 1.2             # HV20 must be below HV_MA × this to allow entries
     atr_period: 14                  # ATR lookback for volatility-adjusted stop
     atr_multiplier: 2.0             # Stop = entry - atr_multiplier × ATR
+    risk_per_trade_pct: 0.01        # Risk 1% of equity per trade for ATR-based sizing
+    sma200_lower_buffer_pct: 0.15   # Entry blocked if price < SMA200 × (1 - this); prevents buying broken stocks
+    sma200_upper_buffer_pct: 0.15   # Entry blocked if price > SMA200 × (1 + this); prevents buying overextended stocks
+    volume_spike_ratio: 1.5         # Entry bar volume must exceed this multiple of the 20-day average
+    profit_floor_pct: 0.015         # Exit via SMA target must exceed entry × (1 + this) to cover slippage
     weight: 1.0
 
   gap_up:
@@ -160,27 +167,124 @@ strategies:
     entry_window_minutes: 45     # Only enter within first 45 min of market open
     intraday_exit: false         # Respect intraday.enabled setting above
     hold_days: 2
+    atr_period: 14
+    atr_multiplier: 2.0
+    risk_per_trade_pct: 0.01
     weight: 0.8
 
   ma_crossover:
     enabled: true
     asset_class: crypto
-    description: "Enter when 20-EMA crosses above 50-EMA, exit on cross below"
+    description: "Enter when 9-EMA crosses above 21-EMA with slope + volatility + RSI filters. Exit on daily close max-loss, bearish cross, RSI target, or 12-day hold cap. Uses 2xATR stop and 1%-risk position sizing."
     fast_ema: 9
     slow_ema: 21
     timeframe: "1Day"            # "1Hour" | "4Hour" | "1Day"
+    entry_cross_lookback_days: 2  # Allow entry if bullish cross happened within this many completed daily transitions
     hold_days: 12
+    max_loss_exit_pct: 0.01      # Strategy-level exit if latest daily close is at least 1% below entry
+    atr_period: 14
+    atr_multiplier: 2.0
+    risk_per_trade_pct: 0.01     # Risk 1% of equity per trade for ATR-based sizing
+    rsi_entry_min: 35            # RSI must be at least this to avoid entering oversold chop
+    rsi_entry_max: 70            # RSI must be below this to avoid buying overbought
+    rsi_exit_max: 75             # Exit if RSI rises above this (overbought target)
+    volume_spike_ratio: 1.2      # Entry bar volume must exceed this multiple of the 20-day average
+    volume_avg_period: 20        # Period for volume average
+    vol_filter_period: 10        # Period for volatility (range) filter average
     weight: 1.0
 
   range_breakout:
-    enabled: true
+    enabled: false
     asset_class: crypto
-    description: "Enter on breakout of prior day high/low with volume confirmation"
-    breakout_pct: 0.008          # Price must break 0.8% beyond prior day high/low
+    description: "Enter long on confirmed daily close breakout above the prior day high with volume, trend, volatility, RSI, and extension guards. Exit failed breakouts early before the 3-day cap."
+    breakout_pct: 0.008          # Close must break 0.8% beyond prior day high
+    max_breakout_extension_pct: 0.08  # Avoid chasing closes >8% beyond the breakout level
     volume_multiplier: 1.8       # Volume must be 1.8x average to confirm breakout
+    volume_avg_period: 20        # Lookback for average volume confirmation
     timeframe: "1Day"
     hold_days: 3
+    atr_period: 14
+    atr_multiplier: 2.0
+    risk_per_trade_pct: 0.01
+    vol_filter_period: 10
+    min_range_ratio: 0.5         # Entry bar range must be at least 50% of recent average range
+    trend_ema_period: 50         # Price must close above this EMA
+    trend_slope_lookback: 5      # Trend EMA must be non-declining across this many bars
+    rsi_period: 14
+    rsi_entry_max: 78            # Avoid buying severely overextended breakout closes
+    rsi_exit_max: 82             # Profit-taking exhaustion exit after profit floor
+    profit_floor_pct: 0.03       # RSI exhaustion exit only after at least 3% open profit
+    breakdown_exit_pct: 0.02     # Exit failed breakout when close falls 2% below entry
+    trend_exit_enabled: true     # Exit when completed close falls below trend EMA
     weight: 0.9
+
+# --- VALIDATION GATES ---
+# Non-trading guardrails used before scaling live capital or enabling disabled alphas.
+# These settings do not change order sizing or live/paper execution behavior.
+validation:
+  cost_model:
+    slippage_bps: 10.0           # Backtest gate assumes 10 bps adverse fill per side
+    fee_bps: 5.0                 # Backtest gate assumes 5 bps fees/commission per side
+    min_fee_usd: 0.0
+
+  production_gate:
+    windows:
+      - name: default_12m_costed
+        days: 365
+        end_date: "04/10/2026"
+        screener: true
+        strategies: [momentum, rsi_reversion, ma_crossover]
+        required: true
+        min_return_pct: 0.04
+        max_drawdown_pct: 0.035
+        min_profit_factor: 1.05
+        min_trades: 40
+      - name: default_6m_costed
+        days: 180
+        end_date: "04/10/2026"
+        screener: true
+        strategies: [momentum, rsi_reversion, ma_crossover]
+        required: true
+        min_return_pct: 0.0
+        max_drawdown_pct: 0.025
+        min_trades: 10
+      - name: crypto_12m_costed
+        days: 365
+        end_date: "04/10/2026"
+        screener: false
+        strategies: [ma_crossover]
+        required: true
+        min_return_pct: 0.03
+        max_drawdown_pct: 0.025
+        min_profit_factor: 1.05
+        min_trades: 20
+      - name: crypto_recent_30d_watch
+        days: 30
+        screener: false
+        strategies: [ma_crossover]
+        required: false
+        min_return_pct: 0.0
+        max_drawdown_pct: 0.015
+        min_trades: 4
+
+  rsi_reversion_enablement:
+    required_paper_days: 60
+    min_closed_trades: 20
+    min_win_rate: 0.48
+    min_profit_factor: 1.15
+    min_total_return_pct: 0.02
+    max_drawdown_pct: 0.04
+    backtest_windows:
+      - name: rsi_reversion_12m_costed
+        days: 365
+        end_date: "04/10/2026"
+        screener: true
+        strategies: [rsi_reversion]
+        required: true
+        min_return_pct: 0.02
+        max_drawdown_pct: 0.04
+        min_profit_factor: 1.10
+        min_trades: 15
 
 # --- SCHEDULING (reference only; OS scheduler templates live in scheduler/) ---
 schedule:

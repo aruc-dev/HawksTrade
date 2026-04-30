@@ -3,7 +3,6 @@ Description=Run HawksTrade risk checks during weekday market hours
 
 [Timer]
 OnCalendar=Mon..Fri *-*-* 13:45:00
-OnCalendar=Mon..Fri *-*-* 14..19:00:00
 OnCalendar=Mon..Fri *-*-* 14..19:15:00
 OnCalendar=Mon..Fri *-*-* 14..19:30:00
 OnCalendar=Mon..Fri *-*-* 14..19:45:00

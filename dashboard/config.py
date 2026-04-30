@@ -16,7 +16,7 @@ from typing import Any, Dict
 
 import yaml
 
-from core.config_loader import get_config_path
+from core.config_loader import get_config, get_config_path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_PATH = get_config_path()
@@ -29,14 +29,18 @@ VALID_AUTH_MODES = {AUTH_MODE_LOCAL, AUTH_MODE_CLOUDFLARE}
 class DashboardConfig:
     """Lazily loaded dashboard configuration."""
 
-    def __init__(self, config_path: Path = CONFIG_PATH) -> None:
+    def __init__(self, config_path: Path | None = None, base_dir: Path = BASE_DIR) -> None:
         self.config_path = config_path
+        self.base_dir = base_dir
         self._cached: Dict[str, Any] | None = None
 
     def _load(self) -> Dict[str, Any]:
         if self._cached is None:
-            with open(self.config_path) as f:
-                self._cached = yaml.safe_load(f) or {}
+            if self.config_path is None:
+                self._cached = get_config(self.base_dir)
+            else:
+                with open(self.config_path) as f:
+                    self._cached = yaml.safe_load(f) or {}
         return self._cached
 
     @property
@@ -66,24 +70,24 @@ class DashboardConfig:
     @property
     def trade_log_path(self) -> Path:
         rel = self._load().get("reporting", {}).get("trade_log_file", "data/trades.csv")
-        return BASE_DIR / rel
+        return self.base_dir / rel
 
     @property
     def daily_baseline_path(self) -> Path:
-        return BASE_DIR / "data" / "daily_loss_baseline.json"
+        return self.base_dir / "data" / "daily_loss_baseline.json"
 
     @property
     def logs_dir(self) -> Path:
         rel = self._load().get("reporting", {}).get("logs_dir", "logs/")
-        return BASE_DIR / rel
+        return self.base_dir / rel
 
     @property
     def health_snapshot_dir(self) -> Path:
-        return BASE_DIR / "reports" / "health_snapshots"
+        return self.base_dir / "reports" / "health_snapshots"
 
     @property
     def check_systemd_script(self) -> Path:
-        return BASE_DIR / "scripts" / "check_systemd.sh"
+        return self.base_dir / "scripts" / "check_systemd.sh"
 
 
 def get_auth_mode() -> str:

@@ -7,23 +7,252 @@ Tests for v6 improvements:
 
 import unittest
 import contextlib
+import tempfile
 import pandas as pd
 from datetime import datetime, timezone
+from pathlib import Path
+from unittest.mock import patch
 
 import sys
-from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scheduler.run_backtest import (
     BacktestSimulator,
     EXTENDED_POOL,
+    REGIME_HISTORY_LIMITS,
     _apply_override,
+    _backtest_trading_session_date,
+    _backtest_scan_universe,
+    _build_regime_bars,
+    _compute_daily_sharpe,
     _compute_max_drawdown,
+    _compute_profit_factor,
     _compute_quarterly_performance,
     _patch_runtime_risk_config,
+    _run_backtest_hold_exits,
+    _run_backtest_strategy_exits,
+    _stock_market_open_for_backtest,
 )
 from core import risk_manager as rm
 from core.exit_policy import should_exit_for_hold
+
+
+def _price_frame(periods: int) -> pd.DataFrame:
+    index = pd.date_range("2025-01-01", periods=periods, freq="D", tz=timezone.utc)
+    return pd.DataFrame(
+        {
+            "open": range(periods),
+            "high": range(periods),
+            "low": range(periods),
+            "close": range(periods),
+            "volume": [1000] * periods,
+        },
+        index=index,
+    )
+
+
+class TestBacktestRegimeHistory(unittest.TestCase):
+    def test_regime_bars_use_full_filter_windows(self):
+        historical_data = {
+            "SPY": _price_frame(300),
+            "QQQ": _price_frame(100),
+            "BTC/USD": _price_frame(80),
+        }
+        current_date = historical_data["SPY"].index[-1]
+
+        regime_bars = _build_regime_bars(historical_data, current_date)
+
+        self.assertEqual(len(regime_bars["SPY"]), REGIME_HISTORY_LIMITS["SPY"])
+        self.assertEqual(len(regime_bars["QQQ"]), REGIME_HISTORY_LIMITS["QQQ"])
+        self.assertEqual(len(regime_bars["BTC/USD"]), REGIME_HISTORY_LIMITS["BTC/USD"])
+
+
+class TestBacktestLiveFidelity(unittest.TestCase):
+    def test_backtest_session_date_uses_simulated_current_date(self):
+        sim = BacktestSimulator(initial_fund=10000.0)
+        sim.current_date = datetime(2026, 3, 30, 15, 0, tzinfo=timezone.utc)
+
+        self.assertEqual(_backtest_trading_session_date(sim).isoformat(), "2026-03-30")
+
+    def test_daily_loss_baseline_resets_on_simulated_session_date(self):
+        sim = BacktestSimulator(initial_fund=10000.0)
+        original_start = rm._session_start_value
+        original_date = rm._session_date
+        with tempfile.TemporaryDirectory() as tmpdir:
+            values = iter([100000.0, 100000.0, 94000.0, 94000.0, 94000.0])
+            with (
+                patch("core.risk_manager.DAILY_BASELINE_FILE", Path(tmpdir) / "daily_loss_baseline.json"),
+                patch("core.risk_manager.ac.get_portfolio_value", side_effect=lambda: next(values)),
+                patch("core.risk_manager._current_trading_session_date", side_effect=lambda now=None: _backtest_trading_session_date(sim)),
+                patch("core.risk_manager._session_start_value", None),
+                patch("core.risk_manager._session_date", None),
+            ):
+                sim.current_date = datetime(2026, 3, 30, 15, 0, tzinfo=timezone.utc)
+                self.assertFalse(rm.daily_loss_exceeded())
+                self.assertTrue(rm.daily_loss_exceeded())
+
+                sim.current_date = datetime(2026, 3, 31, 15, 0, tzinfo=timezone.utc)
+                self.assertFalse(rm.daily_loss_exceeded())
+
+        self.assertEqual(rm._session_start_value, original_start)
+        self.assertEqual(rm._session_date, original_date)
+
+    def test_stock_market_open_for_backtest_skips_weekends(self):
+        self.assertTrue(_stock_market_open_for_backtest(datetime(2026, 4, 24, tzinfo=timezone.utc)))
+        self.assertFalse(_stock_market_open_for_backtest(datetime(2026, 4, 25, tzinfo=timezone.utc)))
+        self.assertFalse(_stock_market_open_for_backtest(datetime(2026, 4, 26, tzinfo=timezone.utc)))
+
+    def test_stock_market_open_for_backtest_skips_exchange_holidays(self):
+        self.assertFalse(_stock_market_open_for_backtest(datetime(2026, 4, 3, tzinfo=timezone.utc)))
+        self.assertFalse(_stock_market_open_for_backtest(datetime(2026, 7, 3, tzinfo=timezone.utc)))
+        self.assertTrue(_stock_market_open_for_backtest(datetime(2026, 7, 6, tzinfo=timezone.utc)))
+
+    def test_stock_market_open_for_backtest_skips_next_year_observed_new_years(self):
+        self.assertFalse(_stock_market_open_for_backtest(datetime(2021, 12, 31, tzinfo=timezone.utc)))
+        self.assertTrue(_stock_market_open_for_backtest(datetime(2021, 12, 30, tzinfo=timezone.utc)))
+
+    def test_stock_scan_universe_is_none_on_weekends_but_crypto_continues(self):
+        class FakeStock:
+            asset_class = "stocks"
+
+        class FakeCrypto:
+            asset_class = "crypto"
+
+        cfg = {
+            "stocks": {"scan_universe": ["AAPL"]},
+            "crypto": {"scan_universe": ["BTC/USD"]},
+        }
+
+        stock_universe = _backtest_scan_universe(
+            FakeStock(),
+            cfg,
+            screener=None,
+            screener_enabled=False,
+            current_date=datetime(2026, 4, 25, tzinfo=timezone.utc),
+            market_open=False,
+        )
+        crypto_universe = _backtest_scan_universe(
+            FakeCrypto(),
+            cfg,
+            screener=None,
+            screener_enabled=False,
+            current_date=datetime(2026, 4, 25, tzinfo=timezone.utc),
+            market_open=False,
+        )
+
+        self.assertIsNone(stock_universe)
+        self.assertEqual(crypto_universe, ["BTC/USD"])
+
+    def test_strategy_exit_runs_for_matching_open_position(self):
+        class FakeMACross:
+            name = "ma_crossover"
+            asset_class = "crypto"
+
+            def should_exit(self, symbol, entry_price):
+                return True, f"exit {symbol} {entry_price}"
+
+        sim = BacktestSimulator(initial_fund=10000.0)
+        sim.current_date = datetime(2026, 4, 25, tzinfo=timezone.utc)
+        sim.positions = {
+            "BTC/USD": {
+                "qty": 1,
+                "entry_price": 100.0,
+                "entry_date": sim.current_date,
+                "asset_class": "crypto",
+                "strategy": "ma_crossover",
+            },
+        }
+
+        with patch("scheduler.run_backtest.oe.exit_position") as exit_position:
+            _run_backtest_strategy_exits([FakeMACross()], sim, market_open=False)
+
+        exit_position.assert_called_once_with(
+            "BTC/USD",
+            "exit BTC/USD 100.0",
+            "crypto",
+            open_trades_callback=sim.get_open_trades_for_backtest,
+        )
+
+    def test_stock_strategy_exit_runs_when_market_open(self):
+        class FakeRSIReversion:
+            name = "rsi_reversion"
+            asset_class = "stocks"
+
+            def should_exit(self, symbol, entry_price):
+                return True, f"rsi target {symbol} {entry_price}"
+
+        sim = BacktestSimulator(initial_fund=10000.0)
+        sim.current_date = datetime(2026, 4, 24, tzinfo=timezone.utc)
+        sim.positions = {
+            "AAPL": {
+                "qty": 1,
+                "entry_price": 100.0,
+                "entry_date": sim.current_date,
+                "asset_class": "stock",
+                "strategy": "rsi_reversion",
+            },
+        }
+
+        with patch("scheduler.run_backtest.oe.exit_position") as exit_position:
+            _run_backtest_strategy_exits([FakeRSIReversion()], sim, market_open=True)
+
+        exit_position.assert_called_once_with(
+            "AAPL",
+            "rsi target AAPL 100.0",
+            "stock",
+            open_trades_callback=sim.get_open_trades_for_backtest,
+        )
+
+    def test_strategy_exit_skips_same_day_entries_when_intraday_disabled(self):
+        class FakeMomentum:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def should_exit(self, symbol, entry_price):
+                return True, "same-day exit"
+
+        sim = BacktestSimulator(initial_fund=10000.0)
+        sim.current_date = datetime(2026, 4, 24, tzinfo=timezone.utc)
+        sim.positions = {
+            "AAPL": {
+                "qty": 1,
+                "entry_price": 100.0,
+                "entry_date": sim.current_date,
+                "asset_class": "stock",
+                "strategy": "momentum",
+            },
+        }
+
+        with patch("scheduler.run_backtest.oe.exit_position") as exit_position:
+            _run_backtest_strategy_exits(
+                [FakeMomentum()],
+                sim,
+                market_open=True,
+                skip_symbols={"AAPL"},
+            )
+
+        exit_position.assert_not_called()
+
+    def test_stock_hold_exits_are_skipped_when_market_closed(self):
+        sim = BacktestSimulator(initial_fund=10000.0)
+        sim.current_date = datetime(2026, 4, 25, tzinfo=timezone.utc)
+        sim.historical_data = {"AAPL": _price_frame(10)}
+        sim.positions = {
+            "AAPL": {
+                "qty": 1,
+                "entry_price": 100.0,
+                "entry_date": datetime(2026, 4, 20, tzinfo=timezone.utc),
+                "asset_class": "stock",
+                "strategy": "momentum",
+                "high_water_price": 100.0,
+            },
+        }
+        cfg = {"strategies": {"momentum": {"hold_days": 1, "exit_policy": "fixed_hold"}}}
+
+        with patch("scheduler.run_backtest.oe.exit_position") as exit_position:
+            _run_backtest_hold_exits(sim, cfg, market_open=False)
+
+        exit_position.assert_not_called()
 
 
 class TestHoldDayExitFix(unittest.TestCase):
@@ -317,6 +546,64 @@ class TestBacktestExperimentControls(unittest.TestCase):
         ])
 
         self.assertAlmostEqual(_compute_max_drawdown(df_curve), -0.25)
+
+    def test_compute_profit_factor(self):
+        trades = pd.DataFrame([
+            {"pnl": 20.0},
+            {"pnl": -5.0},
+            {"pnl": -5.0},
+        ])
+
+        self.assertAlmostEqual(_compute_profit_factor(trades), 2.0)
+
+    def test_compute_daily_sharpe_returns_zero_for_flat_curve(self):
+        curve = pd.DataFrame([
+            {"value": 100.0},
+            {"value": 100.0},
+            {"value": 100.0},
+        ])
+
+        self.assertEqual(_compute_daily_sharpe(curve), 0.0)
+
+    def test_backtest_cost_model_applies_slippage_and_fees(self):
+        sim = BacktestSimulator(
+            initial_fund=1000.0,
+            cost_model={"slippage_bps": 100.0, "fee_bps": 10.0},
+        )
+        sim.historical_data = {
+            "AAPL": pd.DataFrame(
+                {
+                    "open": [100.0, 110.0],
+                    "high": [100.0, 110.0],
+                    "low": [100.0, 110.0],
+                    "close": [100.0, 110.0],
+                    "volume": [1000, 1000],
+                },
+                index=pd.date_range("2026-01-01", periods=2, freq="D", tz=timezone.utc),
+            )
+        }
+
+        class Side:
+            def __init__(self, value):
+                self.value = value
+
+        class Req:
+            def __init__(self, side):
+                self.symbol = "AAPL"
+                self.side = Side(side)
+                self.qty = 1
+                self.strategy = "test"
+
+        sim.current_date = sim.historical_data["AAPL"].index[0]
+        sim.submit_order(Req("buy"))
+        self.assertAlmostEqual(sim.positions["AAPL"]["entry_price"], 101.0)
+        self.assertAlmostEqual(sim.positions["AAPL"]["entry_fee"], 0.101)
+
+        sim.current_date = sim.historical_data["AAPL"].index[1]
+        sim.submit_order(Req("sell"))
+
+        self.assertAlmostEqual(sim.trades_log[0]["exit_price"], 108.9)
+        self.assertAlmostEqual(sim.trades_log[0]["pnl"], 7.6901, places=4)
 
 
 class TestExtendedPool(unittest.TestCase):

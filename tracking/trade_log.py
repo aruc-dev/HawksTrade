@@ -10,8 +10,9 @@ from __future__ import annotations
 import csv
 import contextlib
 import logging
+import math
 from decimal import Decimal, InvalidOperation
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, Iterator
 
@@ -183,7 +184,7 @@ def _apply_close_to_matching_buy_rows(
 COLUMNS = [
     "timestamp", "mode", "symbol", "strategy", "asset_class",
     "side", "qty", "entry_price", "exit_price", "stop_loss",
-    "take_profit", "pnl_pct", "exit_reason", "order_id", "status",
+    "take_profit", "high_water_price", "pnl_pct", "exit_reason", "order_id", "status",
 ]
 
 
@@ -224,7 +225,10 @@ def locked_trade_log(path: Path | None = None, *, exclusive: bool = True) -> Ite
     trade_log_path = Path(path or TRADE_LOG)
     trade_log_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = _lock_path(trade_log_path)
-    with open(lock_path, "a+b") as lock_file:
+    lock_mode = "a+b"
+    if not exclusive and lock_path.exists():
+        lock_mode = "r+b"
+    with open(lock_path, lock_mode) as lock_file:
         _lock_file(lock_file, exclusive=exclusive)
         try:
             yield trade_log_path
@@ -275,8 +279,16 @@ def get_open_trades() -> list:
 
 
 def get_closed_trades() -> list:
-    """Return all closed trades from the trade log CSV."""
-    return [row for row in read_trade_rows() if row.get("status") == "closed"]
+    """Return exit-side (sell) closed trade rows from the trade log CSV.
+
+    Only sell rows are returned so callers like kelly_position_size() see
+    one row per completed round-trip — not two (the buy row is also marked
+    closed by mark_trade_closed, which would otherwise double the sample).
+    """
+    return [
+        row for row in read_trade_rows()
+        if row.get("status") == "closed" and row.get("side") == "sell"
+    ]
 
 
 def mark_trade_closed(
@@ -533,8 +545,83 @@ def reconcile_open_trades_with_positions(
     return summary
 
 
+def update_high_water_prices(symbol_prices: dict) -> None:
+    """
+    Batch-update high_water_price for open buy rows to the running maximum.
+
+    Called from run_risk_check after each price-poll cycle. A single file
+    rewrite handles all positions so the call is O(1) rewrites regardless of
+    how many positions are open.
+
+    Rows that have never had high_water_price set (positions opened before
+    this column was added) are initialised to the entry_price on first call.
+    """
+    if not symbol_prices:
+        return
+    with locked_trade_log(exclusive=True) as trade_log_path:
+        rows = _read_rows_unlocked(trade_log_path)
+        changed = False
+        for row in rows:
+            if row.get("side") != "buy" or row.get("status") not in ACTIVE_ENTRY_STATUSES:
+                continue
+            symbol = row.get("symbol", "")
+            price: float | None = None
+            for sym, p in symbol_prices.items():
+                if _symbols_match(sym, symbol):
+                    try:
+                        price = float(p)
+                    except (ValueError, TypeError):
+                        price = None
+                    break
+            if price is None or not math.isfinite(price) or price <= 0:
+                continue
+            raw = row.get("high_water_price", "")
+            try:
+                current_hwp = float(raw) if raw and raw != "" else None
+            except (ValueError, TypeError):
+                current_hwp = None
+            if current_hwp is not None and not math.isfinite(current_hwp):
+                current_hwp = None
+            if current_hwp is None:
+                # Initialise from entry_price for backward-compat rows
+                try:
+                    current_hwp = float(row.get("entry_price", 0) or 0)
+                except (ValueError, TypeError):
+                    current_hwp = 0.0
+                if not math.isfinite(current_hwp):
+                    current_hwp = 0.0
+            new_hwp = max(current_hwp, price)
+            if new_hwp != current_hwp:
+                row["high_water_price"] = round(new_hwp, 4)
+                changed = True
+        if changed:
+            with open(trade_log_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=COLUMNS)
+                writer.writeheader()
+                writer.writerows(rows)
+
+
+def _business_days_between(start: date, end: date) -> int:
+    """Count Mon–Fri business days in [start, end). Same semantics as np.busday_count."""
+    if end <= start:
+        return 0
+    total = (end - start).days
+    full_weeks, remainder = divmod(total, 7)
+    days = full_weeks * 5
+    start_dow = start.weekday()  # 0=Monday … 6=Sunday
+    for i in range(remainder):
+        if (start_dow + i) % 7 < 5:
+            days += 1
+    return days
+
+
 def get_trade_age_days(symbol: str) -> float:
-    """Return how many calendar days ago the most recent open trade was entered."""
+    """Return trade age for the most recent open position.
+
+    Stocks use business days (Mon–Fri) to match the backtest simulator, so a
+    Thursday entry that spans a weekend reaches ``hold_days=4`` on Wednesday,
+    not Monday.  Crypto positions use calendar days (24/7 market).
+    """
     entries = [
         row for row in get_open_trades()
         if _symbols_match(row.get("symbol", ""), symbol) and row.get("side") == "buy"
@@ -543,5 +630,15 @@ def get_trade_age_days(symbol: str) -> float:
         return 0.0
     latest = sorted(entries, key=lambda x: x["timestamp"])[-1]
     entry_dt = _as_utc(datetime.fromisoformat(latest["timestamp"]))
-    delta    = _utc_now() - entry_dt
-    return delta.total_seconds() / 86400
+
+    asset_class = latest.get("asset_class", "stock")
+    is_crypto = "crypto" in str(asset_class).lower()
+
+    if is_crypto:
+        delta = _utc_now() - entry_dt
+        return max(delta.total_seconds() / 86400, 0.0)
+
+    # Business days for stocks — matches np.busday_count(entry_date, today)
+    entry_date = entry_dt.date()
+    today = _utc_now().date()
+    return float(max(_business_days_between(entry_date, today), 0))

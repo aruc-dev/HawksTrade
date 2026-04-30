@@ -17,9 +17,9 @@ from typing import Iterable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import alpaca_client as ac
-from tracking.order_intents import reconcile_order_intents
-from tracking.trade_log import reconcile_open_trades_with_positions
+from core import alpaca_client as ac  # noqa: E402
+from tracking.order_intents import reconcile_order_intents  # noqa: E402
+from tracking.trade_log import reconcile_open_trades_with_positions  # noqa: E402
 
 
 log = logging.getLogger("reconcile_trade_log")

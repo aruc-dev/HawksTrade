@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import os
 import logging
+import math
 import time
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from alpaca.trading.client import TradingClient
@@ -278,6 +280,7 @@ def place_market_order(
     side: str,
     time_in_force: str = "day",
     strategy: str = "unknown",
+    asset_class: Optional[str] = None,
     client_order_id: Optional[str] = None,
 ):
     """Place a market order. side = 'buy' or 'sell'."""
@@ -289,7 +292,11 @@ def place_market_order(
         symbol=symbol,
         qty=qty,
         side=OrderSide.BUY if side == "buy" else OrderSide.SELL,
-        time_in_force=TimeInForce.DAY if time_in_force == "day" else TimeInForce.GTC,
+        time_in_force=normalize_market_time_in_force(
+            symbol,
+            time_in_force,
+            asset_class=asset_class,
+        ),
         client_order_id=client_order_id,
     )
     # Attach strategy for backtest mock visibility (bypass Pydantic strictness)
@@ -431,6 +438,22 @@ def normalize_time_in_force(
     return requested
 
 
+def normalize_market_time_in_force(
+    symbol: str,
+    time_in_force: str,
+    asset_class: Optional[str] = None,
+) -> TimeInForce:
+    """Return an Alpaca-compatible market-order time-in-force."""
+    time_in_force = (time_in_force or "day").lower()
+    asset_class = (asset_class or "").lower()
+    is_crypto = asset_class == "crypto" or "/" in symbol
+    if is_crypto:
+        if time_in_force == "ioc":
+            return TimeInForce.IOC
+        return TimeInForce.GTC
+    return TimeInForce.GTC if time_in_force == "gtc" else TimeInForce.DAY
+
+
 def _is_fractional_stock_order(symbol: str, qty: float, asset_class: Optional[str] = None) -> bool:
     asset_class = (asset_class or "").lower()
     is_crypto = asset_class == "crypto" or "/" in symbol
@@ -482,6 +505,19 @@ def _symbol_lookup_variants(symbol: str) -> list:
     return variants
 
 
+MAX_BARS_PER_DATA_REQUEST = 10000
+
+
+def _normalise_bar_limit(limit: int) -> int:
+    try:
+        normalised = int(limit)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("bar limit must be a positive integer") from exc
+    if normalised <= 0:
+        raise ValueError("bar limit must be a positive integer")
+    return normalised
+
+
 def _lookback_delta(timeframe: str, limit: int, market: str) -> timedelta:
     """Return enough calendar lookback for strategies to receive recent bars."""
     multiplier = 3 if market == "stock" else 2
@@ -498,10 +534,98 @@ def _lookback_delta(timeframe: str, limit: int, market: str) -> timedelta:
     return timedelta(days=max(limit * multiplier, 30))
 
 
+def _timeframe_seconds(timeframe: str) -> int:
+    if timeframe == "1Min":
+        return 60
+    if timeframe == "5Min":
+        return 5 * 60
+    if timeframe == "15Min":
+        return 15 * 60
+    if timeframe == "1Hour":
+        return 60 * 60
+    if timeframe == "4Hour":
+        return 4 * 60 * 60
+    return 24 * 60 * 60
+
+
+def _estimated_bars_per_symbol(timeframe: str, limit: int, market: str) -> int:
+    lookback = _lookback_delta(timeframe, limit, market=market)
+    return max(1, math.ceil(lookback.total_seconds() / _timeframe_seconds(timeframe)))
+
+
+def _bar_request_chunk_size(timeframe: str, limit: int, market: str) -> int:
+    bars_per_symbol = _estimated_bars_per_symbol(timeframe, limit, market=market)
+    return max(1, MAX_BARS_PER_DATA_REQUEST // bars_per_symbol)
+
+
+def _bar_request_limit(timeframe: str, limit: int, market: str, batch_size: int) -> int:
+    bars_per_symbol = _estimated_bars_per_symbol(timeframe, limit, market=market)
+    return min(MAX_BARS_PER_DATA_REQUEST, max(1, bars_per_symbol * batch_size))
+
+
+def _bar_timestamp(bar):
+    if hasattr(bar, "timestamp"):
+        return getattr(bar, "timestamp")
+    if isinstance(bar, dict):
+        return bar.get("timestamp")
+    return None
+
+
+def _parse_bar_timestamp(value):
+    if isinstance(value, datetime):
+        ts = value
+    elif isinstance(value, str):
+        raw = value.replace("Z", "+00:00")
+        try:
+            ts = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+    else:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts
+
+
+def _completed_daily_bars(bars, market: str, now: datetime | None = None):
+    if not bars:
+        return bars
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    tz = ZoneInfo("America/New_York") if market == "stock" else timezone.utc
+    current_session_date = now.astimezone(tz).date()
+    completed = []
+    for bar in bars:
+        ts = _parse_bar_timestamp(_bar_timestamp(bar))
+        if ts is not None and ts.astimezone(tz).date() >= current_session_date:
+            continue
+        completed.append(bar)
+    return completed
+
+
+def _filter_completed_daily_bars(bars_by_symbol: dict, timeframe: str, market: str):
+    if timeframe != "1Day":
+        return bars_by_symbol
+    return {
+        symbol: _completed_daily_bars(bars, market=market)
+        for symbol, bars in bars_by_symbol.items()
+    }
+
+
 # ── Market Data: Stocks ──────────────────────────────────────────────────────
 
 def get_stock_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
-    """Fetch OHLCV bars for a list of stock symbols. Always split-adjusted."""
+    """
+    Fetch OHLCV bars for a list of stock symbols. Always split-adjusted.
+    Returns a plain dict: { symbol: [Bar, Bar, ...] }.
+    Chunks large requests to avoid Alpaca's 10,000-bar-per-call limit.
+    """
+    if not symbols:
+        return {}
+    limit = _normalise_bar_limit(limit)
+
     tf_map = {
         "1Min": TimeFrame(1, TimeFrameUnit.Minute),
         "5Min": TimeFrame(5, TimeFrameUnit.Minute),
@@ -510,26 +634,40 @@ def get_stock_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
         "1Day": TimeFrame.Day,
     }
     tf = tf_map.get(timeframe, TimeFrame.Day)
+
+    chunk_size = _bar_request_chunk_size(timeframe, limit, market="stock")
+
+    all_bars = {}
+    feed = DataFeed.SIP if MODE == "live" else DataFeed.IEX
     end = datetime.now(timezone.utc)
     start = end - _lookback_delta(timeframe, limit, market="stock")
-    request_limit = limit * max(len(symbols), 1)
-    
-    # Use SIP feed for live, IEX for paper (default)
-    feed = DataFeed.SIP if MODE == "live" else DataFeed.IEX
-    
-    req = StockBarsRequest(
-        symbol_or_symbols=symbols,
-        timeframe=tf,
-        start=start,
-        end=end,
-        feed=feed,
-        adjustment=Adjustment.ALL,
-        limit=request_limit,
-    )
-    return call_alpaca(
-        f"stock_data.get_stock_bars[{len(symbols)}:{timeframe}]",
-        lambda: get_stock_data_client().get_stock_bars(req),
-    )
+
+    for i in range(0, len(symbols), chunk_size):
+        batch = symbols[i: i + chunk_size]
+        request_limit = _bar_request_limit(timeframe, limit, market="stock", batch_size=len(batch))
+
+        req = StockBarsRequest(
+            symbol_or_symbols=batch,
+            timeframe=tf,
+            start=start,
+            end=end,
+            feed=feed,
+            adjustment=Adjustment.ALL,
+            limit=request_limit,
+        )
+        
+        batch_res = call_alpaca(
+            f"stock_data.get_stock_bars[{len(batch)}:{timeframe}]",
+            lambda: get_stock_data_client().get_stock_bars(req),
+        )
+        
+        # Merge BarSet.data (dict) into our master result
+        if hasattr(batch_res, "data"):
+            all_bars.update(batch_res.data)
+        elif isinstance(batch_res, dict):
+            all_bars.update(batch_res)
+
+    return _filter_completed_daily_bars(all_bars, timeframe=timeframe, market="stock")
 
 
 def get_stock_latest_quote(symbol: str):
@@ -577,7 +715,15 @@ def get_stock_latest_price(symbol: str) -> float:
 # ── Market Data: Crypto ──────────────────────────────────────────────────────
 
 def get_crypto_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
-    """Fetch OHLCV bars for a list of crypto pairs (e.g. ['BTC/USD'])."""
+    """
+    Fetch OHLCV bars for a list of crypto pairs (e.g. ['BTC/USD']).
+    Returns a plain dict: { symbol: [Bar, Bar, ...] }.
+    Chunks requests to avoid Alpaca limits.
+    """
+    if not symbols:
+        return {}
+    limit = _normalise_bar_limit(limit)
+
     request_symbols = [to_crypto_pair_symbol(symbol) for symbol in symbols]
     tf_map = {
         "1Min": TimeFrame(1, TimeFrameUnit.Minute),
@@ -588,20 +734,35 @@ def get_crypto_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
         "1Day": TimeFrame.Day,
     }
     tf = tf_map.get(timeframe, TimeFrame.Day)
+
+    chunk_size = _bar_request_chunk_size(timeframe, limit, market="crypto")
+
+    all_bars = {}
     end = datetime.now(timezone.utc)
     start = end - _lookback_delta(timeframe, limit, market="crypto")
-    request_limit = limit * max(len(request_symbols), 1)
-    req = CryptoBarsRequest(
-        symbol_or_symbols=request_symbols,
-        timeframe=tf,
-        start=start,
-        end=end,
-        limit=request_limit,
-    )
-    return call_alpaca(
-        f"crypto_data.get_crypto_bars[{len(request_symbols)}:{timeframe}]",
-        lambda: get_crypto_data_client().get_crypto_bars(req),
-    )
+
+    for i in range(0, len(request_symbols), chunk_size):
+        batch = request_symbols[i: i + chunk_size]
+        request_limit = _bar_request_limit(timeframe, limit, market="crypto", batch_size=len(batch))
+
+        req = CryptoBarsRequest(
+            symbol_or_symbols=batch,
+            timeframe=tf,
+            start=start,
+            end=end,
+            limit=request_limit,
+        )
+        batch_res = call_alpaca(
+            f"crypto_data.get_crypto_bars[{len(batch)}:{timeframe}]",
+            lambda: get_crypto_data_client().get_crypto_bars(req),
+        )
+        
+        if hasattr(batch_res, "data"):
+            all_bars.update(batch_res.data)
+        elif isinstance(batch_res, dict):
+            all_bars.update(batch_res)
+            
+    return _filter_completed_daily_bars(all_bars, timeframe=timeframe, market="crypto")
 
 
 def get_crypto_latest_price(symbol: str) -> float:

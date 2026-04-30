@@ -12,14 +12,19 @@ re-reading the source.
 
 ---
 
-## 1. Current state of the book
+## 1. Historical state of the book
 
-**Active strategies**
+Note: this section records the pre-April 30, 2026 baseline used when the
+proposal was written. The current committed default enables `rsi_reversion` and
+disables `range_breakout`; see `config/config.yaml` and `strategies/strategy.md`
+for the live strategy state.
+
+**Active strategies at proposal time**
 - `momentum` (stocks) — top-N by 5-day return, `profit_trailing` exit
 - `ma_crossover` (crypto) — EMA 9/21 with slope + volatility + RSI(35–70) filter
 - `range_breakout` (crypto) — prior-day high + 1.8× volume + EMA50 + vol filter
 
-**Disabled strategies**
+**Disabled strategies at proposal time**
 - `rsi_reversion` (stocks) — over-filtered, rarely fires
 - `gap_up` (stocks) — needs tick-level fills the 30-min scheduler can't deliver
 

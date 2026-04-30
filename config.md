@@ -1,8 +1,8 @@
 # HawksTrade Configuration Guide
 
-> **Updated:** April 14, 2026
+> **Updated:** April 30, 2026
 > **Primary config file:** `config/config.yaml`
-> **Local config:** `config/config.local.yaml` — if present, used **in full** in place of `config/config.yaml`. Must contain the complete configuration. Gitignored; use for per-machine settings without modifying the committed file.
+> **Local config:** `config/config.local.yaml` — if present, deep-merged over `config/config.yaml`. Include only the keys you want to override. Gitignored; use for per-machine settings without modifying the committed file.
 > **Recommended profile:** growth-oriented paper trading profile validated by the latest 12-month backtest.
 
 This guide explains the available user-facing configuration sections and the currently recommended defaults. Do not switch `mode` to `live` or change risk parameters unless you explicitly intend to accept the added trading risk.
@@ -18,20 +18,20 @@ The latest validated default configuration is:
 | Trading mode | `mode: paper` | Paper trading should remain the default until live trading is explicitly approved. |
 | Intraday trading | `intraday.enabled: false` | The system is validated as a swing-trading bot. |
 | Screener | `screener.enabled: true` | The tightened screener improved 12-month return versus the old screener and recent fixed-universe test. |
-| Momentum | enabled, `top_n: 3`, `min_momentum_pct: 0.06` | Reduced lower-quality momentum churn and improved the validated return/win-rate profile. |
-| RSI Reversion | disabled | Did not improve the recommended 12-month configuration. |
+| Momentum | enabled, `top_n: 1`, `min_momentum_pct: 0.10`, `volume_spike_ratio: 1.8`, `min_breadth_coverage_pct: 0.75` | Focuses stock exposure on the single strongest high-volume momentum candidate and blocks entries when breadth data coverage is too thin. |
+| RSI Reversion | enabled | Active mean-reversion stock sleeve with crash and realised-volatility guards. The full profile passes production gates, but RSI itself had two losing 12-month trades, so monitor with the RSI validation profile before scaling allocation. |
 | Gap-Up | disabled | Did not improve the recommended 12-month configuration. |
-| MA Crossover | enabled | Positive crypto contribution in the latest 12-month backtest. |
-| Range Breakout | enabled | Positive crypto contribution in the latest recommended 12-month backtest. |
+| MA Crossover | enabled, `max_loss_exit_pct: 0.01` | Positive crypto contribution in the latest 12-month backtest with a tighter daily-close loss exit to preserve capital. |
+| Range Breakout | disabled | Implementation remains available, but the active crypto sleeve now uses MA Crossover only. |
 | Momentum exit policy | `profit_trailing` | Exits flat/losing trades after the minimum hold while allowing winners to run under trailing protection. |
 
 Latest recommended 12-month result:
 
 | Final Value | Return | Trades | Win Rate | Max Drawdown |
 |---:|---:|---:|---:|---:|
-| $11,900.35 | +19.00% | 274 | 34.7% | -6.13% |
+| $11,211.57 | +12.12% | 56 | 42.9% | -2.09% |
 
-These results enforce `trading.max_position_pct: 0.05` for all entries, including momentum/Kelly sizing. Earlier higher-return documentation reflected the older sizing behavior before that risk-cap fix.
+These results enforce `trading.max_position_pct: 0.08` for all entries, including momentum/Kelly sizing, with RSI Reversion enabled and Range Breakout disabled. The latest approved risk increase moves the max-position cap from 7% to 8%; stop-loss, take-profit, daily-loss halt, and mode remain unchanged.
 
 See [backtests.md](backtests.md) for the full comparison.
 
@@ -82,7 +82,7 @@ This bot is validated as a swing-trading system. Enabling intraday changes behav
 ```yaml
 trading:
   max_positions: 10
-  max_position_pct: 0.05
+  max_position_pct: 0.08
   stop_loss_pct: 0.035
   take_profit_pct: 0.12
   daily_loss_limit_pct: 0.05
@@ -94,7 +94,7 @@ trading:
 | Setting | Meaning | Current Default |
 |---|---|---:|
 | `max_positions` | Max concurrent open positions | 10 |
-| `max_position_pct` | Max portfolio allocation per trade | 5% |
+| `max_position_pct` | Max portfolio allocation per trade | 8% |
 | `stop_loss_pct` | Per-position stop-loss from entry | 3.5% |
 | `take_profit_pct` | Per-position take-profit from entry | 12% |
 | `daily_loss_limit_pct` | Daily account-level loss halt | 5% |
@@ -212,34 +212,41 @@ These pairs are used by the crypto strategies. Crypto scans can run 24/7.
 momentum:
   enabled: true
   asset_class: stocks
-  top_n: 3
+  top_n: 1
   hold_days: 4
   exit_policy: "profit_trailing"
   profit_floor_pct: 0.0
   trail_activation_pct: 0.06
   trailing_stop_pct: 0.04
   max_hold_days: 20
-  min_momentum_pct: 0.06
+  min_momentum_pct: 0.10
+  min_alpha_pct: 0.0
+  min_breadth_coverage_pct: 0.75
+  volume_spike_ratio: 1.8
 ```
 
 Recommended: enabled.
 
-Momentum is the primary stock contributor. The stricter `top_n: 3` and `min_momentum_pct: 0.06` settings reduced churn and improved the validated default profile.
+Momentum is the primary stock contributor. The stricter `top_n: 1`, `min_momentum_pct: 0.10`, `volume_spike_ratio: 1.8`, and `min_breadth_coverage_pct: 0.75` settings reduced churn, improved win rate, and cut drawdown in the validated default profile.
 
 ### RSI Reversion
 
 ```yaml
 rsi_reversion:
-  enabled: false
+  enabled: true
   rsi_period: 14
-  oversold_threshold: 38
-  overbought_threshold: 62
+  oversold_threshold: 30
+  overbought_threshold: 50
   hold_days: 10
 ```
 
-Recommended: disabled.
+Recommended: enabled in the active profile, with continued monitoring through
+`python3 scheduler/run_validation_gate.py --profile rsi` before scaling its
+capital allocation.
 
-Keep available for experiments, but it is not part of the recommended default based on the latest backtests.
+The latest 12-month default passed production gates, but RSI-only contribution
+was negative in the same window, so treat it as a monitored sleeve rather than a
+candidate for higher allocation.
 
 ### Gap-Up
 
@@ -267,27 +274,46 @@ ma_crossover:
   slow_ema: 21
   timeframe: "1Day"
   hold_days: 12
+  max_loss_exit_pct: 0.01
 ```
 
 Recommended: enabled.
 
-This strategy contributed positively in the latest recommended 12-month backtest.
+This strategy contributed positively in the latest recommended 12-month backtest. The strategy-level max-loss exit closes the position when the latest daily close is at least 1% below entry, which reduced the largest observed 12-month MA Crossover loss in validation.
 
 ### Range Breakout
 
 ```yaml
 range_breakout:
-  enabled: true
+  enabled: false
   asset_class: crypto
   breakout_pct: 0.008
+  max_breakout_extension_pct: 0.08
   volume_multiplier: 1.8
+  volume_avg_period: 20
   timeframe: "1Day"
   hold_days: 3
+  atr_period: 14
+  atr_multiplier: 2.0
+  risk_per_trade_pct: 0.01
+  vol_filter_period: 10
+  min_range_ratio: 0.5
+  trend_ema_period: 50
+  trend_slope_lookback: 5
+  rsi_period: 14
+  rsi_entry_max: 78
+  rsi_exit_max: 82
+  profit_floor_pct: 0.03
+  breakdown_exit_pct: 0.02
+  trend_exit_enabled: true
 ```
 
-Recommended: enabled.
+Recommended: disabled in the active profile.
 
-This strategy improved the latest recommended 12-month configuration after the momentum entry criteria were tightened.
+The implementation remains available for experiments. It uses confirmed daily
+close breakouts, ranked signal selection, ATR-risk sizing, and explicit
+failed-breakout exits before the 3-day hold cap, but it is not part of the
+active default strategy set.
 
 ---
 
@@ -327,9 +353,11 @@ Use `--strategies` and repeated `--set` arguments to test configuration variants
 
 ```bash
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
-  --strategies momentum,ma_crossover,range_breakout \
-  --set strategies.momentum.top_n=3 \
-  --set strategies.momentum.min_momentum_pct=0.06
+  --strategies momentum,rsi_reversion,ma_crossover \
+  --set strategies.momentum.top_n=1 \
+  --set strategies.momentum.min_momentum_pct=0.10 \
+  --set strategies.momentum.volume_spike_ratio=1.8 \
+  --set strategies.momentum.min_breadth_coverage_pct=0.75
 ```
 
 Run both screener and fixed-universe variants before adopting a change:
@@ -338,3 +366,48 @@ Run both screener and fixed-universe variants before adopting a change:
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --no-screener
 ```
+
+For execution-cost sensitivity, pass backtest-only slippage and fee assumptions:
+
+```bash
+python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
+  --slippage-bps 10 --fee-bps 5
+```
+
+---
+
+## Production Validation Gates
+
+`validation:` defines non-trading gates used before scaling live capital or
+enabling disabled alpha sleeves. These settings do not change live order sizing,
+stops, take-profits, or mode.
+
+```yaml
+validation:
+  cost_model:
+    slippage_bps: 10.0
+    fee_bps: 5.0
+    min_fee_usd: 0.0
+```
+
+Run the default production gate with:
+
+```bash
+python3 scheduler/run_validation_gate.py --profile production
+```
+
+The production profile requires the costed default strategy set to pass the
+configured 12-month and 6-month windows, and requires the crypto sleeve to pass
+a 12-month window. The latest 30-day crypto sleeve is watch-only: it reports
+weak short-window behavior without blocking the full strategy set when the
+longer capital-preservation gates still pass.
+
+RSI Reversion has a separate monitoring gate:
+
+```bash
+python3 scheduler/run_validation_gate.py --profile rsi
+```
+
+Keep running this profile before scaling RSI Reversion allocation. It checks both
+costed backtest requirements and the paper-trading criteria in
+`validation.rsi_reversion_enablement`.

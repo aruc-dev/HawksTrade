@@ -30,7 +30,7 @@ from core import order_executor as oe
 from core.run_markers import RunScope, run_scope
 from core.logging_config import runtime_log_handlers
 from scheduler.reconcile_trade_log import safe_reconcile
-from tracking.trade_log import get_open_trades
+from tracking.trade_log import get_open_trades, update_high_water_prices
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 LOG_DIR  = BASE_DIR / "logs"
@@ -79,6 +79,35 @@ def _mark_unhealthy_exit_result(marker: RunScope | None, result: dict | None, st
             stage=stage,
             error_type="PendingExitOrderCheckFailed",
             blocked_exit_symbol=result.get("symbol", ""),
+        )
+    elif result.get("status") in {"exit_failed", "invalid_exit_price", "invalid_entry_price"}:
+        marker.mark_error(
+            stage=stage,
+            error_type=result.get("error_type", "ExitFailed"),
+            failed_exit_symbol=result.get("symbol", ""),
+            error=result.get("error", ""),
+        )
+
+
+def _emergency_exit_verified(result: dict | None, dry_run: bool) -> bool:
+    if not result:
+        return False
+    expected_status = "dry_run" if dry_run else "closed"
+    return result.get("status") == expected_status
+
+
+def _mark_unverified_emergency_exit(
+    marker: RunScope | None,
+    result: dict | None,
+    symbol: str,
+) -> None:
+    _mark_unhealthy_exit_result(marker, result, "emergency_exit")
+    if marker is not None and marker.status != "error":
+        marker.mark_error(
+            stage="emergency_exit",
+            error_type="EmergencyExitNotVerified",
+            failed_exit_symbol=(result or {}).get("symbol", symbol),
+            exit_status=(result or {}).get("status", "missing_result"),
         )
 
 
@@ -355,6 +384,7 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
             )
             return
         open_trades = get_open_trades()
+        emergency_failed = False
         for pos in positions:
             symbol      = pos.symbol
             asset_class = (
@@ -369,9 +399,20 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
                 reason="Daily loss limit — emergency close",
                 asset_class=asset_class,
                 dry_run=dry_run,
+                force_market=True,
             )
-            _mark_unhealthy_exit_result(marker, result, "emergency_exit")
-        log.warning("All positions closed. Bot will not trade again today.")
+            if not _emergency_exit_verified(result, dry_run):
+                emergency_failed = True
+                log.error(
+                    "Emergency close for %s was not verified; status=%s",
+                    exit_symbol,
+                    (result or {}).get("status", "missing_result"),
+                )
+                _mark_unverified_emergency_exit(marker, result, exit_symbol)
+        if emergency_failed:
+            log.error("Emergency liquidation incomplete. Bot will not trade again today.")
+        else:
+            log.warning("All emergency exits verified. Bot will not trade again today.")
         _reconcile_trade_log_after_run(
             marker,
             dry_run,
@@ -412,6 +453,8 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
         return
 
     _prune_price_failures_for_positions(positions)
+
+    observed_prices: dict[str, float] = {}
 
     for pos in positions:
         symbol      = pos.symbol
@@ -464,6 +507,7 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
             continue
 
         _clear_price_failure(symbol)
+        observed_prices[symbol] = current_price
 
         # Use the ATR/custom stop recorded at entry only when it actually differs
         # from what the global stop would have been — i.e. the strategy widened
@@ -492,6 +536,9 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
             pnl = (current_price - entry_price) / entry_price
             log.info(f"  {symbol:<12} entry={entry_price:.4f} now={current_price:.4f} "
                      f"P&L={pnl:+.2%} — HOLD")
+
+    if observed_prices and not dry_run:
+        update_high_water_prices(observed_prices)
 
     _reconcile_trade_log_after_run(marker, dry_run, positions=positions)
 

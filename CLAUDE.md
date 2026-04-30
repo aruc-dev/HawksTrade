@@ -194,6 +194,7 @@ The AI agent should run these scripts on this schedule:
 | `scheduler/run_risk_check.py` | Stop-loss / take-profit enforcement | none |
 | `scheduler/run_report.py` | Performance & portfolio report | `--weekly` |
 | `scheduler/run_backtest.py` | Historical strategy simulation | `--days`, `--fund`, `--exit-policy`, `--screener`, `--no-screener`, `--strategies`, `--set` |
+| `scheduler/run_validation_gate.py` | Cost-aware production readiness gates | `--profile production`, `--profile rsi`, `--profile all` |
 
 ---
 
@@ -204,14 +205,15 @@ Each can be individually enabled/disabled.
 
 | Strategy | Asset | Logic |
 |----------|-------|-------|
-| `momentum` | Stocks | Buy top 3 by 5-day return (min 6%), exit flat/losing trades after 4 trading days, let profitable trades run with trailing protection |
-| `rsi_reversion` | Stocks | Disabled by default; buy RSI < 38, sell RSI > 62 |
+| `momentum` | Stocks | Buy top 1 by 5-day return (min 10%) with 1.8x volume and 75% breadth coverage, exit flat/losing trades after 4 trading days, let profitable trades run with trailing protection |
+| `rsi_reversion` | Stocks | Enabled by default; conservative mean reversion with RSI < 30, %B < 20%, volume spike, 1-bar recovery, SMA200 band, and crash/volatility guards |
 | `gap_up` | Stocks | Disabled by default; buy on >3% gap-up with 1.5x volume, hold 2 days |
-| `ma_crossover` | Crypto | Buy on 9-EMA crossing above 21-EMA (daily bars) |
-| `range_breakout` | Crypto | Buy on breakout above prior day high, 1.8x volume |
+| `ma_crossover` | Crypto | Buy on 9-EMA crossing above 21-EMA, including the configured recent-cross window (daily bars), with a 1% daily-close max-loss exit |
+| `range_breakout` | Crypto | Disabled by default; ranked daily close breakout implementation remains available for crypto experiments |
 
 Momentum backtests can compare `--exit-policy fixed_hold`, `--exit-policy profit_trailing`, and `--exit-policy risk_only_baseline`. Use `risk_only_baseline` only as a benchmark for the old no-hold-exit behavior, not as the default live policy.
-Use `--strategies momentum,ma_crossover,range_breakout` and repeated `--set key.path=value` arguments for backtest-only strategy experiments without editing `config/config.yaml`.
+Use `--strategies momentum,rsi_reversion,ma_crossover` and repeated `--set key.path=value` arguments for backtest-only strategy experiments without editing `config/config.yaml`.
+Run `python3 scheduler/run_validation_gate.py --profile production` before scaling live capital. Run `python3 scheduler/run_validation_gate.py --profile rsi` before scaling RSI Reversion allocation.
 
 ---
 
@@ -221,7 +223,7 @@ These are set in `config/config.yaml → trading:` and enforced by `core/risk_ma
 
 | Rule | Value |
 |------|-------|
-| Max position size | 5% of portfolio per trade |
+| Max position size | 8% of portfolio per trade |
 | Stop-loss | 3.5% below entry |
 | Take-profit | 12% above entry |
 | Daily loss limit | 5% from first observed account value for the NY trading date → halt all trading |

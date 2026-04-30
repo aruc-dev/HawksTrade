@@ -275,7 +275,7 @@ def parse_portfolio_snapshot(log_path) -> dict:
 
 def compute_stats(trades: list) -> dict:
     closed = [t for t in trades if t.get("status", "").strip().lower() == "closed"
-              and t.get("side", "").strip().lower() == "buy"]
+              and t.get("side", "").strip().lower() == "sell"]
     if not closed:
         return {
             "total": 0, "wins": 0, "losses": 0,
