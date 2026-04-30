@@ -85,6 +85,7 @@ class GapUpStrategy(BaseStrategy):
             return []
 
         signals = []
+        portfolio_value = None
 
         for symbol in universe:
             try:
@@ -125,16 +126,23 @@ class GapUpStrategy(BaseStrategy):
                         atr = _calc_atr(bars, atr_period)
                         # For GapUp, we use today's open as entry for sizing
                         atr_stop = round(price - atr_mult * atr, 2)
-                        
-                        portfolio_value = ac.get_portfolio_value()
-                        risk_amount = portfolio_value * risk_pct
                         risk_per_share = price - atr_stop
-                        
+
                         if risk_per_share > 0:
+                            if portfolio_value is None:
+                                try:
+                                    portfolio_value = ac.get_portfolio_value()
+                                except Exception as e:
+                                    log.error(
+                                        "[GapUp] Could not fetch portfolio value for ATR-risk sizing; "
+                                        f"skipping signals: {e}"
+                                    )
+                                    return []
+                            risk_amount = portfolio_value * risk_pct
                             qty = risk_amount / risk_per_share
                             max_qty = (portfolio_value * max_position_pct) / price
                             qty = round(min(qty, max_qty), 6)
-                            
+
                             if qty * price >= min_trade_value:
                                 # true gap boosts confidence
                                 is_true_gap = today_open > prev_high

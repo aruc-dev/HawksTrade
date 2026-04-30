@@ -486,6 +486,26 @@ class TradeLogTests(unittest.TestCase):
 
         self.assertEqual(symbols, {"PARTIAL", "OPEN"})
 
+    def test_update_high_water_prices_recovers_from_nan_existing_value(self):
+        trade_log.log_trade({
+            "timestamp": "2026-04-17T12:00:00+00:00",
+            "mode": "paper",
+            "symbol": "AAPL",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "side": "buy",
+            "qty": 1,
+            "entry_price": "100",
+            "high_water_price": "NaN",
+            "order_id": "nan-hwp",
+            "status": "open",
+        })
+
+        trade_log.update_high_water_prices({"AAPL": 105})
+
+        rows = trade_log.read_trade_rows()
+        self.assertEqual(float(rows[0]["high_water_price"]), 105.0)
+
     def test_log_trade_preserves_rows_with_concurrent_process_writers(self):
         worker_count = 4
         rows_per_worker = 25

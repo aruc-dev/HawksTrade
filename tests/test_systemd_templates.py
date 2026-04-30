@@ -125,6 +125,19 @@ class SystemdTemplateTests(unittest.TestCase):
                 self.assertIn("WantedBy=timers.target", text)
                 self.assertIn(f"Unit={timer_name.removesuffix('.timer')}.service", text)
 
+    def test_risk_check_timer_keeps_15_minute_market_cadence(self):
+        text = (SYSTEMD_DIR / "hawkstrade-risk-check.timer").read_text(encoding="utf-8")
+
+        for calendar_line in (
+            "OnCalendar=Mon..Fri *-*-* 13:45:00",
+            "OnCalendar=Mon..Fri *-*-* 14..19:00:00",
+            "OnCalendar=Mon..Fri *-*-* 14..19:15:00",
+            "OnCalendar=Mon..Fri *-*-* 14..19:30:00",
+            "OnCalendar=Mon..Fri *-*-* 14..19:45:00",
+        ):
+            with self.subTest(calendar_line=calendar_line):
+                self.assertIn(calendar_line, text)
+
     def test_docs_include_install_and_operational_commands(self):
         text = (SYSTEMD_DIR / "README.md").read_text(encoding="utf-8")
 

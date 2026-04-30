@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import contextlib
 import logging
+import math
 from decimal import Decimal, InvalidOperation
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -567,20 +568,27 @@ def update_high_water_prices(symbol_prices: dict) -> None:
             price: float | None = None
             for sym, p in symbol_prices.items():
                 if _symbols_match(sym, symbol):
-                    price = float(p)
+                    try:
+                        price = float(p)
+                    except (ValueError, TypeError):
+                        price = None
                     break
-            if price is None or price <= 0:
+            if price is None or not math.isfinite(price) or price <= 0:
                 continue
             raw = row.get("high_water_price", "")
             try:
                 current_hwp = float(raw) if raw and raw != "" else None
             except (ValueError, TypeError):
                 current_hwp = None
+            if current_hwp is not None and not math.isfinite(current_hwp):
+                current_hwp = None
             if current_hwp is None:
                 # Initialise from entry_price for backward-compat rows
                 try:
                     current_hwp = float(row.get("entry_price", 0) or 0)
                 except (ValueError, TypeError):
+                    current_hwp = 0.0
+                if not math.isfinite(current_hwp):
                     current_hwp = 0.0
             new_hwp = max(current_hwp, price)
             if new_hwp != current_hwp:
