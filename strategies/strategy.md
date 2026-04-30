@@ -12,9 +12,9 @@
 |---|---|---|---|
 | Momentum | Stocks | **Enabled** | `momentum.py` |
 | RSI Reversion | Stocks | **Enabled** | `rsi_reversion.py` |
-| Gap-Up | Stocks | Disabled | `gap_up.py` |
+| Gap-Up | Stocks | **Enabled** | `gap_up.py` |
 | MA Crossover | Crypto | **Enabled** | `ma_crossover.py` |
-| Range Breakout | Crypto | Disabled | `range_breakout.py` |
+| Range Breakout | Crypto | **Enabled** | `range_breakout.py` |
 
 All strategies share a common global risk layer (8% max position size,
 3.5% stop-loss, 12% take-profit, max 10 open positions, 5% daily-loss halt)
@@ -49,8 +49,8 @@ filtering:
    - **Yellow** (breadth 25–50%): reduced deployment, up to `yellow_max_positions: 1`.
    - **Green** (breadth ≥ 50%): full `top_n: 1` deployment.
 
-**Volume Confirmation (per-signal):** Each candidate must have entry-bar volume above 180% of
-its 20-day average volume (`volume_spike_ratio: 1.8`). Signals where today's volume is
+**Volume Confirmation (per-signal):** Each candidate must have entry-bar volume above 250% of
+its 20-day average volume (`volume_spike_ratio: 2.5`). Signals where today's volume is
 suspiciously thin — a common trait of exhaustion moves — are skipped. The screener
 provides a separate 20-day ADV baseline at universe construction time; this check adds
 a per-signal guard at scan time.
@@ -82,14 +82,14 @@ room while the global 3.5% stop remains the absolute floor.
 | `trailing_stop_pct` | 4% from peak |
 | `exit_policy` | `profit_trailing` |
 | `atr_period` | 14 |
-| `atr_multiplier` | 2.0 |
+| `atr_multiplier` | 1.2 ATR stop extension |
 | `risk_per_trade_pct` | 1% of equity |
 | `max_positions_per_sector` | 1 |
 | `breadth_green_threshold` | 50% |
 | `breadth_red_threshold` | 25% |
 | `min_breadth_coverage_pct` | 75% |
 | `yellow_max_positions` | 1 |
-| `volume_spike_ratio` | 1.8 (entry bar > 180% of 20-day avg volume) |
+| `volume_spike_ratio` | 2.5 (entry bar > 250% of 20-day avg volume) |
 
 **Regime filters:**
 - SPY > SMA50 (hard requirement; Red if fails).
@@ -103,20 +103,20 @@ room while the global 3.5% stop remains the absolute floor.
 **Type:** Mean reversion, swing trade.
 
 **Entry:** Five conditions must all be true simultaneously:
-1. RSI(14) < 30 — deeply oversold.
+1. RSI(14) < 35 — oversold with room for recovery.
 2. Bollinger Band %B < 20% — price in the lower quintile of the 20-day, 2σ band.
-3. Volume ≥ 1.5× 20-day average — confirming capitulation selling.
+3. Volume ≥ 0.8× 20-day average — sufficient liquidity confirmation.
 4. Last close > prior close — 1-bar recovery; freefall has paused.
 5. SMA200 Band: Price must be within configurable buffers of the 200-day MA.
    - Entry blocked if `price < SMA200 × (1 - sma200_lower_buffer_pct)` (broken stocks).
    - Entry blocked if `price > SMA200 × (1 + sma200_upper_buffer_pct)` (overextended stocks).
    - Default buffers: ±15%.
 
-**Stop:** 2 × ATR(14) below entry (volatility-adjusted). The ATR stop flows
-through `order_executor.enter_position` into the trade log and is picked up by
-`run_risk_check` in both backtest and live/paper modes. It widens the stop only
-when it falls further below entry than the global 3.5% stop; the global stop
-governs whenever the ATR stop is tighter or absent.
+**Stop:** The 0.8 × ATR(14) stop extension flows through
+`order_executor.enter_position` into the trade log and is picked up by
+`run_risk_check` in both backtest and live/paper modes. It only extends the
+stop when it falls further below entry than the global 3.5% stop; the global
+stop governs whenever the ATR stop would be tighter or absent.
 
 **Exit:** Whichever fires first:
 - Price ≥ SMA(`bb_period`) — mean-reversion target reached (default: SMA20).
@@ -128,21 +128,21 @@ governs whenever the ATR stop is tighter or absent.
 | Parameter | Value |
 |---|---|
 | `rsi_period` | 14 |
-| `oversold_threshold` | 30 |
+| `oversold_threshold` | 35 |
 | `overbought_threshold` | 50 (RSI neutral exit) |
 | `hold_days` | 10 business days |
 | `bb_period` | 20 |
 | `bb_std` | 2.0 |
 | `atr_period` | 14 |
-| `atr_multiplier` | 2.0 |
-| `vix_multiplier` | 1.2 |
+| `atr_multiplier` | 0.8 ATR stop extension |
+| `vix_multiplier` | 0.9 |
 | `sma200_lower_buffer_pct` | 15% |
 | `sma200_upper_buffer_pct` | 15% |
-| `volume_spike_ratio` | 1.5 |
+| `volume_spike_ratio` | 0.8 |
 
 **Regime filters:**
 - Crash filter: skip if SPY is >20% below its 252-day peak.
-- VIX proxy: skip if SPY realised HV(20) > 200-day HV MA × `vix_multiplier` (default: 1.2).
+- VIX proxy: skip if SPY realised HV(20) > 200-day HV MA × `vix_multiplier` (default: 0.9).
 
 **Monitoring gate:** This strategy is enabled in the active default profile.
 Continue running `python3 scheduler/run_validation_gate.py --profile rsi` before
@@ -152,34 +152,47 @@ profit factor, +2% aggregate paper return, and max drawdown no worse than 4%.
 
 ---
 
-## 3. Gap-Up *(Stocks — Disabled)*
+## 3. Gap-Up *(Stocks — Enabled)*
 
 **Type:** Opening momentum, short swing trade.
 
 **Entry:** All of the following must be true at market open (within first 45 minutes):
-1. Today's open is 3–15% above the prior close (gap bounded to avoid exhaustion gaps).
-2. Volume ≥ 1.5× 20-day average.
-3. Price > SMA200 — stock is in a long-term uptrend.
-4. Prior day closed green (close > open) — pre-gap momentum confirmation.
-5. Entry within 45 minutes of the 9:30 ET open.
+1. Today's open is 6–15% above the prior close (gap bounded to avoid exhaustion gaps).
+2. Today's open is above the prior day's high (`require_true_gap: true`).
+3. Opening minute-bar volume pace is at least 1.5× the 20-day average daily pace.
+4. At least 75% of the scan universe is above SMA50 — broad participation guard.
+5. Price > SMA200 and no more than 35% above SMA200 — avoids exhausted gaps far above trend.
+6. Prior day closed green (close > open) — pre-gap momentum confirmation.
+7. The latest opening-window price has not faded more than 0.5% below the session open
+   and is not already more than 3% above the session open.
+8. Entry within 45 minutes of the 9:30 ET open.
 
-A "true gap" bonus (today's open also above the prior day's high) raises the
-confidence score.
+Completed daily bars are used for SMA200, ATR, prior-day OHLC, and average
+volume. Current-session minute bars are used for the live opening gap and volume
+pace, so the strategy does not trade from the current day's completed daily
+volume or close. Signals are ranked by confidence and capped at one per scan.
 
-**Exit:** 2-day hold cap. No active strategy-level exit signal; stop-loss and
-take-profit from the global risk manager apply throughout.
+**Exit:** 2-day hold cap, failed-gap exit if the completed close falls 3% below entry,
+and trend-loss exit if the completed close loses SMA200. Stop-loss and take-profit
+from the global risk manager apply throughout.
 
 **Key parameters:**
 
 | Parameter | Value |
 |---|---|
-| `min_gap_pct` | 3% |
-| `max_gap_pct` (code) | 15% (hard cap) |
-| `volume_multiplier` | 1.5× |
+| `min_gap_pct` | 6% |
+| `max_gap_pct` | 15% |
+| `volume_multiplier` | 1.5× opening volume pace |
+| `min_breadth_pct` | 75% |
+| `max_trend_extension_pct` | 35% above SMA200 |
 | `entry_window_minutes` | 45 min after open |
+| `max_signals` | 1 top-ranked candidate per scan |
 | `hold_days` | 2 business days |
 
 **Regime filter:** SPY > SMA50 (bull market required).
+
+**Monitoring gate:** Run `python3 scheduler/run_validation_gate.py --profile gap`
+before scaling capital allocated to this sleeve.
 
 ---
 
@@ -188,7 +201,7 @@ take-profit from the global risk manager apply throughout.
 **Type:** Trend-following, medium-term swing. Runs 24/7 on daily bars.
 
 **Entry:** Five conditions must all be true:
-1. 9-EMA crosses above 21-EMA on the daily chart, or crossed within the configured recent-entry window.
+1. 6-EMA crosses above 18-EMA on the latest completed daily transition.
 2. 21-EMA is sloping upward over the last 5 bars — no crossovers into a flat trend.
 3. Today's price range ≥ 50% of the 10-day average range — market is moving.
 4. RSI(14) between 35 and 70 — not entering an already-overbought or deeply-oversold
@@ -205,10 +218,11 @@ take-profit from the global risk manager apply throughout.
 
 | Parameter | Value |
 |---|---|
-| `fast_ema` | 9 |
-| `slow_ema` | 21 |
+| `fast_ema` | 6 |
+| `slow_ema` | 18 |
 | `timeframe` | 1Day |
-| `entry_cross_lookback_days` | 2 |
+| `entry_cross_lookback_days` | 1 |
+| `max_signals` | 1 top-ranked candidate per scan |
 | `hold_days` | 12 calendar days |
 | `max_loss_exit_pct` | 1% below entry on latest daily close |
 | `rsi_entry_min` | 35 |
@@ -221,13 +235,13 @@ take-profit from the global risk manager apply throughout.
 
 ---
 
-## 5. Range Breakout *(Crypto — Disabled)*
+## 5. Range Breakout *(Crypto — Enabled)*
 
 **Type:** Breakout, short swing trade. Runs 24/7 on daily bars.
 
 **Entry:** All of the following must be true:
-1. Today's close ≥ prior day's high × 1.008 (price breaks 0.8% above the prior range).
-2. Volume ≥ 1.8× 20-day average — breakout backed by conviction.
+1. Today's close ≥ prior 20-day high × 1.008, excluding the current bar.
+2. Volume ≥ 3.0× 20-day average — breakout backed by conviction.
 3. Price > 50-day EMA and EMA50 is non-declining over 5 bars — breakout in the direction of the longer trend.
 4. Today's range ≥ 50% of the 10-day average range — market is not compressed.
 5. Close is no more than 8% beyond the breakout level — avoids chasing stale vertical moves.
@@ -240,7 +254,7 @@ take-profit from the global risk manager apply throughout.
 breakout excess, volume ratio, and trend spread. This avoids entering lower-quality
 signals first just because they appear earlier in `crypto.scan_universe`.
 
-**Exit:** Failed breakouts can exit before the 3-calendar-day cap:
+**Exit:** Failed breakouts can exit before the 14-calendar-day cap:
 - Close ≤ entry × 0.98 — breakout failure.
 - Close < EMA50 — trend filter failure.
 - RSI(14) ≥ 82 after at least 3% open profit — exhaustion profit-taking.
@@ -251,9 +265,10 @@ Stop-loss and take-profit from the global risk manager apply throughout.
 
 | Parameter | Value |
 |---|---|
-| `breakout_pct` | 0.8% above prior high |
+| `breakout_lookback_days` | 20 |
+| `breakout_pct` | 0.8% above prior 20-day high |
 | `max_breakout_extension_pct` | 8% above breakout level |
-| `volume_multiplier` | 1.8× |
+| `volume_multiplier` | 3.0× |
 | `volume_avg_period` | 20 |
 | `trend_ema_period` | 50 |
 | `trend_slope_lookback` | 5 |
@@ -262,7 +277,7 @@ Stop-loss and take-profit from the global risk manager apply throughout.
 | `rsi_exit_max` | 82 |
 | `breakdown_exit_pct` | 2% below entry |
 | `timeframe` | 1Day |
-| `hold_days` | 3 calendar days |
+| `hold_days` | 14 calendar days |
 
 **Regime filter:** BTC/USD > 20-day EMA (crypto bull regime required).
 

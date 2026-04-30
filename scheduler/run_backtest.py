@@ -125,6 +125,19 @@ def _build_regime_bars(historical_data: dict, current_date: datetime) -> dict:
     return regime_bars
 
 
+def _gap_up_backtest_scan_time(current_date) -> datetime:
+    session_date = _as_datetime(current_date).date()
+    scan_et = datetime(
+        session_date.year,
+        session_date.month,
+        session_date.day,
+        9,
+        35,
+        tzinfo=ZoneInfo("America/New_York"),
+    )
+    return scan_et.astimezone(timezone.utc)
+
+
 def _as_datetime(value) -> datetime:
     if isinstance(value, pd.Timestamp):
         value = value.to_pydatetime()
@@ -367,6 +380,26 @@ def _make_bar_fetcher(sim: "BacktestSimulator"):
                 df = sim.historical_data[s]
                 mask = df.index <= sim.current_date
                 hist_df = df[mask].tail(limit)
+                if timeframe in {"1Min", "5Min", "15Min"}:
+                    # Daily historical backtests do not have real minute bars.
+                    # Provide a synthetic 9:35 ET opening bar so gap_up can be
+                    # evaluated at the session open without using the full daily
+                    # close as its entry price.
+                    session_date = _as_datetime(sim.current_date).date()
+                    session_mask = pd.Series(
+                        [_as_datetime(idx).date() <= session_date for idx in df.index],
+                        index=df.index,
+                    )
+                    hist_df = df[session_mask].tail(1).copy()
+                    if not hist_df.empty:
+                        open_price = hist_df.iloc[-1]["open"]
+                        hist_df.loc[:, "high"] = open_price
+                        hist_df.loc[:, "low"] = open_price
+                        hist_df.loc[:, "close"] = open_price
+                        hist_df.loc[:, "volume"] = hist_df["volume"] * (5.0 / 390.0)
+                        hist_df.index = pd.DatetimeIndex([
+                            _gap_up_backtest_scan_time(sim.current_date)
+                        ])
                 bars_list = [
                     SimpleBar(
                         open_price=float(row["open"]),
@@ -440,6 +473,7 @@ class BacktestSimulator:
         self.historical_data = {}  # symbol -> df
         self.equity_curve = []
         self.cost_model = _normalise_cost_model(cost_model)
+        self.pending_entry_prices = {}
 
     def get_portfolio_value(self):
         pos_value = 0
@@ -511,6 +545,8 @@ class BacktestSimulator:
         return float(np.busday_count(entry_date, curr_date))
 
     def get_current_price(self, symbol):
+        if symbol in self.pending_entry_prices:
+            return float(self.pending_entry_prices[symbol])
         df = self.historical_data.get(symbol)
         if df is None or df.empty: return 0.0
         mask = df.index <= self.current_date
@@ -882,8 +918,13 @@ def run_backtest(
                 )
                 if universe is None:
                     continue
+                scan_time = (
+                    _gap_up_backtest_scan_time(dt)
+                    if strat.name == "gap_up"
+                    else dt
+                )
                 scan_kwargs = {
-                    "current_time": dt,
+                    "current_time": scan_time,
                     "regime_bars": regime_bars,
                     "allow_regime_warmup": True,
                 }
@@ -896,13 +937,19 @@ def run_backtest(
                 for sig in signals:
                     if sig["symbol"] not in sim.positions:
                         asset_class = "crypto" if strat.asset_class == "crypto" else "stock"
-                        order = oe.enter_position(
-                            sig["symbol"],
-                            strat.name,
-                            asset_class,
-                            suggested_qty=sig.get("atr_risk_qty"),
-                            atr_stop_price=sig.get("atr_stop_price"),
-                        )
+                        entry_price = sig.get("entry_price")
+                        if entry_price and entry_price > 0:
+                            sim.pending_entry_prices[sig["symbol"]] = float(entry_price)
+                        try:
+                            order = oe.enter_position(
+                                sig["symbol"],
+                                strat.name,
+                                asset_class,
+                                suggested_qty=sig.get("atr_risk_qty"),
+                                atr_stop_price=sig.get("atr_stop_price"),
+                            )
+                        finally:
+                            sim.pending_entry_prices.pop(sig["symbol"], None)
                         # enter_position returns status="open" (not "filled") — update strategy name on any non-None return
                         if order and sig["symbol"] in sim.positions:
                             sim.positions[sig["symbol"]]["strategy"] = strat.name

@@ -120,9 +120,16 @@ sudo systemctl disable --now 'hawkstrade-*.timer'
   `scripts/run_hawkstrade_job.sh`, so they use the project `.venv`, Alpaca
   preflight checks, and the shared trade-mutation lock.
 - The health-check service uses `.venv/bin/python`, then `.venv/bin/python3`,
-  then `python3` as a fallback.
+  then `python3` as a fallback. On systemd deployments it reads installed
+  `/etc/systemd/system/hawkstrade-*.timer` schedules instead of cron templates,
+  so expected-run health matches the timers active on EC2. Set
+  `HAWKSTRADE_SYSTEMD_TIMER_DIR` only if timers are installed elsewhere.
 - Health checks write timestamped HTML/JSON snapshots to
   `reports/health_snapshots/`. Set `HAWKSTRADE_HEALTH_SNAPSHOT_RETENTION_DAYS`
   in `/etc/hawkstrade/hawkstrade.env` to adjust retention.
 - Keep `HAWKSTRADE_REQUIRE_SHM=1` enabled on EC2 so missing RAM secrets fail
   closed instead of falling back to disk dotenv files.
+- The crypto-only timer can overlap with the hourly full scan. Crypto-only scans
+  use a non-blocking lock and may exit 75 when the full scan owns the trade lock;
+  `scripts/check_systemd.sh` treats that lock-busy skip as acceptable for
+  `hawkstrade-crypto-scan.service`.

@@ -73,6 +73,13 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
   --set strategies.momentum.min_momentum_pct=0.06
 ```
 
+Run sleeve-specific gates before scaling Gap-Up or Range Breakout:
+
+```bash
+python3 scheduler/run_validation_gate.py --profile gap
+python3 scheduler/run_validation_gate.py --profile range
+```
+
 ## Paper Order Lifecycle
 
 Only run this when explicitly requested. It creates and closes a simulated Alpaca paper

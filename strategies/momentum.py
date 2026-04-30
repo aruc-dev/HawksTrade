@@ -1,7 +1,7 @@
 """
 HawksTrade - Momentum Strategy (Adaptive v2.1)
 ===============================================
-Phase 1: ATR-adjusted stop-loss (2×ATR below entry) and 1%-risk position sizing.
+Phase 1: ATR-adjusted stop extension (1.2×ATR below entry) and 1%-risk position sizing.
 Phase 2: Sector-neutral ranking — max 1 position per GICS sector.
 Phase 3: Breadth data coverage guard.
 Phase 4: Market breadth tiered regime guard.

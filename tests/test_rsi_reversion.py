@@ -45,8 +45,9 @@ class RSIReversionScanTests(unittest.TestCase):
 
         self.assertEqual(len(signals), 1)
         self.assertIn("atr_risk_qty", signals[0])
-        # atr_stop = 96 - 2*2 = 92; risk_per_share = 4; risk_dollars = 100 → qty = 25
-        self.assertAlmostEqual(signals[0]["atr_risk_qty"], 25.0, places=4)
+        # Default atr_multiplier=0.8: atr_stop = 96 - 0.8*2 = 94.4;
+        # risk_per_share = 1.6; risk_dollars = 100 -> qty = 62.5.
+        self.assertAlmostEqual(signals[0]["atr_risk_qty"], 62.5, places=4)
 
     def test_scan_skips_signal_when_atr_risk_qty_below_notional_minimum(self):
         # price≈96, atr=20 → atr_stop=56, risk_per_share=40, risk_dollars=10 → qty=0.25

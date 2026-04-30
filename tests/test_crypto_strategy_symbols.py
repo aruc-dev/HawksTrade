@@ -76,6 +76,7 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch("strategies.range_breakout.ac.get_portfolio_value", return_value=10000.0),
             patch.dict("strategies.range_breakout.SCFG", {
                 "enabled": True,
+                "breakout_lookback_days": 1,
                 "volume_multiplier": 0,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -85,6 +86,55 @@ class CryptoStrategySymbolTests(unittest.TestCase):
 
         self.assertEqual(len(signals), 1)
         self.assertEqual(signals[0]["symbol"], "BTCUSD")
+
+    def test_range_breakout_scan_accepts_slashless_bar_key_for_slashed_symbol(self):
+        bars = [_bar(80, high=81, low=79) for _ in range(60)]
+        bars.append(_bar(100, high=101, low=99, volume=1000))
+        bars.append(_bar(102, high=103, low=99, volume=3000))
+
+        with (
+            patch("strategies.range_breakout.ac.get_crypto_bars", return_value={"BTCUSD": bars}),
+            patch("strategies.range_breakout.rm.crypto_regime_ok", return_value=True),
+            patch("strategies.range_breakout.ac.get_portfolio_value", return_value=10000.0),
+            patch.dict("strategies.range_breakout.SCFG", {
+                "enabled": True,
+                "breakout_lookback_days": 20,
+                "breakout_pct": 0.005,
+                "volume_multiplier": 0,
+                "vol_filter_period": 0,
+                "rsi_entry_max": 100,
+            }),
+        ):
+            signals = RangeBreakoutStrategy().scan(["BTC/USD"])
+
+        self.assertEqual(len(signals), 1)
+        self.assertEqual(signals[0]["symbol"], "BTC/USD")
+        self.assertIn("20d high", signals[0]["reason"])
+
+    def test_range_breakout_uses_configured_multi_day_high(self):
+        bars = [_bar(80, high=81, low=79) for _ in range(40)]
+        bars.extend([_bar(100, high=110, low=99, volume=1000)])
+        bars.extend([_bar(90, high=91, low=89, volume=1000) for _ in range(18)])
+        bars.append(_bar(100, high=101, low=99, volume=1000))
+        bars.append(_bar(102, high=103, low=99, volume=3000))
+
+        with (
+            patch("strategies.range_breakout.ac.get_crypto_bars", return_value={"BTC/USD": bars}),
+            patch("strategies.range_breakout.rm.crypto_regime_ok", return_value=True),
+            patch("strategies.range_breakout.ac.get_portfolio_value") as get_portfolio_value,
+            patch.dict("strategies.range_breakout.SCFG", {
+                "enabled": True,
+                "breakout_lookback_days": 20,
+                "breakout_pct": 0.005,
+                "volume_multiplier": 0,
+                "vol_filter_period": 0,
+                "rsi_entry_max": 100,
+            }),
+        ):
+            signals = RangeBreakoutStrategy().scan(["BTC/USD"])
+
+        self.assertEqual(signals, [])
+        get_portfolio_value.assert_not_called()
 
     def test_range_breakout_allows_fractional_crypto_position_size(self):
         bars = [_bar(48000 + idx * 10, high=48100 + idx * 10, low=47900 + idx * 10) for idx in range(60)]
@@ -97,6 +147,7 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch("strategies.range_breakout.ac.get_portfolio_value", return_value=10000.0),
             patch.dict("strategies.range_breakout.SCFG", {
                 "enabled": True,
+                "breakout_lookback_days": 1,
                 "volume_multiplier": 0,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -132,6 +183,7 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch("strategies.range_breakout.ac.get_portfolio_value") as get_portfolio_value,
             patch.dict("strategies.range_breakout.SCFG", {
                 "enabled": True,
+                "breakout_lookback_days": 1,
                 "volume_multiplier": 0,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -153,6 +205,7 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch("strategies.range_breakout.ac.get_portfolio_value", return_value=10000.0),
             patch.dict("strategies.range_breakout.SCFG", {
                 "enabled": True,
+                "breakout_lookback_days": 1,
                 "volume_multiplier": 1.8,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -173,6 +226,7 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch("strategies.range_breakout.ac.get_portfolio_value", side_effect=RuntimeError("account unavailable")),
             patch.dict("strategies.range_breakout.SCFG", {
                 "enabled": True,
+                "breakout_lookback_days": 1,
                 "volume_multiplier": 0,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -193,6 +247,7 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch("strategies.range_breakout.ac.get_portfolio_value", return_value=10000.0),
             patch.dict("strategies.range_breakout.SCFG", {
                 "enabled": True,
+                "breakout_lookback_days": 1,
                 "volume_multiplier": 1.8,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -220,6 +275,7 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch("strategies.range_breakout.ac.get_portfolio_value", return_value=10000.0),
             patch.dict("strategies.range_breakout.SCFG", {
                 "enabled": True,
+                "breakout_lookback_days": 1,
                 "volume_multiplier": 1.8,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,

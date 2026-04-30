@@ -1,8 +1,10 @@
 import math
 import unittest
+from unittest.mock import patch
 
 from scheduler.run_validation_gate import (
     evaluate_rsi_forward_gate,
+    run_validation_gate,
     threshold_failures,
 )
 
@@ -115,6 +117,88 @@ class ValidationGateTests(unittest.TestCase):
 
         self.assertEqual(result["stats"]["closed_trades"], 1)
         self.assertEqual(result["stats"]["total_return_pct"], -0.02)
+
+    def test_range_profile_runs_configured_backtest_gates(self):
+        cfg = {
+            "validation": {
+                "cost_model": {},
+                "range_breakout_enablement": {
+                    "backtest_windows": [
+                        {
+                            "name": "range_breakout_12m_costed",
+                            "days": 365,
+                            "strategies": ["range_breakout"],
+                            "required": True,
+                        }
+                    ]
+                },
+            },
+        }
+        record = {
+            "name": "range_breakout_12m_costed",
+            "required": True,
+            "passed": True,
+            "failures": [],
+            "stats": {
+                "return_pct": 0.05,
+                "max_drawdown": -0.01,
+                "trades": 12,
+                "win_rate": 0.55,
+                "profit_factor": 2.0,
+                "daily_sharpe": 1.2,
+            },
+        }
+
+        with (
+            patch("scheduler.run_validation_gate.get_config", return_value=cfg),
+            patch("scheduler.run_validation_gate.evaluate_backtest_gate", return_value=record) as gate,
+        ):
+            exit_code, output = run_validation_gate(profile="range")
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Range Breakout enablement gates:", output)
+        gate.assert_called_once()
+
+    def test_gap_profile_runs_configured_backtest_gates(self):
+        cfg = {
+            "validation": {
+                "cost_model": {},
+                "gap_up_enablement": {
+                    "backtest_windows": [
+                        {
+                            "name": "gap_up_12m_costed",
+                            "days": 365,
+                            "strategies": ["gap_up"],
+                            "required": True,
+                        }
+                    ]
+                },
+            },
+        }
+        record = {
+            "name": "gap_up_12m_costed",
+            "required": True,
+            "passed": True,
+            "failures": [],
+            "stats": {
+                "return_pct": 0.03,
+                "max_drawdown": -0.01,
+                "trades": 15,
+                "win_rate": 0.73,
+                "profit_factor": 3.0,
+                "daily_sharpe": 1.2,
+            },
+        }
+
+        with (
+            patch("scheduler.run_validation_gate.get_config", return_value=cfg),
+            patch("scheduler.run_validation_gate.evaluate_backtest_gate", return_value=record) as gate,
+        ):
+            exit_code, output = run_validation_gate(profile="gap")
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Gap-Up enablement gates:", output)
+        gate.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ Group=ec2-user
 WorkingDirectory=/home/ec2-user/HawksTrade
 EnvironmentFile=/etc/hawkstrade/hawkstrade.env
 Environment=HAWKSTRADE_REQUIRE_SHM=1
-ExecStart=/usr/bin/bash -lc 'cd "$HAWKSTRADE_DIR" && mkdir -p logs reports && PY=.venv/bin/python; if [ ! -x "$PY" ]; then PY=.venv/bin/python3; fi; if [ ! -x "$PY" ]; then PY=python3; fi; exec "$PY" scripts/check_health_linux.py --hours "${HAWKSTRADE_HEALTH_HOURS:-4}"'
+ExecStart=/usr/bin/bash -lc 'cd "$HAWKSTRADE_DIR" && mkdir -p logs reports && PY=.venv/bin/python; if [ ! -x "$PY" ]; then PY=.venv/bin/python3; fi; if [ ! -x "$PY" ]; then PY=python3; fi; exec "$PY" scripts/check_health_linux.py --schedule-source systemd --systemd-timer-dir "${HAWKSTRADE_SYSTEMD_TIMER_DIR:-/etc/systemd/system}" --hours "${HAWKSTRADE_HEALTH_HOURS:-4}"'
 Restart=no
 TimeoutStartSec=15min
 StandardOutput=journal
