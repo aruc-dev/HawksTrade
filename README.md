@@ -46,7 +46,7 @@ HawksTrade includes a high-fidelity historical simulator. The current default st
 | **RSI Reversion** | US Stocks | Enabled; RSI < 30, %B < 20%, SMA-200 within +/-15%, vol spike 1.5x, 1-bar recovery | Conservative mean reversion with crash and realised-volatility regime guards. |
 | **Gap-Up** | US Stocks | Disabled by default; 3% gap, high volume, SMA-200 trend | Gap plays on strong trend confirmation. |
 | **EMA Crossover** | Crypto | 9/21 EMA, 2-day recent-cross window, RSI 35-70, slope + volatility filters, 1% daily-close max-loss exit | Bullish EMA crossover with BTC regime gate and tighter strategy-level capital defense. |
-| **Range Breakout** | Crypto | Disabled; prior-day high close breakout, 1.8x volume, rising EMA-50, RSI/extension guards | Ranked breakout implementation remains available, but is not part of the active default strategy set. |
+| **Range Breakout** | Crypto | Disabled; 20-day high close breakout, 2.0x volume, rising EMA-50, RSI/extension guards | Ranked Donchian-style breakout implementation remains available, but is not part of the active default strategy set. |
 
 **Crypto Universe**: `BTC/USD`, `SOL/USD`, `LINK/USD`, `DOGE/USD`, `LTC/USD`, `DOT/USD`.
 
@@ -95,6 +95,13 @@ RSI Reversion is enabled in the active default profile. Use its dedicated gate a
 
 ```bash
 python3 scheduler/run_validation_gate.py --profile rsi
+```
+
+Range Breakout remains disabled by default. Use its dedicated gate before
+enabling or allocating capital to that sleeve:
+
+```bash
+python3 scheduler/run_validation_gate.py --profile range
 ```
 
 ---

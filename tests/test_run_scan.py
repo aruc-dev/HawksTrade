@@ -726,7 +726,7 @@ class RunScanTests(unittest.TestCase):
 
         with (
             patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
-            patch.object(run_scan, "get_trade_age_days", return_value=4),
+            patch.object(run_scan, "get_trade_age_days", return_value=15),
             patch.object(run_scan.oe, "exit_position") as exit_position,
         ):
             run_scan._check_hold_day_exits([], dry_run=True, market_open=False)

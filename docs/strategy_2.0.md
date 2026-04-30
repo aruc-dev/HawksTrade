@@ -169,11 +169,12 @@ and the timestamp of that peak. Add to the position record in
 `core/order_executor.py` / trade log columns, or compute from historical bars
 at each risk-check pass.
 
-### 3.4 Widen the range_breakout window — MEDIUM impact, LOW effort
+### 3.4 Widen the range_breakout window — IMPLEMENTED
 
 Replace "prior day high" with "20-day high" (Donchian channel). A 20-day
 breakout is a much higher-signal setup than a 1-day one — well-supported in
-the trend-following literature. Extend `hold_days` to 10 accordingly.
+the trend-following literature. The implemented variant uses a 20-day high,
+0.8% breakout threshold, 2.0x volume confirmation, and a 14-day hold cap.
 
 **Config:**
 
@@ -181,8 +182,9 @@ the trend-following literature. Extend `hold_days` to 10 accordingly.
 strategies:
   range_breakout:
     breakout_lookback_days: 20   # replace prior-day-high with N-day high
-    breakout_pct: 0.005          # smaller excess needed because range is wider
-    hold_days: 10                # up from 3
+    breakout_pct: 0.008
+    volume_multiplier: 2.0
+    hold_days: 14                # up from 3
 ```
 
 ### 3.5 Re-enable rsi_reversion as a diversifier — MEDIUM impact, MEDIUM effort

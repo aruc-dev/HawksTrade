@@ -287,12 +287,13 @@ This strategy contributed positively in the latest recommended 12-month backtest
 range_breakout:
   enabled: false
   asset_class: crypto
+  breakout_lookback_days: 20
   breakout_pct: 0.008
   max_breakout_extension_pct: 0.08
-  volume_multiplier: 1.8
+  volume_multiplier: 2.0
   volume_avg_period: 20
   timeframe: "1Day"
-  hold_days: 3
+  hold_days: 14
   atr_period: 14
   atr_multiplier: 2.0
   risk_per_trade_pct: 0.01
@@ -311,9 +312,9 @@ range_breakout:
 Recommended: disabled in the active profile.
 
 The implementation remains available for experiments. It uses confirmed daily
-close breakouts, ranked signal selection, ATR-risk sizing, and explicit
-failed-breakout exits before the 3-day hold cap, but it is not part of the
-active default strategy set.
+20-day Donchian high breakouts, ranked signal selection, ATR-risk sizing, and
+explicit failed-breakout exits before the 14-day hold cap, but it is not part of
+the active default strategy set.
 
 ---
 
@@ -411,3 +412,12 @@ python3 scheduler/run_validation_gate.py --profile rsi
 Keep running this profile before scaling RSI Reversion allocation. It checks both
 costed backtest requirements and the paper-trading criteria in
 `validation.rsi_reversion_enablement`.
+
+Range Breakout has a separate enablement gate:
+
+```bash
+python3 scheduler/run_validation_gate.py --profile range
+```
+
+This checks the disabled breakout sleeve independently before it is considered
+for live allocation.

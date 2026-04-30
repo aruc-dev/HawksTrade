@@ -73,6 +73,12 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
   --set strategies.momentum.min_momentum_pct=0.06
 ```
 
+Run the disabled Range Breakout sleeve gate before enabling it:
+
+```bash
+python3 scheduler/run_validation_gate.py --profile range
+```
+
 ## Paper Order Lifecycle
 
 Only run this when explicitly requested. It creates and closes a simulated Alpaca paper

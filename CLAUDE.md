@@ -194,7 +194,7 @@ The AI agent should run these scripts on this schedule:
 | `scheduler/run_risk_check.py` | Stop-loss / take-profit enforcement | none |
 | `scheduler/run_report.py` | Performance & portfolio report | `--weekly` |
 | `scheduler/run_backtest.py` | Historical strategy simulation | `--days`, `--fund`, `--exit-policy`, `--screener`, `--no-screener`, `--strategies`, `--set` |
-| `scheduler/run_validation_gate.py` | Cost-aware production readiness gates | `--profile production`, `--profile rsi`, `--profile all` |
+| `scheduler/run_validation_gate.py` | Cost-aware production readiness gates | `--profile production`, `--profile rsi`, `--profile range`, `--profile all` |
 
 ---
 
@@ -209,11 +209,11 @@ Each can be individually enabled/disabled.
 | `rsi_reversion` | Stocks | Enabled by default; conservative mean reversion with RSI < 30, %B < 20%, volume spike, 1-bar recovery, SMA200 band, and crash/volatility guards |
 | `gap_up` | Stocks | Disabled by default; buy on >3% gap-up with 1.5x volume, hold 2 days |
 | `ma_crossover` | Crypto | Buy on 9-EMA crossing above 21-EMA, including the configured recent-cross window (daily bars), with a 1% daily-close max-loss exit |
-| `range_breakout` | Crypto | Disabled by default; ranked daily close breakout implementation remains available for crypto experiments |
+| `range_breakout` | Crypto | Disabled by default; ranked 20-day Donchian-style breakout implementation remains available for crypto experiments |
 
 Momentum backtests can compare `--exit-policy fixed_hold`, `--exit-policy profit_trailing`, and `--exit-policy risk_only_baseline`. Use `risk_only_baseline` only as a benchmark for the old no-hold-exit behavior, not as the default live policy.
 Use `--strategies momentum,rsi_reversion,ma_crossover` and repeated `--set key.path=value` arguments for backtest-only strategy experiments without editing `config/config.yaml`.
-Run `python3 scheduler/run_validation_gate.py --profile production` before scaling live capital. Run `python3 scheduler/run_validation_gate.py --profile rsi` before scaling RSI Reversion allocation.
+Run `python3 scheduler/run_validation_gate.py --profile production` before scaling live capital. Run `python3 scheduler/run_validation_gate.py --profile rsi` before scaling RSI Reversion allocation, and `python3 scheduler/run_validation_gate.py --profile range` before enabling or scaling Range Breakout.
 
 ---
 

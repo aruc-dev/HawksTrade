@@ -139,6 +139,15 @@ RSI Reversion is enabled in the active profile by configuration, but the dedicat
 `--profile rsi` gate should still be used before scaling its allocation. The
 latest default 12-month run had only 2 RSI trades and both lost money.
 
+Range Breakout remains disabled in the active profile. Its dedicated enablement
+gate now validates the hardened Donchian-style implementation before any live
+allocation:
+
+| Gate | Result | Return | Max Drawdown | Trades | Win Rate | Profit Factor | Daily Sharpe |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `range_breakout_12m_costed` | PASS | +6.52% | -1.18% | 14 | 64.3% | 4.44 | 1.93 |
+| `range_breakout_recent_30d_watch` | WARN | -0.36% | -0.36% | 1 | 0.0% | 0.00 | -5.17 |
+
 ---
 
 ## Historical Momentum Adaptive v2.0 — A/B Comparison (90 days, April 27 2026)

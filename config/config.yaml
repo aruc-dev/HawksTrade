@@ -196,13 +196,14 @@ strategies:
   range_breakout:
     enabled: false
     asset_class: crypto
-    description: "Enter long on confirmed daily close breakout above the prior day high with volume, trend, volatility, RSI, and extension guards. Exit failed breakouts early before the 3-day cap."
-    breakout_pct: 0.008          # Close must break 0.8% beyond prior day high
+    description: "Enter long on confirmed daily close breakout above the configured Donchian high with volume, trend, volatility, RSI, and extension guards. Exit failed breakouts early before the hold cap."
+    breakout_lookback_days: 20   # Close must break above the prior N-day high, excluding the current bar
+    breakout_pct: 0.008          # Close must break 0.8% beyond the Donchian high
     max_breakout_extension_pct: 0.08  # Avoid chasing closes >8% beyond the breakout level
-    volume_multiplier: 1.8       # Volume must be 1.8x average to confirm breakout
+    volume_multiplier: 2.0       # Volume must be 2.0x average to confirm breakout
     volume_avg_period: 20        # Lookback for average volume confirmation
     timeframe: "1Day"
-    hold_days: 3
+    hold_days: 14
     atr_period: 14
     atr_multiplier: 2.0
     risk_per_trade_pct: 0.01
@@ -285,6 +286,28 @@ validation:
         max_drawdown_pct: 0.04
         min_profit_factor: 1.10
         min_trades: 15
+
+  range_breakout_enablement:
+    backtest_windows:
+      - name: range_breakout_12m_costed
+        days: 365
+        end_date: "04/10/2026"
+        screener: false
+        strategies: [range_breakout]
+        required: true
+        min_return_pct: 0.04
+        max_drawdown_pct: 0.02
+        min_profit_factor: 1.50
+        min_trades: 10
+        min_win_rate: 0.50
+      - name: range_breakout_recent_30d_watch
+        days: 30
+        screener: false
+        strategies: [range_breakout]
+        required: false
+        min_return_pct: 0.0
+        max_drawdown_pct: 0.015
+        min_trades: 1
 
 # --- SCHEDULING (reference only; OS scheduler templates live in scheduler/) ---
 schedule:

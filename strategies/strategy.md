@@ -226,8 +226,8 @@ take-profit from the global risk manager apply throughout.
 **Type:** Breakout, short swing trade. Runs 24/7 on daily bars.
 
 **Entry:** All of the following must be true:
-1. Today's close ≥ prior day's high × 1.008 (price breaks 0.8% above the prior range).
-2. Volume ≥ 1.8× 20-day average — breakout backed by conviction.
+1. Today's close ≥ prior 20-day high × 1.008, excluding the current bar.
+2. Volume ≥ 2.0× 20-day average — breakout backed by conviction.
 3. Price > 50-day EMA and EMA50 is non-declining over 5 bars — breakout in the direction of the longer trend.
 4. Today's range ≥ 50% of the 10-day average range — market is not compressed.
 5. Close is no more than 8% beyond the breakout level — avoids chasing stale vertical moves.
@@ -240,7 +240,7 @@ take-profit from the global risk manager apply throughout.
 breakout excess, volume ratio, and trend spread. This avoids entering lower-quality
 signals first just because they appear earlier in `crypto.scan_universe`.
 
-**Exit:** Failed breakouts can exit before the 3-calendar-day cap:
+**Exit:** Failed breakouts can exit before the 14-calendar-day cap:
 - Close ≤ entry × 0.98 — breakout failure.
 - Close < EMA50 — trend filter failure.
 - RSI(14) ≥ 82 after at least 3% open profit — exhaustion profit-taking.
@@ -251,9 +251,10 @@ Stop-loss and take-profit from the global risk manager apply throughout.
 
 | Parameter | Value |
 |---|---|
-| `breakout_pct` | 0.8% above prior high |
+| `breakout_lookback_days` | 20 |
+| `breakout_pct` | 0.8% above prior 20-day high |
 | `max_breakout_extension_pct` | 8% above breakout level |
-| `volume_multiplier` | 1.8× |
+| `volume_multiplier` | 2.0× |
 | `volume_avg_period` | 20 |
 | `trend_ema_period` | 50 |
 | `trend_slope_lookback` | 5 |
@@ -262,7 +263,7 @@ Stop-loss and take-profit from the global risk manager apply throughout.
 | `rsi_exit_max` | 82 |
 | `breakdown_exit_pct` | 2% below entry |
 | `timeframe` | 1Day |
-| `hold_days` | 3 calendar days |
+| `hold_days` | 14 calendar days |
 
 **Regime filter:** BTC/USD > 20-day EMA (crypto bull regime required).
 

@@ -282,6 +282,15 @@ def run_validation_gate(profile: str = "production", initial_fund: float = 10000
         lines.append(_render_rsi_forward_record(forward_record))
         lines.append("")
 
+    if profile in {"range", "all"}:
+        range_cfg = validation_cfg.get("range_breakout_enablement", {})
+        lines.append("Range Breakout enablement gates:")
+        for gate in range_cfg.get("backtest_windows", []):
+            record = evaluate_backtest_gate(gate, cost_model, initial_fund)
+            records.append(record)
+            lines.append(_render_backtest_record(record))
+        lines.append("")
+
     required_failures = [r for r in records if r["required"] and not r["passed"]]
     warnings = [r for r in records if not r["required"] and not r["passed"]]
     if required_failures:
@@ -299,7 +308,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--profile",
-        choices=["production", "rsi", "all"],
+        choices=["production", "rsi", "range", "all"],
         default="production",
         help="Gate profile to run",
     )
