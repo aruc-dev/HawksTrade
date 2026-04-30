@@ -139,7 +139,7 @@ strategies:
     volume_spike_ratio: 1.8        # Entry bar volume must exceed this multiple of the 20-day average
 
   rsi_reversion:
-    enabled: false
+    enabled: true
     asset_class: stocks
     description: "Conservative RSI mean reversion. Entry: RSI<30, %B<20%, vol≥1.5×, 1-bar recovery, price within 15% below and 15% above SMA200. Stop: 2×ATR(14). Exit: price reaches SMA20 OR RSI>50 OR 10-day cap. Regime: skip on severe crash (SPY >20% below 252d peak) or elevated VIX proxy."
     rsi_period: 14
@@ -194,7 +194,7 @@ strategies:
     weight: 1.0
 
   range_breakout:
-    enabled: true
+    enabled: false
     asset_class: crypto
     description: "Enter long on confirmed daily close breakout above the prior day high with volume, trend, volatility, RSI, and extension guards. Exit failed breakouts early before the 3-day cap."
     breakout_pct: 0.008          # Close must break 0.8% beyond prior day high
@@ -233,7 +233,7 @@ validation:
         days: 365
         end_date: "04/10/2026"
         screener: true
-        strategies: [momentum, ma_crossover, range_breakout]
+        strategies: [momentum, rsi_reversion, ma_crossover]
         required: true
         min_return_pct: 0.04
         max_drawdown_pct: 0.035
@@ -243,7 +243,7 @@ validation:
         days: 180
         end_date: "04/10/2026"
         screener: true
-        strategies: [momentum, ma_crossover, range_breakout]
+        strategies: [momentum, rsi_reversion, ma_crossover]
         required: true
         min_return_pct: 0.0
         max_drawdown_pct: 0.025
@@ -252,7 +252,7 @@ validation:
         days: 365
         end_date: "04/10/2026"
         screener: false
-        strategies: [ma_crossover, range_breakout]
+        strategies: [ma_crossover]
         required: true
         min_return_pct: 0.03
         max_drawdown_pct: 0.025
@@ -261,7 +261,7 @@ validation:
       - name: crypto_recent_30d_watch
         days: 30
         screener: false
-        strategies: [ma_crossover, range_breakout]
+        strategies: [ma_crossover]
         required: false
         min_return_pct: 0.0
         max_drawdown_pct: 0.015

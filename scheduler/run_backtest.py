@@ -1109,7 +1109,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--strategies",
         type=str,
-        help="Comma-separated strategy allowlist for experiments, e.g. momentum,ma_crossover,range_breakout",
+        help="Comma-separated strategy allowlist for experiments, e.g. momentum,rsi_reversion,ma_crossover",
     )
     parser.add_argument(
         "--set",

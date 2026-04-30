@@ -30,7 +30,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener
 
 ## Backtesting & Performance
 
-HawksTrade includes a high-fidelity historical simulator. The current profit-tuned default strategy set achieved **+11.99% annual return** in the 12-month backtest ending 2026-04-10 on $10,000 starting capital, with the configured 8% max-position risk cap enforced.
+HawksTrade includes a high-fidelity historical simulator. The current default strategy set achieved **+12.12% annual return** in the 12-month backtest ending 2026-04-10 on $10,000 starting capital, with the configured 8% max-position risk cap enforced.
 
 - **Backtest Summary**: [backtests.md](backtests.md)
 - **Configuration Guide**: [config.md](config.md)
@@ -43,23 +43,23 @@ HawksTrade includes a high-fidelity historical simulator. The current profit-tun
 | Strategy | Market | Key Parameters | Approach |
 |----------|--------|----------------|----------|
 | **Momentum** | US Stocks | Top 1 by 5-day return, min 10% momentum, 1.8x volume spike, 75% breadth coverage, profit-aware exit | Captures only high-conviction rallies, exits flat/losing trades after the minimum hold, and lets profitable trades run under trailing protection. |
-| **RSI Reversion** | US Stocks | Disabled by default; RSI < 30, %B < 20%, SMA-200 within +/-15%, vol spike 1.5x, 1-bar recovery | Conservative mean reversion with crash and realised-volatility regime guards. |
+| **RSI Reversion** | US Stocks | Enabled; RSI < 30, %B < 20%, SMA-200 within +/-15%, vol spike 1.5x, 1-bar recovery | Conservative mean reversion with crash and realised-volatility regime guards. |
 | **Gap-Up** | US Stocks | Disabled by default; 3% gap, high volume, SMA-200 trend | Gap plays on strong trend confirmation. |
 | **EMA Crossover** | Crypto | 9/21 EMA, 2-day recent-cross window, RSI 35-70, slope + volatility filters, 1% daily-close max-loss exit | Bullish EMA crossover with BTC regime gate and tighter strategy-level capital defense. |
-| **Range Breakout** | Crypto | Prior-day high close breakout, 1.8x volume, rising EMA-50, RSI/extension guards | Ranked breakout entries with BTC regime gate, ATR-risk sizing, and failed-breakout exits. |
+| **Range Breakout** | Crypto | Disabled; prior-day high close breakout, 1.8x volume, rising EMA-50, RSI/extension guards | Ranked breakout implementation remains available, but is not part of the active default strategy set. |
 
 **Crypto Universe**: `BTC/USD`, `SOL/USD`, `LINK/USD`, `DOGE/USD`, `LTC/USD`, `DOT/USD`.
 
 ### Market Regime Filters
 
-- **Stock Regime Guards**: Momentum and Gap-Up use the SPY/QQQ SMA-50 regime gate. RSI Reversion has separate crash and realised-volatility filters and remains disabled by default until it has a validated production edge.
-- **BTC EMA-20 (Crypto)**: EMA Crossover and Range Breakout strategies are gated by BTC/USD trading above its 20-day EMA. When BTC is below EMA-20 (crypto bear regime), crypto scans are skipped.
+- **Stock Regime Guards**: Momentum and Gap-Up use the SPY/QQQ SMA-50 regime gate. RSI Reversion has separate crash and realised-volatility filters.
+- **BTC EMA-20 (Crypto)**: The active EMA Crossover crypto strategy is gated by BTC/USD trading above its 20-day EMA. Range Breakout shares this gate if re-enabled later.
 
 Live/paper scans fail closed when regime data is unavailable or insufficient, blocking new entries until the bot can confirm market conditions. Backtests still allow early warmup periods with insufficient bars so simulations can start before every long-window filter is populated.
 
 ### Strategy Position Sizing
 
-Momentum, RSI Reversion, EMA Crossover, and Range Breakout emit ATR-risk quantities that target 1% account risk per trade before the global 8% max-position cap is applied. Momentum still has a Half-Kelly fallback in the executor if a signal does not include ATR sizing, but the current strategy path provides ATR-risk sizing by default.
+Momentum, RSI Reversion, and EMA Crossover emit ATR-risk quantities that target 1% account risk per trade before the global 8% max-position cap is applied. Range Breakout also emits ATR-risk quantities if re-enabled later. Momentum still has a Half-Kelly fallback in the executor if a signal does not include ATR sizing, but the current strategy path provides ATR-risk sizing by default.
 
 ### Momentum Exit Policy
 
@@ -75,7 +75,7 @@ Use `--no-screener` to backtest only the fixed configured stock universe, or `--
 
 ```bash
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
-  --strategies momentum,ma_crossover,range_breakout \
+  --strategies momentum,rsi_reversion,ma_crossover \
   --set strategies.momentum.top_n=1 \
   --set strategies.momentum.min_momentum_pct=0.10 \
   --set strategies.momentum.volume_spike_ratio=1.8 \
@@ -91,7 +91,7 @@ windows, and reports watch-only warnings for weak recent crypto windows:
 python3 scheduler/run_validation_gate.py --profile production
 ```
 
-RSI Reversion remains disabled until its explicit enablement gate passes:
+RSI Reversion is enabled in the active default profile. Use its dedicated gate as an ongoing monitoring check before scaling its capital allocation:
 
 ```bash
 python3 scheduler/run_validation_gate.py --profile rsi

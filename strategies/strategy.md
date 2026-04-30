@@ -11,10 +11,10 @@
 | Strategy | Asset | Status | File |
 |---|---|---|---|
 | Momentum | Stocks | **Enabled** | `momentum.py` |
-| RSI Reversion | Stocks | Disabled by default | `rsi_reversion.py` |
+| RSI Reversion | Stocks | **Enabled** | `rsi_reversion.py` |
 | Gap-Up | Stocks | Disabled | `gap_up.py` |
 | MA Crossover | Crypto | **Enabled** | `ma_crossover.py` |
-| Range Breakout | Crypto | **Enabled** | `range_breakout.py` |
+| Range Breakout | Crypto | Disabled | `range_breakout.py` |
 
 All strategies share a common global risk layer (8% max position size,
 3.5% stop-loss, 12% take-profit, max 10 open positions, 5% daily-loss halt)
@@ -98,7 +98,7 @@ room while the global 3.5% stop remains the absolute floor.
 
 ---
 
-## 2. RSI Reversion *(Stocks — Disabled by default)*
+## 2. RSI Reversion *(Stocks — Enabled)*
 
 **Type:** Mean reversion, swing trade.
 
@@ -144,11 +144,11 @@ governs whenever the ATR stop is tighter or absent.
 - Crash filter: skip if SPY is >20% below its 252-day peak.
 - VIX proxy: skip if SPY realised HV(20) > 200-day HV MA × `vix_multiplier` (default: 1.2).
 
-**Enablement gate:** This strategy remains disabled by default until
-`python3 scheduler/run_validation_gate.py --profile rsi` passes. The gate
-requires cost-aware backtest performance plus at least 60 paper-trading days,
-20 closed RSI trades, 48% win rate, 1.15 profit factor, +2% aggregate paper
-return, and max drawdown no worse than 4%.
+**Monitoring gate:** This strategy is enabled in the active default profile.
+Continue running `python3 scheduler/run_validation_gate.py --profile rsi` before
+scaling its capital allocation. The gate requires cost-aware backtest performance
+plus at least 60 paper-trading days, 20 closed RSI trades, 48% win rate, 1.15
+profit factor, +2% aggregate paper return, and max drawdown no worse than 4%.
 
 ---
 
@@ -221,7 +221,7 @@ take-profit from the global risk manager apply throughout.
 
 ---
 
-## 5. Range Breakout *(Crypto — Enabled)*
+## 5. Range Breakout *(Crypto — Disabled)*
 
 **Type:** Breakout, short swing trade. Runs 24/7 on daily bars.
 

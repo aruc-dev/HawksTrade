@@ -75,6 +75,7 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch("strategies.range_breakout.rm.crypto_regime_ok", return_value=True),
             patch("strategies.range_breakout.ac.get_portfolio_value", return_value=10000.0),
             patch.dict("strategies.range_breakout.SCFG", {
+                "enabled": True,
                 "volume_multiplier": 0,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -95,6 +96,7 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch("strategies.range_breakout.rm.crypto_regime_ok", return_value=True),
             patch("strategies.range_breakout.ac.get_portfolio_value", return_value=10000.0),
             patch.dict("strategies.range_breakout.SCFG", {
+                "enabled": True,
                 "volume_multiplier": 0,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -129,6 +131,7 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch("strategies.range_breakout.rm.crypto_regime_ok", return_value=True),
             patch("strategies.range_breakout.ac.get_portfolio_value") as get_portfolio_value,
             patch.dict("strategies.range_breakout.SCFG", {
+                "enabled": True,
                 "volume_multiplier": 0,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -149,6 +152,7 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch("strategies.range_breakout.rm.crypto_regime_ok", return_value=True),
             patch("strategies.range_breakout.ac.get_portfolio_value", return_value=10000.0),
             patch.dict("strategies.range_breakout.SCFG", {
+                "enabled": True,
                 "volume_multiplier": 1.8,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -168,6 +172,7 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch("strategies.range_breakout.rm.crypto_regime_ok", return_value=True),
             patch("strategies.range_breakout.ac.get_portfolio_value", side_effect=RuntimeError("account unavailable")),
             patch.dict("strategies.range_breakout.SCFG", {
+                "enabled": True,
                 "volume_multiplier": 0,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -187,6 +192,7 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch("strategies.range_breakout.rm.crypto_regime_ok", return_value=True),
             patch("strategies.range_breakout.ac.get_portfolio_value", return_value=10000.0),
             patch.dict("strategies.range_breakout.SCFG", {
+                "enabled": True,
                 "volume_multiplier": 1.8,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -213,6 +219,7 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch("strategies.range_breakout.rm.crypto_regime_ok", return_value=True),
             patch("strategies.range_breakout.ac.get_portfolio_value", return_value=10000.0),
             patch.dict("strategies.range_breakout.SCFG", {
+                "enabled": True,
                 "volume_multiplier": 1.8,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -230,6 +237,7 @@ class CryptoStrategySymbolTests(unittest.TestCase):
         with (
             patch("strategies.range_breakout.ac.get_crypto_bars", return_value={"BTC/USD": bars}),
             patch.dict("strategies.range_breakout.SCFG", {
+                "enabled": True,
                 "breakdown_exit_pct": 0.02,
                 "trend_exit_enabled": False,
             }),
@@ -246,6 +254,7 @@ class CryptoStrategySymbolTests(unittest.TestCase):
         with (
             patch("strategies.range_breakout.ac.get_crypto_bars", return_value={"BTC/USD": bars}),
             patch.dict("strategies.range_breakout.SCFG", {
+                "enabled": True,
                 "breakdown_exit_pct": 0.05,
                 "trend_exit_enabled": True,
             }),
