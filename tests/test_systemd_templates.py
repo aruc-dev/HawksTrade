@@ -92,6 +92,8 @@ class SystemdTemplateTests(unittest.TestCase):
         self.assertIn("PY=.venv/bin/python", text)
         self.assertIn("PY=.venv/bin/python3", text)
         self.assertIn("scripts/check_health_linux.py", text)
+        self.assertIn("--schedule-source systemd", text)
+        self.assertIn('--systemd-timer-dir "${HAWKSTRADE_SYSTEMD_TIMER_DIR:-/etc/systemd/system}"', text)
         self.assertIn("${HAWKSTRADE_HEALTH_HOURS:-4}", text)
 
     def test_secret_loader_populates_dev_shm(self):

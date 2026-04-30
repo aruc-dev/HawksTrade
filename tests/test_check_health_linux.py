@@ -75,6 +75,131 @@ PATH=/usr/local/bin:/usr/bin:/bin
             self.assertEqual(jobs[0].pattern.cron_text, "35 6 * * 1-5")
             self.assertEqual(jobs[1].pattern.cron_text, "0 * * * *")
 
+    def test_load_systemd_timer_jobs_parses_supported_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            timer_dir = Path(tmp)
+            self._write(
+                timer_dir / "hawkstrade-crypto-scan.timer",
+                """
+[Timer]
+OnCalendar=hourly
+Unit=hawkstrade-crypto-scan.service
+""".strip()
+                + "\n",
+            )
+            self._write(
+                timer_dir / "hawkstrade-full-scan.timer",
+                """
+[Timer]
+OnCalendar=Mon..Fri *-*-* 14..19:00:00
+Unit=hawkstrade-full-scan.service
+""".strip()
+                + "\n",
+            )
+            self._write(
+                timer_dir / "hawkstrade-risk-check.timer",
+                """
+[Timer]
+OnCalendar=Mon..Fri *-*-* 13:45:00
+OnCalendar=Mon..Fri *-*-* 14..19:15:00
+OnCalendar=Mon..Fri *-*-* 14..19:30:00
+OnCalendar=Mon..Fri *-*-* 14..19:45:00
+Unit=hawkstrade-risk-check.service
+""".strip()
+                + "\n",
+            )
+            self._write(
+                timer_dir / "hawkstrade-health-check.timer",
+                """
+[Timer]
+OnCalendar=*-*-* *:00/15:00
+Unit=hawkstrade-health-check.service
+""".strip()
+                + "\n",
+            )
+
+            jobs = health.load_systemd_timer_jobs(timer_dir)
+            by_key = {job.key: [] for job in jobs}
+            for job in jobs:
+                by_key[job.key].append(job)
+
+            self.assertEqual(by_key["crypto_scan"][0].pattern.cron_text, "0 * * * *")
+            self.assertEqual(by_key["crypto_scan"][0].schedule_text, "OnCalendar=hourly")
+            self.assertEqual(by_key["full_scan"][0].pattern.cron_text, "0 14-19 * * 1-5")
+            self.assertEqual(
+                [job.pattern.cron_text for job in by_key["risk_check"]],
+                [
+                    "45 13 * * 1-5",
+                    "15 14-19 * * 1-5",
+                    "30 14-19 * * 1-5",
+                    "45 14-19 * * 1-5",
+                ],
+            )
+            self.assertNotIn("health_check", by_key)
+
+    def test_build_report_uses_systemd_timer_schedule_when_requested(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            timer_dir = tmp_path / "systemd"
+            log_dir = tmp_path / "logs"
+            self._write(
+                timer_dir / "hawkstrade-full-scan.timer",
+                """
+[Timer]
+OnCalendar=Mon..Fri *-*-* 14..19:00:00
+Unit=hawkstrade-full-scan.service
+""".strip()
+                + "\n",
+            )
+            self._write(
+                timer_dir / "hawkstrade-crypto-scan.timer",
+                """
+[Timer]
+OnCalendar=hourly
+Unit=hawkstrade-crypto-scan.service
+""".strip()
+                + "\n",
+            )
+            self._write(
+                log_dir / "scan_20260417.log",
+                """
+2026-04-17 18:00:00,000 [INFO] run_scan: RUN_START script=run_scan run_id=scan-systemd scan_kind=full run_stocks=1 run_crypto=1 dry_run=0
+2026-04-17 18:00:01,000 [INFO] run_scan: RUN_END script=run_scan run_id=scan-systemd status=ok duration_s=1.000 outcome=completed
+2026-04-17 19:00:00,000 [INFO] run_scan: RUN_START script=run_scan run_id=crypto-systemd scan_kind=crypto run_stocks=0 run_crypto=1 dry_run=0
+2026-04-17 19:00:01,000 [INFO] run_scan: RUN_END script=run_scan run_id=crypto-systemd status=ok duration_s=1.000 outcome=completed
+""".strip()
+                + "\n",
+            )
+
+            alpaca_state = health.AlpacaState(
+                connected=True,
+                account_error=None,
+                positions_error=None,
+                portfolio_value=100000,
+                cash=50000,
+                buying_power=200000,
+                broker_positions=[],
+                trade_log_open_rows=[],
+            )
+
+            report = health.build_health_report(
+                schedule_source="systemd",
+                systemd_timer_dir=timer_dir,
+                log_dir=log_dir,
+                html_output=tmp_path / "health.html",
+                now=datetime(2026, 4, 17, 19, 30, 0),
+                lookback_hours=2.0,
+                alpaca_state=alpaca_state,
+                trade_summary={"total_trades": 0},
+                price_failure_state_file=tmp_path / "missing_price_failures.json",
+            )
+
+            self.assertEqual(report.cron_template, "systemd")
+            self.assertEqual(report.cron_file, timer_dir.resolve())
+            self.assertEqual([job.key for job in report.job_health], ["full_scan", "crypto_scan"])
+            self.assertTrue(all(job.status == "green" for job in report.job_health))
+            self.assertTrue(all(line.startswith("OnCalendar=") for job in report.job_health for line in job.schedule_lines))
+
     def test_evaluate_job_health_detects_missed_runs(self):
         with tempfile.TemporaryDirectory() as tmp:
             cron_file = Path(tmp) / "hawkstrade-pacific.cron"
@@ -538,7 +663,7 @@ PATH=/usr/local/bin:/usr/bin:/bin
         items = health.collect_alert_items(report)
 
         self.assertTrue(any("Overall health is [NOK]" in item for item in items))
-        self.assertTrue(any("Cron Risk check [NOK]: 2 missed run(s)" in item for item in items))
+        self.assertTrue(any("Schedule Risk check [NOK]: 2 missed run(s)" in item for item in items))
         self.assertTrue(any("Price fetch AAPL [NOK]" in item for item in items))
         self.assertTrue(any("Log errors: 1 in window" in item for item in items))
 

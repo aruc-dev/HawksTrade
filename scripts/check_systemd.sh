@@ -343,6 +343,10 @@ else
                 note_warn "${s}: no Result recorded (never invoked)"
                 ;;
             *)
+                if [[ "${s}" == "hawkstrade-crypto-scan.service" && "${exec_status}" == "75" ]]; then
+                    note_ok "${s}: last run skipped because trade lock was busy (exit 75); acceptable overlap with full scan"
+                    continue
+                fi
                 note_fail "${s}: last run failed (Result=${result}, ExecMainStatus=${exec_status}, Code=${exec_code})"
                 echo ""
                 echo "      ${C_BOLD}Last 10 log lines for ${s}:${C_RESET}"

@@ -2,14 +2,16 @@
 """
 HawksTrade Linux health check.
 
-This script inspects the configured cron template, parses runtime logs, checks
-Alpaca connectivity, summarizes portfolio/trade health, and emits both a
-terminal report and an HTML dashboard.
+This script inspects the configured schedule definitions, parses runtime logs,
+checks Alpaca connectivity, summarizes portfolio/trade health, and emits both a
+terminal report and an HTML dashboard. It supports cron templates for local
+checks and systemd timer templates for EC2 deployments.
 
 Usage:
   python3 scripts/check_health_linux.py
   python3 scripts/check_health_linux.py --cron-template pacific
   python3 scripts/check_health_linux.py --cron-file scheduler/cron/hawkstrade-pacific.cron
+  python3 scripts/check_health_linux.py --schedule-source systemd --systemd-timer-dir scheduler/systemd
   python3 scripts/check_health_linux.py --hours 8
 """
 
@@ -57,6 +59,7 @@ DEFAULT_CRON_FILES = {
     "pacific": BASE_DIR / "scheduler" / "cron" / "hawkstrade-pacific.cron",
     "utc": BASE_DIR / "scheduler" / "cron" / "hawkstrade-utc.cron",
 }
+DEFAULT_SYSTEMD_TIMER_DIR = BASE_DIR / "scheduler" / "systemd"
 log = logging.getLogger("check_health_linux")
 
 # ── Dataclasses ──────────────────────────────────────────────────────────────
@@ -103,6 +106,7 @@ class CronJob:
     command: str
     source_file: Path
     line_no: int
+    schedule_text: str | None = None
 
 
 @dataclass
@@ -352,6 +356,157 @@ def load_cron_jobs(cron_file: Path) -> list[CronJob]:
     return jobs
 
 
+SYSTEMD_TIMER_JOBS = {
+    "hawkstrade-stock-scan.timer": ("stock_scan", "Stock scan"),
+    "hawkstrade-full-scan.timer": ("full_scan", "Full scan"),
+    "hawkstrade-crypto-scan.timer": ("crypto_scan", "Crypto scan"),
+    "hawkstrade-risk-check.timer": ("risk_check", "Risk check"),
+    "hawkstrade-daily-report.timer": ("daily_report", "Daily report"),
+    "hawkstrade-weekly-report.timer": ("weekly_report", "Weekly report"),
+}
+
+SYSTEMD_DOWS = {
+    "mon": 1,
+    "tue": 2,
+    "wed": 3,
+    "thu": 4,
+    "fri": 5,
+    "sat": 6,
+    "sun": 7,
+}
+
+
+def _read_systemd_timer_calendars(timer_file: Path) -> list[tuple[int, str]]:
+    calendars: list[tuple[int, str]] = []
+    in_timer = False
+    with open(timer_file, "r", encoding="utf-8") as f:
+        for line_no, raw in enumerate(f, start=1):
+            line = raw.strip()
+            if not line or line.startswith("#") or line.startswith(";"):
+                continue
+            if line.startswith("[") and line.endswith("]"):
+                in_timer = line.lower() == "[timer]"
+                continue
+            if not in_timer or not line.startswith("OnCalendar="):
+                continue
+            value = line.split("=", 1)[1].strip()
+            if value:
+                calendars.append((line_no, value))
+    return calendars
+
+
+def _systemd_dow_to_cron(spec: str) -> str:
+    raw = spec.strip()
+    if not raw or raw == "*":
+        return "*"
+
+    pieces: list[str] = []
+    for part in raw.split(","):
+        token = part.strip().lower()
+        if not token:
+            continue
+        if ".." in token:
+            start_s, end_s = token.split("..", 1)
+            start = SYSTEMD_DOWS[start_s[:3]]
+            end = SYSTEMD_DOWS[end_s[:3]]
+            if start <= end:
+                pieces.append(f"{start}-{end}")
+            else:
+                pieces.append(f"{start}-7")
+                pieces.append(f"1-{end}")
+            continue
+        pieces.append(str(SYSTEMD_DOWS[token[:3]]))
+
+    return ",".join(pieces) if pieces else "*"
+
+
+def _systemd_range_to_cron(spec: str) -> str:
+    raw = spec.strip()
+    if raw == "*":
+        return "*"
+    return raw.replace("..", "-")
+
+
+def _systemd_step_minutes(spec: str) -> str:
+    start_s, step_s = spec.split("/", 1)
+    start = int(start_s or "0")
+    step = int(step_s)
+    if step <= 0:
+        raise ValueError(f"Invalid systemd minute step: {spec}")
+    return ",".join(str(value) for value in range(start, 60, step))
+
+
+def _systemd_time_to_cron(time_spec: str) -> tuple[str, str]:
+    parts = time_spec.split(":")
+    if len(parts) < 2:
+        raise ValueError(f"Unsupported systemd time expression: {time_spec}")
+
+    hour_spec = _systemd_range_to_cron(parts[0])
+    minute_raw = parts[1].strip()
+    if "/" in minute_raw:
+        minute_spec = _systemd_step_minutes(minute_raw)
+    else:
+        minute_spec = _systemd_range_to_cron(str(int(minute_raw)) if minute_raw.isdigit() else minute_raw)
+    return minute_spec, hour_spec
+
+
+def _systemd_calendar_to_pattern(calendar: str) -> CronPattern | None:
+    expr = calendar.strip()
+    if not expr:
+        return None
+    if expr.lower() == "hourly":
+        return _cron_pattern("0", "*", "*")
+
+    parts = expr.split()
+    if not parts:
+        return None
+
+    dow_spec = "*"
+    time_spec = ""
+    first = parts[0].lower()
+    if any(first.startswith(day) for day in SYSTEMD_DOWS):
+        dow_spec = _systemd_dow_to_cron(parts[0])
+        candidates = parts[1:]
+    else:
+        candidates = parts
+
+    for candidate in candidates:
+        if ":" in candidate:
+            time_spec = candidate
+            break
+
+    if not time_spec:
+        return None
+
+    minute_spec, hour_spec = _systemd_time_to_cron(time_spec)
+    return _cron_pattern(minute_spec, hour_spec, dow_spec)
+
+
+def load_systemd_timer_jobs(timer_dir: Path) -> list[CronJob]:
+    jobs: list[CronJob] = []
+    for timer_file in sorted(Path(timer_dir).expanduser().resolve().glob("hawkstrade-*.timer")):
+        job_info = SYSTEMD_TIMER_JOBS.get(timer_file.name)
+        if job_info is None:
+            continue
+        key, label = job_info
+        for line_no, calendar in _read_systemd_timer_calendars(timer_file):
+            pattern = _systemd_calendar_to_pattern(calendar)
+            if pattern is None:
+                continue
+            jobs.append(
+                CronJob(
+                    key=key,
+                    label=label,
+                    pattern=pattern,
+                    command=f"systemd:{timer_file.name}",
+                    source_file=timer_file,
+                    line_no=line_no,
+                    schedule_text=f"OnCalendar={calendar}",
+                )
+            )
+    return jobs
+
+
 def _group_jobs(jobs: Iterable[CronJob]) -> dict[str, list[CronJob]]:
     grouped: dict[str, list[CronJob]] = {}
     for job in jobs:
@@ -361,6 +516,12 @@ def _group_jobs(jobs: Iterable[CronJob]) -> dict[str, list[CronJob]]:
 
 def _human_cron_line(pattern: CronPattern) -> str:
     return pattern.cron_text
+
+
+def _human_schedule_line(job: CronJob) -> str:
+    if job.schedule_text:
+        return job.schedule_text
+    return _human_cron_line(job.pattern)
 
 
 def detect_cron_template(local_timezone: str) -> str:
@@ -387,6 +548,21 @@ def resolve_cron_file(cron_template: str | None = None, cron_file: str | Path | 
         template = detect_cron_template(datetime.now().astimezone().tzname() or "")
     path = DEFAULT_CRON_FILES.get(template, DEFAULT_CRON_FILES["pacific"])
     return template, path
+
+
+def resolve_schedule(
+    *,
+    schedule_source: str = "cron",
+    cron_template: str | None = None,
+    cron_file: str | Path | None = None,
+    systemd_timer_dir: str | Path | None = None,
+) -> tuple[str, Path, list[CronJob]]:
+    if schedule_source == "systemd":
+        timer_dir = Path(systemd_timer_dir or DEFAULT_SYSTEMD_TIMER_DIR).expanduser().resolve()
+        return "systemd", timer_dir, load_systemd_timer_jobs(timer_dir)
+
+    template_name, cron_path = resolve_cron_file(cron_template=cron_template, cron_file=cron_file)
+    return template_name, cron_path, load_cron_jobs(cron_path)
 
 
 def _template_from_filename(path: Path) -> str:
@@ -1018,7 +1194,7 @@ def _combined_scan_health(
         "full_scan": _build_job_health(
             key="full_scan",
             label=full_jobs[0].label if full_jobs else "Full scan",
-            schedule_lines=[_human_cron_line(job.pattern) for job in full_jobs],
+            schedule_lines=[_human_schedule_line(job) for job in full_jobs],
             jobs_for_key=combined_jobs,
             recent_records=recent_combined_records,
             all_records=all_combined_records,
@@ -1029,7 +1205,7 @@ def _combined_scan_health(
         "crypto_scan": _build_job_health(
             key="crypto_scan",
             label=crypto_jobs[0].label if crypto_jobs else "Crypto scan",
-            schedule_lines=[_human_cron_line(job.pattern) for job in crypto_jobs],
+            schedule_lines=[_human_schedule_line(job) for job in crypto_jobs],
             jobs_for_key=combined_jobs,
             recent_records=recent_combined_records,
             all_records=all_combined_records,
@@ -1089,7 +1265,7 @@ def evaluate_job_health(
             _build_job_health(
                 key=key,
                 label=jobs_for_key[0].label if jobs_for_key else key,
-                schedule_lines=[_human_cron_line(job.pattern) for job in jobs_for_key],
+                schedule_lines=[_human_schedule_line(job) for job in jobs_for_key],
                 jobs_for_key=jobs_for_key,
                 recent_records=recent_records,
                 all_records=key_records,
@@ -1373,8 +1549,10 @@ def load_price_failure_state(path: str | Path = DEFAULT_PRICE_FAILURE_STATE_FILE
 
 def build_health_report(
     *,
+    schedule_source: str = "cron",
     cron_template: str = "auto",
     cron_file: str | Path | None = None,
+    systemd_timer_dir: str | Path | None = None,
     log_dir: str | Path = LOG_DIR,
     html_output: str | Path = DEFAULT_HTML_OUTPUT,
     now: datetime | None = None,
@@ -1384,8 +1562,12 @@ def build_health_report(
     price_failure_state_file: str | Path = DEFAULT_PRICE_FAILURE_STATE_FILE,
 ) -> HealthReport:
     now = now or datetime.now().astimezone().replace(tzinfo=None)
-    template_name, cron_path = resolve_cron_file(cron_template=cron_template, cron_file=cron_file)
-    jobs = load_cron_jobs(cron_path)
+    template_name, schedule_path, jobs = resolve_schedule(
+        schedule_source=schedule_source,
+        cron_template=cron_template,
+        cron_file=cron_file,
+        systemd_timer_dir=systemd_timer_dir,
+    )
     runtime = load_runtime_records(Path(log_dir))
 
     scan_records = runtime["scan"]
@@ -1413,7 +1595,7 @@ def build_health_report(
         generated_at=now,
         lookback_hours=lookback_hours,
         cron_template=template_name,
-        cron_file=cron_path,
+        cron_file=schedule_path,
         local_timezone=datetime.now().astimezone().tzname() or "local",
         overall_status=overall,
         alpaca=alpaca_state,
@@ -1569,15 +1751,15 @@ def format_terminal_report(report: HealthReport, *, use_color: bool = False) -> 
     lines.append("=" * table_width)
     lines.append("HAWKSTRADE LINUX HEALTH CHECK")
     lines.append(f"Generated : {report.generated_at.strftime('%Y-%m-%d %H:%M:%S')} {generated_tz}")
-    lines.append(f"Cron file : {report.cron_file}")
-    lines.append(f"Template  : {report.cron_template} | Local TZ: {report.local_timezone}")
+    lines.append(f"Schedule path  : {report.cron_file}")
+    lines.append(f"Schedule source: {report.cron_template} | Local TZ: {report.local_timezone}")
     lines.append(f"Window    : {window_label}")
     lines.append(f"Overall   : {overall}")
     lines.append("Legend    : [OK]=healthy | [WARN]=review | [NOK]=attention")
     lines.append("=" * table_width)
     lines.append("")
 
-    lines.append("CRON HEALTH")
+    lines.append("SCHEDULE HEALTH")
     lines.append(
         f"{'Job':<16} {'Schedule':<44} {'Last Run':<19} {'Age':<10} {'Dur':<10} {'Missed':<15} {'Status'}"
     )
@@ -1595,7 +1777,7 @@ def format_terminal_report(report: HealthReport, *, use_color: bool = False) -> 
         )
     lines.append("")
     lines.append(
-        "Missed counts reflect gaps detected between observed runs and the cron template; "
+        "Missed counts reflect gaps detected between observed runs and the configured schedule; "
         f"runs scheduled in the last {int(EXPECTED_RUN_GRACE.total_seconds() // 60)} minutes are treated as pending."
     )
     lines.append("Full scan and Crypto scan are evaluated together as one hourly cycle when both are scheduled.")
@@ -2068,8 +2250,8 @@ def render_html_report(report: HealthReport) -> str:
       <h1>Linux Health Check</h1>
       <div class="meta">
         <div><strong>Generated</strong>: {generated_local} {generated_tz}</div>
-        <div><strong>Template</strong>: {cron_name}</div>
-        <div><strong>Cron file</strong>: {cron_file}</div>
+        <div><strong>Schedule source</strong>: {cron_name}</div>
+        <div><strong>Schedule path</strong>: {cron_file}</div>
         <div><strong>Window</strong>: {window_label}</div>
         <div><strong>Overall</strong>: <span class="badge {report.overall_status}">{html.escape(report.overall_status.upper())}</span></div>
       </div>
@@ -2079,7 +2261,7 @@ def render_html_report(report: HealthReport) -> str:
     </div>
 
     <section>
-      <h2>Cron Health</h2>
+      <h2>Schedule Health</h2>
       <table>
         <thead>
           <tr>
@@ -2179,7 +2361,7 @@ def render_html_report(report: HealthReport) -> str:
           </table>
         </div>
       </div>
-      <div class="footnote">The dashboard is generated from cron templates, runtime logs, and the current Alpaca snapshot when available. Runs scheduled in the last {int(EXPECTED_RUN_GRACE.total_seconds() // 60)} minutes are treated as pending. Full scan and Crypto scan are evaluated together as one hourly cycle when both are scheduled.</div>
+      <div class="footnote">The dashboard is generated from configured schedules, runtime logs, and the current Alpaca snapshot when available. Runs scheduled in the last {int(EXPECTED_RUN_GRACE.total_seconds() // 60)} minutes are treated as pending. Full scan and Crypto scan are evaluated together as one hourly cycle when both are scheduled.</div>
     </section>
   </div>
 </body>
@@ -2257,6 +2439,8 @@ def health_report_to_dict(report: HealthReport) -> dict:
         "lookback_hours": report.lookback_hours,
         "cron_template": report.cron_template,
         "cron_file": str(report.cron_file),
+        "schedule_source": report.cron_template,
+        "schedule_path": str(report.cron_file),
         "local_timezone": report.local_timezone,
         "overall_status": report.overall_status,
         "html_output": str(report.html_output),
@@ -2385,7 +2569,7 @@ def collect_alert_items(report: HealthReport, *, alert_on: str = "red") -> list[
         if job.last_run_at is None:
             details.append("no observed run")
         suffix = f": {'; '.join(details)}" if details else ""
-        items.append(f"Cron {job.label} [{_alert_status_label(job.status)}]{suffix}")
+        items.append(f"Schedule {job.label} [{_alert_status_label(job.status)}]{suffix}")
 
     for failure in report.price_failures:
         if not _status_meets_threshold(failure.status, alert_on):
@@ -2495,6 +2679,12 @@ def _float_env(name: str, default: float) -> float:
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="HawksTrade Linux health check")
     parser.add_argument(
+        "--schedule-source",
+        choices=["cron", "systemd"],
+        default=os.getenv("HAWKSTRADE_HEALTH_SCHEDULE_SOURCE", "cron").lower(),
+        help="Schedule definitions to inspect: cron templates or systemd timer files (default: cron)",
+    )
+    parser.add_argument(
         "--cron-template",
         default="auto",
         choices=["auto", "eastern", "pacific", "utc"],
@@ -2503,6 +2693,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--cron-file",
         help="Override the cron template file to inspect",
+    )
+    parser.add_argument(
+        "--systemd-timer-dir",
+        default=str(DEFAULT_SYSTEMD_TIMER_DIR),
+        help="Directory containing hawkstrade-*.timer files when --schedule-source systemd is used",
     )
     parser.add_argument(
         "--log-dir",
@@ -2515,7 +2710,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         dest="lookback_hours",
         type=float,
         default=4.0,
-        help="How many hours back to inspect logs and expected cron runs (default: 4)",
+        help="How many hours back to inspect logs and expected scheduled runs (default: 4)",
     )
     parser.add_argument(
         "--lookback-days",
@@ -2592,8 +2787,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.lookback_days is not None:
         args.lookback_hours = float(args.lookback_days) * 24.0
     report = build_health_report(
+        schedule_source=args.schedule_source,
         cron_template=args.cron_template,
         cron_file=args.cron_file,
+        systemd_timer_dir=args.systemd_timer_dir,
         log_dir=args.log_dir,
         html_output=args.html_output,
         lookback_hours=args.lookback_hours,
