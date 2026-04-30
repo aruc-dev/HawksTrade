@@ -203,6 +203,43 @@ class MACrossoverStrategyTests(unittest.TestCase):
         self.assertIn("atr_risk_qty", signals[0])
         self.assertGreater(signals[0]["atr_risk_qty"], 0)
 
+    def test_scan_applies_configured_signal_cap_after_confidence_ranking(self):
+        prices = [100.0] * 121
+        prices[119] = 90.0
+        prices[120] = 200.0
+        low_volume = [_bar(p, high=p+2, low=p-2, volume=1000) for p in prices]
+        high_volume = [_bar(p, high=p+2, low=p-2, volume=1000) for p in prices]
+        high_volume[-1] = _bar(200.0, high=202.0, low=198.0, volume=3000)
+        bars_data = {"LOW/USD": low_volume, "HIGH/USD": high_volume}
+
+        with (
+            patch("strategies.ma_crossover.ac.get_crypto_bars", return_value=bars_data),
+            patch("strategies.ma_crossover.rm.crypto_regime_ok", return_value=True),
+            patch("strategies.ma_crossover._calc_rsi", return_value=55.0),
+            patch("strategies.ma_crossover.ac.get_portfolio_value", return_value=10000.0),
+            patch.dict(
+                "strategies.ma_crossover.SCFG",
+                {
+                    "fast_ema": 9,
+                    "slow_ema": 21,
+                    "timeframe": "1Day",
+                    "atr_period": 14,
+                    "atr_multiplier": 2.0,
+                    "risk_per_trade_pct": 0.01,
+                    "rsi_entry_min": 35,
+                    "rsi_entry_max": 70,
+                    "volume_spike_ratio": 0,
+                    "volume_avg_period": 20,
+                    "vol_filter_period": 10,
+                    "entry_cross_lookback_days": 1,
+                    "max_signals": 1,
+                },
+            ),
+        ):
+            signals = MACrossoverStrategy().scan(["LOW/USD", "HIGH/USD"])
+
+        self.assertEqual([signal["symbol"] for signal in signals], ["HIGH/USD"])
+
     def test_scan_blocks_signals_when_portfolio_value_unavailable_for_atr_sizing(self):
         prices = [100.0] * 121
         prices[119] = 90.0

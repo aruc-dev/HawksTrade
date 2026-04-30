@@ -7,7 +7,7 @@ from strategies.momentum import (
 )
 
 
-def _bar(close, high=None, low=None, volume=2000):
+def _bar(close, high=None, low=None, volume=3000):
     return SimpleNamespace(
         close=float(close),
         high=float(high if high is not None else close * 1.01),
@@ -17,7 +17,7 @@ def _bar(close, high=None, low=None, volume=2000):
     )
 
 
-def _bar_dict(close, high=None, low=None, volume=2000):
+def _bar_dict(close, high=None, low=None, volume=3000):
     return {
         "close": float(close),
         "high": float(high if high is not None else close * 1.01),
@@ -33,7 +33,7 @@ class MomentumStrategyTests(unittest.TestCase):
 
     def test_scan_falls_back_to_single_symbol_fetch_when_batch_response_is_sparse(self):
         prices = [100.0] * 100 + [110.0]
-        bars = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=2000)]
+        bars = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=3000)]
         batch_bars = {"AAPL": bars}
         jpm_bars   = {"JPM": bars}
 
@@ -67,7 +67,7 @@ class MomentumStrategyTests(unittest.TestCase):
 
     def test_scan_skips_missing_symbol_without_warning_when_fallback_is_also_missing(self):
         prices = [100.0] * 100 + [110.0]
-        bars = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=2000)]
+        bars = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=3000)]
         batch_bars = {"AAPL": bars}
 
         def _get_stock_bars(symbols, timeframe="1Day", limit=60):
@@ -129,7 +129,7 @@ class MomentumStrategyTests(unittest.TestCase):
 
     def test_momentum_smoothed_lookback(self):
         prices = [100.0] * 120 + [105.0, 115.0]
-        bars = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=2000)]
+        bars = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=3000)]
         bars_resp = {"AAPL": bars}
         
         with (
@@ -150,8 +150,8 @@ class MomentumStrategyTests(unittest.TestCase):
         a_prices = [100.0] * 100 + [110.0, 110.0]
         b_prices = [100.0] * 100 + [112.0, 112.0]
         
-        bars_a = [_bar(p, volume=1000) for p in a_prices[:-1]] + [_bar(a_prices[-1], volume=2000)]
-        bars_b = [_bar(p, volume=1000) for p in b_prices[:-1]] + [_bar(b_prices[-1], volume=2000)]
+        bars_a = [_bar(p, volume=1000) for p in a_prices[:-1]] + [_bar(a_prices[-1], volume=3000)]
+        bars_b = [_bar(p, volume=1000) for p in b_prices[:-1]] + [_bar(b_prices[-1], volume=3000)]
         
         bars_resp = {"AAPL": bars_a, "MSFT": bars_b}
         regime_bars = {"SPY": [_bar(p) for p in spy_prices]}
@@ -173,7 +173,7 @@ class MomentumStrategyTests(unittest.TestCase):
         spy_prices = [100.0] * 100 + [108.0, 108.0]
         a_prices = [100.0] * 100 + [110.0, 110.0]
 
-        bars_a = [_bar(p, volume=1000) for p in a_prices[:-1]] + [_bar(a_prices[-1], volume=2000)]
+        bars_a = [_bar(p, volume=1000) for p in a_prices[:-1]] + [_bar(a_prices[-1], volume=3000)]
         bars_resp = {"AAPL": bars_a}
         regime_bars = {"SPY": [_bar(p) for p in spy_prices]}
 
@@ -211,7 +211,7 @@ class MomentumStrategyTests(unittest.TestCase):
 
     def test_scan_accepts_dict_bars_for_volume_and_atr_sizing(self):
         prices = [100.0] * 100 + [110.0, 110.0]
-        bars = [_bar_dict(p, volume=1000) for p in prices[:-1]] + [_bar_dict(prices[-1], volume=2000)]
+        bars = [_bar_dict(p, volume=1000) for p in prices[:-1]] + [_bar_dict(prices[-1], volume=3000)]
         bars_resp = {"AAPL": bars}
 
         with (
@@ -235,7 +235,7 @@ class MomentumStrategyTests(unittest.TestCase):
 
     def test_scan_includes_atr_stop_price_in_signal(self):
         prices = list(range(90, 115)) 
-        bars = [_bar(p, high=p * 1.02, low=p * 0.98, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=2000)]
+        bars = [_bar(p, high=p * 1.02, low=p * 0.98, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=3000)]
         bars_resp = {"AAPL": bars}
 
         with (
@@ -258,7 +258,7 @@ class MomentumStrategyTests(unittest.TestCase):
 
     def test_scan_includes_atr_risk_qty_in_signal(self):
         prices = list(range(90, 115))
-        bars = [_bar(p, high=p * 1.02, low=p * 0.98, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=2000)]
+        bars = [_bar(p, high=p * 1.02, low=p * 0.98, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=3000)]
         bars_resp = {"AAPL": bars}
 
         with (
@@ -282,7 +282,7 @@ class MomentumStrategyTests(unittest.TestCase):
 
     def test_scan_blocks_signals_when_portfolio_value_unavailable_for_atr_sizing(self):
         prices = list(range(90, 115))
-        bars = [_bar(p, high=p * 1.02, low=p * 0.98, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=2000)]
+        bars = [_bar(p, high=p * 1.02, low=p * 0.98, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=3000)]
         bars_resp = {"AAPL": bars}
 
         with (
@@ -304,7 +304,7 @@ class MomentumStrategyTests(unittest.TestCase):
 
     def test_scan_enforces_sector_neutrality(self):
         prices = [100.0] * 100 + [120.0, 120.0]
-        bars_high = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=2000)]
+        bars_high = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=3000)]
         
         bars_resp = {
             "AAPL": bars_high, 
@@ -334,7 +334,7 @@ class MomentumStrategyTests(unittest.TestCase):
 
     def test_scan_counts_existing_symbols_against_sector_cap(self):
         prices = [100.0] * 100 + [120.0, 120.0]
-        bars_high = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=2000)]
+        bars_high = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=3000)]
         bars_resp = {
             "NVDA": bars_high,
             "JPM": bars_high,
@@ -361,7 +361,7 @@ class MomentumStrategyTests(unittest.TestCase):
         # 120 bars at 1000.
         # ATR calculation logic:
         # high=1500, low=500 -> TR = 1000.
-        bars = [_bar(1000.0, high=1500.0, low=500.0, volume=1000) for _ in range(120)] + [_bar(1000.0, volume=2000)]
+        bars = [_bar(1000.0, high=1500.0, low=500.0, volume=1000) for _ in range(120)] + [_bar(1000.0, volume=3000)]
         bars_resp = {"AAPL": bars}
 
         with (
@@ -382,7 +382,7 @@ class MomentumStrategyTests(unittest.TestCase):
 
     def test_scan_full_signals_in_green_regime(self):
         prices = [100.0] * 100 + [110.0, 110.0]
-        bars = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=2000)]
+        bars = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=3000)]
         bars_resp = {"AAPL": bars, "MSFT": bars, "GOOG": bars}
 
         with (
@@ -399,7 +399,7 @@ class MomentumStrategyTests(unittest.TestCase):
 
     def test_scan_blocks_when_breadth_coverage_is_too_low(self):
         prices = [100.0] * 100 + [110.0, 110.0]
-        bars = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=2000)]
+        bars = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=3000)]
         bars_resp = {"AAPL": bars}
 
         with (
@@ -427,7 +427,7 @@ class MomentumStrategyTests(unittest.TestCase):
         # Before fix: this band got full top_n (Green behaviour).
         # After fix: yellow_max_positions cap applies.
         prices = [100.0] * 100 + [110.0, 110.0]
-        bars = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=2000)]
+        bars = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=3000)]
         bars_resp = {"AAPL": bars, "MSFT": bars, "GOOG": bars}
 
         with (

@@ -191,6 +191,79 @@ class GapUpStrategyTests(unittest.TestCase):
 
         self.assertEqual([signal["symbol"] for signal in signals], ["HIGH"])
 
+    def test_scan_blocks_when_configured_breadth_guard_fails(self):
+        bars = _eligible_daily_bars()
+        opening = _opening_bar(106, volume=40)
+
+        with (
+            patch(
+                "strategies.gap_up.ac.get_stock_bars",
+                side_effect=_stock_bars_side_effect({"AAPL": bars}, {"AAPL": opening}),
+            ),
+            patch("strategies.gap_up.rm.market_regime_ok", return_value=True),
+            patch("strategies.gap_up.rm.market_breadth_pct", return_value=0.55) as breadth,
+            patch("strategies.gap_up.ac.get_portfolio_value") as get_portfolio_value,
+            patch.dict(
+                "strategies.gap_up.SCFG",
+                {
+                    "enabled": True,
+                    "min_gap_pct": 0.04,
+                    "max_gap_pct": 0.15,
+                    "volume_multiplier": 1.5,
+                    "volume_avg_period": 20,
+                    "min_breadth_pct": 0.60,
+                    "entry_window_minutes": 45,
+                    "atr_period": 14,
+                    "atr_multiplier": 2.0,
+                    "trend_sma_period": 200,
+                    "require_true_gap": True,
+                    "risk_per_trade_pct": 0.01,
+                    "max_signals": 0,
+                },
+            ),
+        ):
+            signals = GapUpStrategy().scan(["AAPL"], current_time=datetime(2026, 4, 20, 13, 35))
+
+        self.assertEqual(signals, [])
+        breadth.assert_called_once()
+        get_portfolio_value.assert_not_called()
+
+    def test_scan_blocks_when_gap_is_too_far_above_trend_sma(self):
+        bars = [_bar(100, 101, 99, 100, 1000) for _ in range(199)]
+        bars.append(_bar(99, 101, 98, 100, 1000))
+        opening = _opening_bar(140, volume=40)
+
+        with (
+            patch(
+                "strategies.gap_up.ac.get_stock_bars",
+                side_effect=_stock_bars_side_effect({"AAPL": bars}, {"AAPL": opening}),
+            ),
+            patch("strategies.gap_up.rm.market_regime_ok", return_value=True),
+            patch("strategies.gap_up.ac.get_portfolio_value") as get_portfolio_value,
+            patch.dict(
+                "strategies.gap_up.SCFG",
+                {
+                    "enabled": True,
+                    "min_gap_pct": 0.04,
+                    "max_gap_pct": 0.50,
+                    "volume_multiplier": 1.5,
+                    "volume_avg_period": 20,
+                    "entry_window_minutes": 45,
+                    "atr_period": 14,
+                    "atr_multiplier": 2.0,
+                    "trend_sma_period": 200,
+                    "max_trend_extension_pct": 0.35,
+                    "require_true_gap": True,
+                    "risk_per_trade_pct": 0.01,
+                    "max_signals": 0,
+                },
+            ),
+        ):
+            signals = GapUpStrategy().scan(["AAPL"], current_time=datetime(2026, 4, 20, 13, 35))
+
+        self.assertEqual(signals, [])
+        get_portfolio_value.assert_not_called()
+
     def test_scan_reuses_single_portfolio_value_for_multiple_candidates(self):
         bars = _eligible_daily_bars()
         opening = _opening_bar(105, volume=40)

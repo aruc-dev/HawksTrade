@@ -1,13 +1,13 @@
 """
 HawksTrade - RSI Mean Reversion Strategy (Stocks) — Conservative
 =================================================================
-Entry: RSI(14) < 30 (deeply oversold), %B < 20% (near lower Bollinger Band,
-       20-period 2σ), volume ≥ 1.5× 20-day average, 1-bar price recovery,
+Entry: RSI(14) < 35 (oversold/recovering), %B < 20% (near lower Bollinger Band,
+       20-period 2σ), volume ≥ 0.8× 20-day average, 1-bar price recovery,
        stock within 15% of SMA200.
 
-Stop:  2 × ATR(14) below entry — volatility-adjusted, gives the trade room
-       to breathe during capitulation. Global 3.5% stop remains as absolute
-       floor; whichever is further below entry governs.
+Stop:  0.8 × ATR(14) below entry is available as a volatility stop extension.
+       The global 3.5% stop still governs whenever it is stricter; whichever
+       is further below entry governs.
 
 Exit:  FIRST of:
          (a) Price reaches the 20-day SMA  — mean reversion target achieved.
@@ -16,14 +16,14 @@ Exit:  FIRST of:
 
 Regime filters (both must pass):
   1. Crash filter  — skip if SPY >20% below its 252-day peak.
-  2. VIX proxy     — skip if SPY realised HV(20) > its 200-day MA × 1.2.
+  2. VIX proxy     — skip if SPY realised HV(20) > its 200-day MA × 0.9.
                      Backtests pass enough SPY history after warmup for both
                      filters to run; early warmup still passes through.
 
 ATR stop price is stored in each signal dict as "atr_stop_price". In both
 backtest and live/paper modes it flows through order_executor.enter_position
 into the trade log stop_loss column, and is picked up by run_risk_check as
-the effective stop whenever it widens beyond the global fixed-percentage stop.
+the effective stop whenever it extends beyond the global fixed-percentage stop.
 """
 
 from __future__ import annotations
@@ -236,7 +236,7 @@ class RSIReversionStrategy(BaseStrategy):
         log.info(
             f"[RSI] Scanning {len(universe)} symbols "
             f"(RSI<{oversold}, %B<20%, vol>{volume_spike_ratio:.1f}x, 1-bar recovery, SMA200 -{sma200_lower:.0%}/+{sma200_upper:.0%}, "
-            f"2×ATR stop, exit@SMA20 or RSI>50)..."
+            f"{atr_mult:.1f}×ATR stop extension, exit@SMA20 or RSI>50)..."
         )
 
         try:

@@ -1,10 +1,11 @@
 """
 HawksTrade - EMA Crossover Strategy (Crypto)
 =============================================
-Enters when the fast EMA (9) crosses above the slow EMA (21).
+Enters when the fast EMA crosses above the slow EMA.
 Exits when the fast EMA crosses back below the slow EMA.
 
-Works 24/7 on crypto pairs.
+The production profile uses a 6/18 daily EMA pair and caps each scan to the
+top-ranked signal to reduce correlated crypto entries. Works 24/7 on crypto pairs.
 """
 
 from __future__ import annotations
@@ -94,6 +95,7 @@ class MACrossoverStrategy(BaseStrategy):
         vol_avg_period   = int(SCFG.get("volume_avg_period", 20))
         vol_filter_period = int(SCFG.get("vol_filter_period", 10))
         cross_lookback   = int(SCFG.get("entry_cross_lookback_days", 1))
+        max_signals      = int(SCFG.get("max_signals", 0) or 0)
         min_trade_value  = float(CFG["trading"].get("min_trade_value_usd", 100))
 
         log.info(f"[MACross] Scanning {len(universe)} crypto pairs "
@@ -192,12 +194,19 @@ class MACrossoverStrategy(BaseStrategy):
                         continue
                     atr_stop, atr_risk_qty = sized
 
+                    vol_ratio = curr_vol / avg_vol if avg_vol > 0 else 0.0
+                    confidence = min(
+                        1.0,
+                        (0.55 * min(ema_divergence * 10, 1.0))
+                        + (0.30 * min(vol_ratio / max(vol_spike_ratio, 1.0), 2.0) / 2.0)
+                        + (0.15 * (1.0 - min(abs(rsi_val - 55.0) / 20.0, 1.0))),
+                    )
                     sig = {
                         "symbol":         symbol,
                         "action":         "buy",
                         "strategy":       self.name,
                         "asset_class":    self.asset_class,
-                        "confidence":     round(min(ema_divergence * 10, 1.0), 3),
+                        "confidence":     round(confidence, 3),
                         "atr_stop_price": atr_stop,
                         "reason":         f"BULLISH {fast_span}/{slow_span} EMA Crossover | Slope UP | Vol Confirm | RSI={rsi_val:.1f} | ATR Stop={atr_stop}",
                     }
@@ -213,7 +222,8 @@ class MACrossoverStrategy(BaseStrategy):
                 log.warning(f"[MACross] Error for {symbol}: {e}")
                 continue
 
-        return signals
+        ranked = sorted(signals, key=lambda sig: sig.get("confidence", 0), reverse=True)
+        return ranked[:max_signals] if max_signals > 0 else ranked
 
     def should_exit(self, symbol: str, entry_price: float) -> tuple:
         """Exit on max loss, bearish EMA cross, or overbought RSI."""

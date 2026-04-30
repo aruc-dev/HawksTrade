@@ -1,7 +1,8 @@
 """
 HawksTrade - Gap-Up Strategy (Stocks)
 =======================================
-Identifies stocks that gap up >3% at the open on above-average volume.
+Identifies stocks that gap up 6-15% at the open on above-average volume,
+with breadth and trend-extension guards to avoid exhausted gaps.
 Entry is swing-oriented: hold for hold_days, NOT intraday exit by default.
 
 NOTE: Intraday exit is controlled by config intraday.enabled.
@@ -220,10 +221,12 @@ class GapUpStrategy(BaseStrategy):
         max_gap     = float(SCFG.get("max_gap_pct", 0.15))
         vol_mult    = float(SCFG.get("volume_multiplier", 1.5))
         vol_avg_period = int(SCFG.get("volume_avg_period", 20))
+        min_breadth_pct = float(SCFG.get("min_breadth_pct", 0.0))
         risk_pct    = float(SCFG.get("risk_per_trade_pct", 0.01))
         atr_period  = int(SCFG.get("atr_period", 14))
         atr_mult    = float(SCFG.get("atr_multiplier", 2.0))
         sma_long    = int(SCFG.get("trend_sma_period", 200))
+        max_trend_extension_pct = float(SCFG.get("max_trend_extension_pct", 0.0))
         require_true_gap = bool(SCFG.get("require_true_gap", True))
         history_timeframe = SCFG.get("timeframe", "1Day")
         opening_timeframe = SCFG.get("opening_timeframe", "1Min")
@@ -262,6 +265,14 @@ class GapUpStrategy(BaseStrategy):
         ):
             log.info("[GapUp] Bear regime (SPY < SMA50), skipping scan.")
             return []
+
+        if min_breadth_pct > 0:
+            breadth = rm.market_breadth_pct(universe, bars_data=bars_data)
+            if breadth < min_breadth_pct:
+                log.info(
+                    f"[GapUp] Breadth {breadth:.1%} below {min_breadth_pct:.1%}; skipping scan."
+                )
+                return []
 
         signals = []
         portfolio_value = None
@@ -305,6 +316,7 @@ class GapUpStrategy(BaseStrategy):
                     if (avg_vol > 0 and
                         vol_ratio >= vol_mult and
                         today_open > trend_sma and
+                        (max_trend_extension_pct <= 0 or trend_spread <= max_trend_extension_pct) and
                         prev_close > prev_open and
                         open_extension_pct <= max_open_extension_pct and
                         open_extension_pct >= -max_open_fade_pct and

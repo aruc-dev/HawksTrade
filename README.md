@@ -42,11 +42,11 @@ HawksTrade includes a high-fidelity historical simulator. The current default st
 
 | Strategy | Market | Key Parameters | Approach |
 |----------|--------|----------------|----------|
-| **Momentum** | US Stocks | Top 1 by 5-day return, min 10% momentum, 1.8x volume spike, 75% breadth coverage, profit-aware exit | Captures only high-conviction rallies, exits flat/losing trades after the minimum hold, and lets profitable trades run under trailing protection. |
-| **RSI Reversion** | US Stocks | Enabled; RSI < 30, %B < 20%, SMA-200 within +/-15%, vol spike 1.5x, 1-bar recovery | Conservative mean reversion with crash and realised-volatility regime guards. |
-| **Gap-Up** | US Stocks | Enabled; true 4-15% opening gap, 1.5x opening-volume pace, SMA-200 trend, top-1 ranked signal, 3-day hold | Opening momentum sleeve with completed-bar history, minute-bar entry confirmation, and ATR-risk sizing. |
-| **EMA Crossover** | Crypto | 9/21 EMA, 2-day recent-cross window, RSI 35-70, slope + volatility filters, 1% daily-close max-loss exit | Bullish EMA crossover with BTC regime gate and tighter strategy-level capital defense. |
-| **Range Breakout** | Crypto | Enabled; 20-day high close breakout, 2.0x volume, rising EMA-50, RSI/extension guards | Ranked Donchian-style breakout sleeve with failed-breakout and trend-loss exits. |
+| **Momentum** | US Stocks | Top 1 by 5-day return, min 10% momentum, 2.5x volume spike, 75% breadth coverage, 1.2x ATR stop extension, profit-aware exit | Captures only high-conviction rallies, exits flat/losing trades after the minimum hold, and lets profitable trades run under trailing protection. |
+| **RSI Reversion** | US Stocks | Enabled; RSI < 35, %B < 20%, SMA-200 within +/-15%, 0.8x volume confirmation, 1-bar recovery, 0.8x ATR stop extension | Mean reversion with tighter regime filters and less permissive volatility stop extension after the latest tuning pass. |
+| **Gap-Up** | US Stocks | Enabled; true 6-15% opening gap, 1.5x opening-volume pace, 75% breadth guard, <=35% SMA-200 extension, top-1 ranked signal, 2-day hold, failed-gap exit | Opening momentum sleeve with completed-bar history, minute-bar entry confirmation, and ATR-risk sizing. |
+| **EMA Crossover** | Crypto | 6/18 EMA, latest completed cross only, top-1 ranked signal, RSI 35-70, slope + volatility filters, 1% daily-close max-loss exit | Bullish EMA crossover with BTC regime gate and tighter same-scan concentration control. |
+| **Range Breakout** | Crypto | Enabled; 20-day high close breakout, 3.0x volume, rising EMA-50, RSI/extension guards | Ranked Donchian-style breakout sleeve with failed-breakout and trend-loss exits. |
 
 **Crypto Universe**: `BTC/USD`, `SOL/USD`, `LINK/USD`, `DOGE/USD`, `LTC/USD`, `DOT/USD`.
 
@@ -78,9 +78,12 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
   --strategies momentum,rsi_reversion,gap_up,ma_crossover,range_breakout \
   --set strategies.momentum.top_n=1 \
   --set strategies.momentum.min_momentum_pct=0.10 \
-  --set strategies.momentum.volume_spike_ratio=1.8 \
+  --set strategies.momentum.volume_spike_ratio=2.5 \
   --set strategies.momentum.min_breadth_coverage_pct=0.75 \
-  --set strategies.ma_crossover.max_loss_exit_pct=0.01
+  --set strategies.ma_crossover.fast_ema=6 \
+  --set strategies.ma_crossover.slow_ema=18 \
+  --set strategies.ma_crossover.max_signals=1 \
+  --set strategies.range_breakout.volume_multiplier=3.0
 ```
 
 Before scaling live capital, run the cost-aware validation gate. It applies the
@@ -114,7 +117,7 @@ python3 scheduler/run_validation_gate.py --profile range
 
 - **Asymmetric Reward**: 3.5% stop-loss / 12% take-profit.
 - **Capital Protection**: SMA-based trend filters on all strategies.
-- **Strategy-Local Loss Defense**: MA Crossover exits on a daily close at least 1% below entry, reducing crypto trend-tail losses before the global stop layer is needed.
+- **Strategy-Local Loss Defense**: Momentum and RSI use less-permissive ATR stop extensions on top of the global stop layer, Gap-Up exits failed continuations, and MA Crossover exits on a daily close at least 1% below entry.
 - **Position Limits**: Max 8% of portfolio per trade, cap of 10 concurrent positions.
 - **Daily Guardrail**: 5% daily loss limit (hard stop for the day), keyed to the `America/New_York` trading-session date so UTC cloud hosts do not reset the baseline at UTC midnight. The baseline is the first observed account value for that trading date and is persisted in `data/daily_loss_baseline.json`; it is not reconstructed from the prior close.
 - **Broker Resilience**: Alpaca timeouts, rate limits, and 5xx outages use bounded retry; auth failures, not-found responses, and broker rejections are classified for fail-closed logging.
