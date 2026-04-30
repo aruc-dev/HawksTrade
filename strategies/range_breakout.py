@@ -2,8 +2,10 @@
 HawksTrade - Range Breakout Strategy (Crypto)
 ==============================================
 Enters long when price confirms a breakout above the configured
-Donchian high with volume, trend, volatility, RSI, and extension
-guards. Failed breakouts can exit before the hold_days cap.
+prior N-bar Donchian high, excluding the current bar. The default
+profile requires a 20-day high breakout, 2.0x volume confirmation,
+trend, volatility, RSI, and extension guards. Failed breakouts can
+exit before the 14-day hold cap.
 
 Works 24/7 on crypto pairs.
 """
