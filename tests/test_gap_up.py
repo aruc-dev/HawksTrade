@@ -3,7 +3,9 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from strategies.gap_up import GapUpStrategy
+import pandas as pd
+
+from strategies.gap_up import GapUpStrategy, _completed_daily_history
 
 OPEN_TS = datetime(2026, 4, 20, 13, 35, tzinfo=timezone.utc)
 
@@ -42,6 +44,17 @@ def _stock_bars_side_effect(daily_by_symbol, opening_by_symbol):
 
 
 class GapUpStrategyTests(unittest.TestCase):
+    def test_completed_daily_history_excludes_current_pandas_timestamp_bar(self):
+        prior_bar = _bar(99, 101, 98, 100, 1000, timestamp=pd.Timestamp("2026-04-17T20:00:00Z"))
+        current_bar = _bar(104, 106, 103, 105, 1000, timestamp=pd.Timestamp("2026-04-20T20:00:00Z"))
+
+        completed = _completed_daily_history(
+            [prior_bar, current_bar],
+            current_time=datetime(2026, 4, 20, 13, 35, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(completed, [prior_bar])
+
     def test_scan_requires_true_gap_when_configured(self):
         bars = [_bar(90, 91, 89, 90, 1000) for _ in range(199)]
         bars.append(_bar(97, 104, 96, 98, 1000))

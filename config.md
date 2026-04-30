@@ -18,7 +18,7 @@ The latest validated default configuration is:
 | Trading mode | `mode: paper` | Paper trading should remain the default until live trading is explicitly approved. |
 | Intraday trading | `intraday.enabled: false` | The system is validated as a swing-trading bot. |
 | Screener | `screener.enabled: true` | The tightened screener improved 12-month return versus the old screener and recent fixed-universe test. |
-| Momentum | enabled, `top_n: 1`, `min_momentum_pct: 0.10`, `volume_spike_ratio: 1.8`, `min_breadth_coverage_pct: 0.75` | Focuses stock exposure on the single strongest high-volume momentum candidate and blocks entries when breadth data coverage is too thin. |
+| Momentum | enabled, `top_n: 1`, `min_momentum_pct: 0.10`, `volume_spike_ratio: 2.5`, `min_breadth_coverage_pct: 0.75` | Focuses stock exposure on the single strongest high-volume momentum candidate and blocks entries when breadth data coverage is too thin. |
 | RSI Reversion | enabled | Active mean-reversion stock sleeve with crash and realised-volatility guards. The full profile passes production gates, but RSI itself had two losing 12-month trades, so monitor with the RSI validation profile before scaling allocation. |
 | Gap-Up | enabled | Opening-momentum sleeve with true-gap, opening-volume pace, trend, and top-1 ranking guards. |
 | MA Crossover | enabled, `max_loss_exit_pct: 0.01` | Positive crypto contribution in the latest 12-month backtest with a tighter daily-close loss exit to preserve capital. |
@@ -222,12 +222,12 @@ momentum:
   min_momentum_pct: 0.10
   min_alpha_pct: 0.0
   min_breadth_coverage_pct: 0.75
-  volume_spike_ratio: 1.8
+  volume_spike_ratio: 2.5
 ```
 
 Recommended: enabled.
 
-Momentum is the primary stock contributor. The stricter `top_n: 1`, `min_momentum_pct: 0.10`, `volume_spike_ratio: 1.8`, and `min_breadth_coverage_pct: 0.75` settings reduced churn, improved win rate, and cut drawdown in the validated default profile.
+Momentum is the primary stock contributor. The stricter `top_n: 1`, `min_momentum_pct: 0.10`, `volume_spike_ratio: 2.5`, and `min_breadth_coverage_pct: 0.75` settings reduced churn, improved win rate, and cut drawdown in the validated default profile.
 
 ### RSI Reversion
 
@@ -235,9 +235,12 @@ Momentum is the primary stock contributor. The stricter `top_n: 1`, `min_momentu
 rsi_reversion:
   enabled: true
   rsi_period: 14
-  oversold_threshold: 30
+  oversold_threshold: 35
   overbought_threshold: 50
   hold_days: 10
+  vix_multiplier: 0.9
+  atr_multiplier: 0.8
+  volume_spike_ratio: 0.8
 ```
 
 Recommended: enabled in the active profile, with continued monitoring through
@@ -253,19 +256,21 @@ candidate for higher allocation.
 ```yaml
 gap_up:
   enabled: true
-  min_gap_pct: 0.04
+  min_gap_pct: 0.06
   max_gap_pct: 0.15
   require_true_gap: true
   volume_multiplier: 1.5
   volume_avg_period: 20
+  min_breadth_pct: 0.75
   trend_sma_period: 200
+  max_trend_extension_pct: 0.35
   entry_window_minutes: 45
   opening_timeframe: "1Min"
   max_open_extension_pct: 0.03
   max_open_fade_pct: 0.005
   max_signals: 1
   intraday_exit: false
-  hold_days: 3
+  hold_days: 2
 ```
 
 Recommended: enabled in the all-strategy profile, with continued monitoring.
@@ -302,7 +307,7 @@ range_breakout:
   breakout_lookback_days: 20
   breakout_pct: 0.008
   max_breakout_extension_pct: 0.08
-  volume_multiplier: 2.0
+  volume_multiplier: 3.0
   volume_avg_period: 20
   timeframe: "1Day"
   hold_days: 14
@@ -409,11 +414,11 @@ Run the default production gate with:
 python3 scheduler/run_validation_gate.py --profile production
 ```
 
-The production profile currently validates the costed core strategy subset used
-before the all-strategies enablement change. The all-enabled profile has higher
-observed drawdown in the latest requested backtests, so revisit the production
-gate strategy lists and thresholds before scaling live capital against the full
-all-enabled book. The latest 30-day crypto sleeve is watch-only: it reports
+The production profile validates the current costed production gate rather than
+the older core-only subset. It includes the expanded strategy set used in
+`validation.production_gate.windows[*].strategies`, including `gap_up` and
+`range_breakout`, and applies the tighter production thresholds defined in
+`config/config.yaml`. The latest 30-day crypto sleeve is watch-only: it reports
 weak short-window behavior without blocking the longer capital-preservation
 gates.
 

@@ -218,6 +218,7 @@ class HealthReport:
     log_warnings: list[LogFinding]
     price_failures: list[PriceFailureState]
     html_output: Path
+    schedule_source: str = "cron"
 
 
 @dataclass(frozen=True)
@@ -557,7 +558,8 @@ def resolve_schedule(
     cron_file: str | Path | None = None,
     systemd_timer_dir: str | Path | None = None,
 ) -> tuple[str, Path, list[CronJob]]:
-    if schedule_source == "systemd":
+    source = (schedule_source or "cron").lower()
+    if source == "systemd":
         timer_dir = Path(systemd_timer_dir or DEFAULT_SYSTEMD_TIMER_DIR).expanduser().resolve()
         return "systemd", timer_dir, load_systemd_timer_jobs(timer_dir)
 
@@ -1605,6 +1607,7 @@ def build_health_report(
         log_warnings=warnings,
         price_failures=price_failures,
         html_output=Path(html_output).expanduser().resolve(),
+        schedule_source=(schedule_source or "cron").lower(),
     )
 
 
@@ -1750,12 +1753,13 @@ def format_terminal_report(report: HealthReport, *, use_color: bool = False) -> 
     lines: list[str] = []
     lines.append("=" * table_width)
     lines.append("HAWKSTRADE LINUX HEALTH CHECK")
-    lines.append(f"Generated : {report.generated_at.strftime('%Y-%m-%d %H:%M:%S')} {generated_tz}")
-    lines.append(f"Schedule path  : {report.cron_file}")
-    lines.append(f"Schedule source: {report.cron_template} | Local TZ: {report.local_timezone}")
-    lines.append(f"Window    : {window_label}")
-    lines.append(f"Overall   : {overall}")
-    lines.append("Legend    : [OK]=healthy | [WARN]=review | [NOK]=attention")
+    lines.append(f"Generated       : {report.generated_at.strftime('%Y-%m-%d %H:%M:%S')} {generated_tz}")
+    lines.append(f"Schedule source : {report.schedule_source}")
+    lines.append(f"Schedule label  : {report.cron_template} | Local TZ: {report.local_timezone}")
+    lines.append(f"Schedule path   : {report.cron_file}")
+    lines.append(f"Window          : {window_label}")
+    lines.append(f"Overall         : {overall}")
+    lines.append("Legend          : [OK]=healthy | [WARN]=review | [NOK]=attention")
     lines.append("=" * table_width)
     lines.append("")
 
@@ -2250,7 +2254,8 @@ def render_html_report(report: HealthReport) -> str:
       <h1>Linux Health Check</h1>
       <div class="meta">
         <div><strong>Generated</strong>: {generated_local} {generated_tz}</div>
-        <div><strong>Schedule source</strong>: {cron_name}</div>
+        <div><strong>Schedule source</strong>: {html.escape(report.schedule_source)}</div>
+        <div><strong>Schedule label</strong>: {cron_name}</div>
         <div><strong>Schedule path</strong>: {cron_file}</div>
         <div><strong>Window</strong>: {window_label}</div>
         <div><strong>Overall</strong>: <span class="badge {report.overall_status}">{html.escape(report.overall_status.upper())}</span></div>
@@ -2439,7 +2444,7 @@ def health_report_to_dict(report: HealthReport) -> dict:
         "lookback_hours": report.lookback_hours,
         "cron_template": report.cron_template,
         "cron_file": str(report.cron_file),
-        "schedule_source": report.cron_template,
+        "schedule_source": report.schedule_source,
         "schedule_path": str(report.cron_file),
         "local_timezone": report.local_timezone,
         "overall_status": report.overall_status,

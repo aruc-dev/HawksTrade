@@ -13,7 +13,7 @@
 The current recommended configuration uses:
 
 - Dynamic screener enabled with tightened liquidity, trend, volatility, and overextension filters
-- `momentum` enabled with `top_n: 1`, `min_momentum_pct: 0.10`, `volume_spike_ratio: 1.8`, and `min_breadth_coverage_pct: 0.75`
+- `momentum` enabled with `top_n: 1`, `min_momentum_pct: 0.10`, `volume_spike_ratio: 2.5`, and `min_breadth_coverage_pct: 0.75`
 - `rsi_reversion` enabled with crash and realised-volatility guards
 - `gap_up` enabled with true-gap, opening-volume pace, SMA200, and top-1 ranking guards
 - `ma_crossover` enabled with a 1% daily-close max-loss exit
@@ -98,7 +98,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/10/2026 
   --strategies momentum,rsi_reversion,gap_up,ma_crossover,range_breakout \
   --set strategies.momentum.top_n=1 \
   --set strategies.momentum.min_momentum_pct=0.10 \
-  --set strategies.momentum.volume_spike_ratio=1.8 \
+  --set strategies.momentum.volume_spike_ratio=2.5 \
   --set strategies.momentum.min_breadth_coverage_pct=0.75 \
   --set strategies.ma_crossover.max_loss_exit_pct=0.01
 ```
@@ -107,10 +107,10 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/10/2026 
 
 ## Validation
 
-The production validation gate currently remains the conservative core-gate
-profile from before all strategies were enabled. The requested all-enabled
-profile is benchmarked above; do not assume the production gate fully validates
-the all-enabled book until the gate strategy lists and thresholds are revisited.
+The production validation gate now validates the current costed production gate,
+including `gap_up` and `range_breakout` in the configured strategy lists. The
+requested all-enabled profile is benchmarked above; use the production gate
+thresholds in `config/config.yaml` before scaling live allocation.
 
 The latest implementation was also checked with:
 

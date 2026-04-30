@@ -92,7 +92,23 @@ def _parse_bar_timestamp(value):
             ts = datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             return None
+    elif hasattr(value, "to_pydatetime"):
+        try:
+            ts = value.to_pydatetime()
+        except (TypeError, ValueError):
+            return None
     else:
+        try:
+            ts = pd.to_datetime(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if pd.isna(ts):
+            return None
+        if hasattr(ts, "to_pydatetime"):
+            ts = ts.to_pydatetime()
+        elif not isinstance(ts, datetime):
+            return None
+    if pd.isna(ts):
         return None
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=timezone.utc)

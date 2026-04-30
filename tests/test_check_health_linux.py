@@ -196,6 +196,7 @@ Unit=hawkstrade-crypto-scan.service
 
             self.assertEqual(report.cron_template, "systemd")
             self.assertEqual(report.cron_file, timer_dir.resolve())
+            self.assertEqual(report.schedule_source, "systemd")
             self.assertEqual([job.key for job in report.job_health], ["full_scan", "crypto_scan"])
             self.assertTrue(all(job.status == "green" for job in report.job_health))
             self.assertTrue(all(line.startswith("OnCalendar=") for job in report.job_health for line in job.schedule_lines))
@@ -759,6 +760,7 @@ Unit=hawkstrade-crypto-scan.service
         self.assertEqual(payload["job_health"][0]["last_run_at"], "2026-04-17T18:00:00")
         self.assertEqual(payload["log_errors"][0]["message"], "boom")
         self.assertEqual(payload["html_output"], "/tmp/health.html")
+        self.assertEqual(payload["schedule_source"], "cron")
 
     def test_fetch_alpaca_state_reconciles_before_trade_log_snapshot(self):
         from core import alpaca_client as ac
@@ -985,8 +987,8 @@ RuntimeError: old boom
             self.assertEqual(report.overall_status, "green")
             self.assertEqual(report.lookback_hours, 4.0)
             self.assertIn("HAWKSTRADE LINUX HEALTH CHECK", terminal)
-            self.assertIn("Window    : last 4h", terminal)
-            self.assertIn("Overall   : [OK]", terminal)
+            self.assertIn("Window          : last 4h", terminal)
+            self.assertIn("Overall         : [OK]", terminal)
             self.assertIn("Alpaca connectivity : OK [OK]", terminal)
             self.assertIn("Errors in logs     : NO [OK]", terminal)
             self.assertEqual(report.job_health[0].age, timedelta(minutes=5))

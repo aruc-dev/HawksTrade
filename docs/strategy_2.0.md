@@ -22,11 +22,11 @@ strategies, including `rsi_reversion`, `gap_up`, and `range_breakout`; see
 **Active strategies at proposal time**
 - `momentum` (stocks) — top-N by 5-day return, `profit_trailing` exit
 - `ma_crossover` (crypto) — EMA 9/21 with slope + volatility + RSI(35–70) filter
-- `range_breakout` (crypto) — prior-day high + 1.8× volume + EMA50 + vol filter
+- `range_breakout` (crypto) — legacy single-day breakout with EMA50 and volatility filters
 
 **Disabled strategies at proposal time**
-- `rsi_reversion` (stocks) — over-filtered, rarely fires
-- `gap_up` (stocks) — now hardened with minute-bar opening confirmation
+- `rsi_reversion` (stocks) — then-disabled, over-filtered, rarely fired
+- `gap_up` (stocks) — then-disabled, now hardened with minute-bar opening confirmation
 
 **Portfolio-level observation.** All three active strategies are *correlated
 long-only trend-following*. When the market is in a sustained uptrend all
@@ -74,27 +74,29 @@ filter (≥0.5× 10-day avg range), RSI 35–70 band, and crypto regime gate
 
 ### 2.3 Range Breakout (crypto)
 
-Buys above prior-day high + 1.8× volume + above EMA50 + volatility confirm.
+Buys above a 20-day high plus a 0.8% breakout buffer, with 3.0× volume,
+EMA50 trend confirmation, volatility confirmation, ATR-risk sizing, and a
+14-day hold cap.
 
-- **Prior *day* high only** — no consideration of multi-day consolidation.
-  A tight 5-day range broken is a much higher-quality setup than a single-day
-  high broken in an already-trending market.
-- **`hold_days: 3` is very short** for a breakout strategy. The premise of
-  buying a breakout is that the new range tends to expand over 5–15 days.
+- **Quality filters are now production-oriented** — the implementation avoids
+  one-day noise and requires multi-day confirmation before entry.
+- **Current improvement area:** continue forward-validating fill quality and
+  slippage on crypto breakouts before increasing allocation.
 
 ### 2.4 RSI Reversion (stocks, now enabled)
 
-Requires RSI < 38 *and* 2-bar recovery *and* 1.5× volume spike *and* price
-within 15% of SMA200. That many filters together means very rare signals.
-Likely why it's disabled.
+Requires RSI < 35, %B < 20%, one-bar recovery, volume above 0.8× average,
+price within the SMA200 band, and crash/realised-volatility guards. It is
+enabled in the all-strategy profile, but should remain monitored because recent
+backtests produced few standalone RSI trades.
 
 ### 2.5 Gap Up (stocks, now enabled)
 
 The hardened implementation uses completed daily history plus current-session
-minute bars: true 4–15% opening gap, 1.5× opening-volume pace, SMA200 trend,
-prior-day green close, one ranked signal per scan, and a 3-day hold cap. It
-is enabled in the all-strategy profile, but remains a monitored sleeve because
-short-window backtests are weak.
+minute bars: a true opening gap of at least 6%, 1.5× opening-volume pace,
+SMA200 trend, prior-day green close, one ranked signal per scan, and a 2-day
+hold cap. It is enabled in the all-strategy profile, but remains a monitored
+sleeve because short-window backtests are weak.
 
 ---
 
@@ -176,7 +178,7 @@ at each risk-check pass.
 Replace "prior day high" with "20-day high" (Donchian channel). A 20-day
 breakout is a much higher-signal setup than a 1-day one — well-supported in
 the trend-following literature. The implemented variant uses a 20-day high,
-0.8% breakout threshold, 2.0x volume confirmation, and a 14-day hold cap.
+0.8% breakout threshold, 3.0x volume confirmation, and a 14-day hold cap.
 
 **Config:**
 
@@ -185,7 +187,7 @@ strategies:
   range_breakout:
     breakout_lookback_days: 20   # replace prior-day-high with N-day high
     breakout_pct: 0.008
-    volume_multiplier: 2.0
+    volume_multiplier: 3.0
     hold_days: 14                # up from 3
 ```
 
