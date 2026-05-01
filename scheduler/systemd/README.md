@@ -131,5 +131,5 @@ sudo systemctl disable --now 'hawkstrade-*.timer'
   closed instead of falling back to disk dotenv files.
 - The crypto-only timer can overlap with the hourly full scan. Crypto-only scans
   use a non-blocking lock and may exit 75 when the full scan owns the trade lock;
-  `scripts/check_systemd.sh` treats that lock-busy skip as acceptable for
-  `hawkstrade-crypto-scan.service`.
+  `hawkstrade-crypto-scan.service` marks that exit as successful, and
+  `scripts/check_systemd.sh` treats the lock-busy skip as acceptable.

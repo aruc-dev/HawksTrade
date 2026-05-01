@@ -13,6 +13,7 @@ WorkingDirectory=/home/ec2-user/HawksTrade
 EnvironmentFile=/etc/hawkstrade/hawkstrade.env
 Environment=HAWKSTRADE_REQUIRE_SHM=1
 ExecStart=/home/ec2-user/HawksTrade/scripts/run_hawkstrade_job.sh scheduler/run_scan.py --crypto-only
+SuccessExitStatus=75
 Restart=no
 TimeoutStartSec=45min
 StandardOutput=journal

@@ -140,6 +140,11 @@ class SystemdTemplateTests(unittest.TestCase):
                 self.assertIn(calendar_line, text)
         self.assertNotIn("OnCalendar=Mon..Fri *-*-* 14..19:00:00", text)
 
+    def test_crypto_lock_skip_exit_is_successful(self):
+        text = (SYSTEMD_DIR / "hawkstrade-crypto-scan.service").read_text(encoding="utf-8")
+
+        self.assertIn("SuccessExitStatus=75", text)
+
     def test_docs_include_install_and_operational_commands(self):
         text = (SYSTEMD_DIR / "README.md").read_text(encoding="utf-8")
 
