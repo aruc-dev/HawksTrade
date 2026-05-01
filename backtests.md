@@ -123,7 +123,7 @@ python3 scheduler/run_scan.py --dry-run
 python3 scheduler/run_risk_check.py --dry-run
 python3 scheduler/run_report.py
 python3 scheduler/run_backtest.py --days 30 --fund 10000
-python3 scheduler/run_backtest.py --days 365 --fund 10000
+python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/29/2026 --exit-policy profit_trailing --screener
 python3 scheduler/run_validation_gate.py --profile production
 python3 scheduler/run_validation_gate.py --profile gap
 ```
@@ -142,9 +142,9 @@ Latest production-gate result:
 
 | Gate | Result | Return | Max Drawdown | Trades | Win Rate | Profit Factor | Daily Sharpe |
 |---|---|---:|---:|---:|---:|---:|---:|
-| `default_12m_costed` | PASS | +10.44% | -5.65% | 101 | 43.6% | 1.53 | 1.49 |
-| `default_6m_costed` | PASS | +1.65% | -3.82% | 38 | 42.1% | 1.21 | 0.58 |
-| `crypto_12m_costed` | PASS | +9.03% | -1.20% | 28 | 46.4% | 4.14 | 2.60 |
+| `default_12m_costed` | PASS | +12.23% | -5.65% | 109 | 42.2% | 1.56 | 1.60 |
+| `default_6m_costed` | PASS | +5.27% | -2.00% | 44 | 40.9% | 1.61 | 1.53 |
+| `crypto_12m_costed` | PASS | +8.19% | -1.44% | 29 | 41.4% | 3.38 | 2.35 |
 | `crypto_recent_30d_watch` | WARN | -0.83% | -0.83% | 4 | 0.0% | 0.00 | -4.84 |
 
 RSI Reversion is enabled in the active profile by configuration, but the dedicated
@@ -166,7 +166,7 @@ allocation:
 
 | Gate | Result | Return | Max Drawdown | Trades | Win Rate | Profit Factor | Daily Sharpe |
 |---|---|---:|---:|---:|---:|---:|---:|
-| `gap_up_12m_costed` | PASS | +1.45% | -0.99% | 11 | 72.7% | 2.86 | 0.54 |
+| `gap_up_12m_costed` | PASS | +1.12% | -0.99% | 12 | 66.7% | 2.00 | 0.42 |
 | `gap_up_recent_30d_watch` | WARN | -0.05% | -0.35% | 2 | 50.0% | 0.86 | -0.43 |
 
 ---

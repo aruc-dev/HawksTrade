@@ -152,6 +152,9 @@ class TestGetConfig(unittest.TestCase):
             production_windows["default_12m_costed"]["strategies"],
             ["momentum", "rsi_reversion", "gap_up", "ma_crossover", "range_breakout"],
         )
+        self.assertEqual(production_windows["default_12m_costed"]["end_date"], "04/29/2026")
+        self.assertEqual(production_windows["default_6m_costed"]["end_date"], "04/29/2026")
+        self.assertEqual(production_windows["crypto_12m_costed"]["end_date"], "04/29/2026")
         self.assertEqual(production_windows["default_12m_costed"]["max_drawdown_pct"], 0.06)
         self.assertEqual(production_windows["default_6m_costed"]["max_drawdown_pct"], 0.04)
 
@@ -159,5 +162,7 @@ class TestGetConfig(unittest.TestCase):
             window["name"]: window
             for window in validation["gap_up_enablement"]["backtest_windows"]
         }
+        self.assertEqual(gap_windows["gap_up_12m_costed"]["end_date"], "04/29/2026")
         self.assertTrue(gap_windows["gap_up_12m_costed"]["screener"])
+        self.assertEqual(gap_windows["gap_up_12m_costed"]["min_profit_factor"], 1.95)
         self.assertTrue(gap_windows["gap_up_recent_30d_watch"]["screener"])
