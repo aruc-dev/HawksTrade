@@ -18,8 +18,8 @@ The latest validated default configuration is:
 | Trading mode | `mode: paper` | Paper trading should remain the default until live trading is explicitly approved. |
 | Intraday trading | `intraday.enabled: false` | The system is validated as a swing-trading bot. |
 | Screener | `screener.enabled: true` | The tightened screener improved 12-month return versus the old screener and recent fixed-universe test. |
-| Momentum | enabled, `top_n: 1`, `min_momentum_pct: 0.10`, `volume_spike_ratio: 2.5`, `min_breadth_coverage_pct: 0.75` | Focuses stock exposure on the single strongest high-volume momentum candidate and blocks entries when breadth data coverage is too thin. |
-| RSI Reversion | enabled | Active mean-reversion stock sleeve with crash and realised-volatility guards. The full profile passes production gates, but RSI itself had two losing 12-month trades, so monitor with the RSI validation profile before scaling allocation. |
+| Momentum | enabled, `top_n: 2`, `min_momentum_pct: 0.08`, `volume_spike_ratio: 2.0`, `min_breadth_coverage_pct: 0.65` | Allows a second green-regime stock candidate while keeping yellow regimes capped at one signal and preserving sector/risk guards. |
+| RSI Reversion | enabled | Active mean-reversion stock sleeve with crash and realised-volatility guards. The latest 12-month default contribution was positive, but the sleeve still needs RSI validation-profile monitoring before scaling allocation. |
 | Gap-Up | enabled | Opening-momentum sleeve with true-gap, opening-volume pace, trend, and top-1 ranking guards. |
 | MA Crossover | enabled, `max_loss_exit_pct: 0.01` | Positive crypto contribution in the latest 12-month backtest with a tighter daily-close loss exit to preserve capital. |
 | Range Breakout | enabled | Crypto Donchian breakout sleeve with volume, trend, RSI, extension, and failed-breakout guards. |
@@ -29,9 +29,9 @@ Latest recommended 12-month result:
 
 | Final Value | Return | Trades | Win Rate | Max Drawdown |
 |---:|---:|---:|---:|---:|
-| $10,942.77 | +9.43% | 91 | 40.7% | -5.11% |
+| $12,286.93 | +22.87% | 111 | 48.6% | -4.12% |
 
-These results enforce `trading.max_position_pct: 0.08` for all entries, including momentum/Kelly sizing, with all configured strategies enabled. The latest approved risk increase moves the max-position cap from 7% to 8%; stop-loss, take-profit, daily-loss halt, and mode remain unchanged.
+These results enforce `trading.max_position_pct: 0.08` for all entries, including momentum/Kelly sizing, with all configured strategies enabled. Stop-loss, take-profit, daily-loss halt, and mode remain unchanged.
 
 See [backtests.md](backtests.md) for the full comparison.
 
@@ -212,22 +212,22 @@ These pairs are used by the crypto strategies. Crypto scans can run 24/7.
 momentum:
   enabled: true
   asset_class: stocks
-  top_n: 1
+  top_n: 2
   hold_days: 4
   exit_policy: "profit_trailing"
   profit_floor_pct: 0.0
   trail_activation_pct: 0.06
   trailing_stop_pct: 0.04
   max_hold_days: 20
-  min_momentum_pct: 0.10
+  min_momentum_pct: 0.08
   min_alpha_pct: 0.0
-  min_breadth_coverage_pct: 0.75
-  volume_spike_ratio: 2.5
+  min_breadth_coverage_pct: 0.65
+  volume_spike_ratio: 2.0
 ```
 
 Recommended: enabled.
 
-Momentum is the primary stock contributor. The stricter `top_n: 1`, `min_momentum_pct: 0.10`, `volume_spike_ratio: 2.5`, and `min_breadth_coverage_pct: 0.75` settings reduced churn, improved win rate, and cut drawdown in the validated default profile.
+Momentum is the primary stock contributor. The moderate-growth profile uses `top_n: 2`, `min_momentum_pct: 0.08`, `volume_spike_ratio: 2.0`, and `min_breadth_coverage_pct: 0.65` to increase qualified opportunities while keeping yellow regimes capped at one position and sector concentration capped.
 
 ### RSI Reversion
 
@@ -238,30 +238,31 @@ rsi_reversion:
   oversold_threshold: 35
   overbought_threshold: 50
   hold_days: 10
-  vix_multiplier: 0.9
+  vix_multiplier: 0.95
   atr_multiplier: 0.8
-  volume_spike_ratio: 0.8
+  volume_spike_ratio: 0.7
 ```
 
 Recommended: enabled in the active profile, with continued monitoring through
 `python3 scheduler/run_validation_gate.py --profile rsi` before scaling its
 capital allocation.
 
-The latest 12-month default passed production gates, but RSI-only contribution
-was negative in the same window, so treat it as a monitored sleeve rather than a
-candidate for higher allocation.
+The latest 12-month default produced 25 RSI Reversion trades, 52.0% win rate,
+and $213.95 total P&L. The worst trade was -12.69%, so treat it as a monitored
+sleeve rather than a candidate for higher allocation until the RSI validation
+profile confirms the edge.
 
 ### Gap-Up
 
 ```yaml
 gap_up:
   enabled: true
-  min_gap_pct: 0.06
+  min_gap_pct: 0.05
   max_gap_pct: 0.15
   require_true_gap: true
-  volume_multiplier: 1.5
+  volume_multiplier: 1.3
   volume_avg_period: 20
-  min_breadth_pct: 0.75
+  min_breadth_pct: 0.65
   trend_sma_period: 200
   max_trend_extension_pct: 0.35
   entry_window_minutes: 45
@@ -287,11 +288,13 @@ negative, so do not scale it without rerunning the gap validation profile.
 ma_crossover:
   enabled: true
   asset_class: crypto
-  fast_ema: 9
-  slow_ema: 21
+  fast_ema: 6
+  slow_ema: 18
   timeframe: "1Day"
   hold_days: 12
   max_loss_exit_pct: 0.01
+  rsi_entry_max: 75
+  volume_spike_ratio: 1.0
 ```
 
 Recommended: enabled.
@@ -305,9 +308,9 @@ range_breakout:
   enabled: true
   asset_class: crypto
   breakout_lookback_days: 20
-  breakout_pct: 0.008
+  breakout_pct: 0.006
   max_breakout_extension_pct: 0.08
-  volume_multiplier: 3.0
+  volume_multiplier: 2.5
   volume_avg_period: 20
   timeframe: "1Day"
   hold_days: 14
@@ -315,11 +318,11 @@ range_breakout:
   atr_multiplier: 2.0
   risk_per_trade_pct: 0.01
   vol_filter_period: 10
-  min_range_ratio: 0.5
+  min_range_ratio: 0.45
   trend_ema_period: 50
   trend_slope_lookback: 5
   rsi_period: 14
-  rsi_entry_max: 78
+  rsi_entry_max: 82
   rsi_exit_max: 82
   profit_floor_pct: 0.03
   breakdown_exit_pct: 0.02
@@ -417,10 +420,10 @@ python3 scheduler/run_validation_gate.py --profile production
 The production profile validates the current costed production gate rather than
 the older core-only subset. It includes the expanded strategy set used in
 `validation.production_gate.windows[*].strategies`, including `gap_up` and
-`range_breakout`, and applies the tighter production thresholds defined in
-`config/config.yaml`. The latest 30-day crypto sleeve is watch-only: it reports
-weak short-window behavior without blocking the longer capital-preservation
-gates.
+`range_breakout`, and applies the moderate-risk drawdown thresholds defined in
+`config/config.yaml`: 6% for the 12-month default gate and 4% for the 6-month
+default gate. The latest 30-day crypto sleeve is watch-only: it reports weak
+short-window behavior without blocking the longer capital-preservation gates.
 
 RSI Reversion has a separate monitoring gate:
 
@@ -446,4 +449,5 @@ Gap-Up has a separate enablement gate:
 python3 scheduler/run_validation_gate.py --profile gap
 ```
 
-This checks the opening-momentum sleeve independently before it is scaled.
+This checks the opening-momentum sleeve independently with the dynamic screener
+enabled, matching the active profile before it is scaled.

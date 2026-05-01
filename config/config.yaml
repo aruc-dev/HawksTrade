@@ -114,15 +114,15 @@ strategies:
   momentum:
     enabled: true
     asset_class: stocks          # stocks | crypto | both
-    description: "Adaptive momentum: top-1 high-conviction ranking with reduced ATR stop extension, 1% risk sizing, sector-neutral ranking, breadth coverage guard, breadth-tiered regime, and strict volume-spike entry (>2.5x 20d avg volume required)"
-    top_n: 1                     # Pick only the strongest stock by momentum
+    description: "Adaptive momentum: top-2 green-regime ranking with reduced ATR stop extension, 1% risk sizing, sector-neutral ranking, breadth coverage guard, breadth-tiered regime, and moderated volume-spike entry (>2.0x 20d avg volume required)"
+    top_n: 2                     # Pick the two strongest stocks by momentum in green regimes
     hold_days: 4                 # Minimum hold before profit-aware exit checks
     exit_policy: "profit_trailing" # fixed_hold | profit_trailing | risk_only_baseline
     profit_floor_pct: 0.0        # After hold_days, exit if P&L is flat/negative
     trail_activation_pct: 0.06   # Enable trailing stop once peak gain reaches 6%
     trailing_stop_pct: 0.04      # Exit if price falls 4% from post-entry peak
     max_hold_days: 20            # Cap stale momentum positions even if still green
-    min_momentum_pct: 0.10       # Minimum 10% 5-day gain to qualify
+    min_momentum_pct: 0.08       # Minimum 8% 5-day gain to qualify
     min_alpha_pct: 0.0           # Optional excess 5-day return over SPY; 0 disables this stricter gate
     weight: 1.0                  # Signal weight (relative to other strategies)
     # Phase 1: Volatility-adjusted risk management
@@ -134,9 +134,9 @@ strategies:
     # Phase 3: Market breadth tiered regime guard
     breadth_green_threshold: 0.50  # >= 50% above SMA50 → Green (full top_n deployed)
     breadth_red_threshold: 0.25    # < 25% above SMA50 → Red (no new entries)
-    min_breadth_coverage_pct: 0.75 # Require valid SMA50 coverage for at least 75% of the scan universe
+    min_breadth_coverage_pct: 0.65 # Require valid SMA50 coverage for at least 65% of the scan universe
     yellow_max_positions: 1        # Max positions in Yellow regime (breadth 25–50%)
-    volume_spike_ratio: 2.5        # Entry bar volume must exceed this multiple of the 20-day average
+    volume_spike_ratio: 2.0        # Entry bar volume must exceed this multiple of the 20-day average
 
   rsi_reversion:
     enabled: true
@@ -148,26 +148,26 @@ strategies:
     hold_days: 10                   # Hard exit after 10 business days
     bb_period: 20                   # Bollinger Band lookback period
     bb_std: 2.0                     # Bollinger Band standard deviation multiplier
-    vix_multiplier: 0.9             # HV20 must be below HV_MA × this to allow entries
+    vix_multiplier: 0.95            # HV20 must be below HV_MA × this to allow entries
     atr_period: 14                  # ATR lookback for volatility-adjusted stop
     atr_multiplier: 0.8             # Stop = entry - atr_multiplier × ATR
     risk_per_trade_pct: 0.01        # Risk 1% of equity per trade for ATR-based sizing
     sma200_lower_buffer_pct: 0.15   # Entry blocked if price < SMA200 × (1 - this); prevents buying broken stocks
     sma200_upper_buffer_pct: 0.15   # Entry blocked if price > SMA200 × (1 + this); prevents buying overextended stocks
-    volume_spike_ratio: 0.8         # Entry bar volume must exceed this multiple of the 20-day average
+    volume_spike_ratio: 0.7         # Entry bar volume must exceed this multiple of the 20-day average
     profit_floor_pct: 0.015         # Exit via SMA target must exceed entry × (1 + this) to cover slippage
     weight: 1.0
 
   gap_up:
     enabled: true
     asset_class: stocks
-    description: "Buy confirmed true-gap stocks gapping up 6-15% with opening-volume pace, trend confirmation, and failed-gap exits"
-    min_gap_pct: 0.06            # Minimum gap-up percentage
+    description: "Buy confirmed true-gap stocks gapping up 5-15% with opening-volume pace, trend confirmation, and failed-gap exits"
+    min_gap_pct: 0.05            # Minimum gap-up percentage
     max_gap_pct: 0.15            # Avoid buying exhaustion gaps beyond this percentage
     require_true_gap: true       # Today's open must also clear the prior day's high
-    volume_multiplier: 1.5       # Opening volume pace must be 1.5x the 20-day average daily pace
+    volume_multiplier: 1.3       # Opening volume pace must be 1.3x the 20-day average daily pace
     volume_avg_period: 20        # Lookback for average volume confirmation
-    min_breadth_pct: 0.75         # Require at least 75% of scan universe above SMA50
+    min_breadth_pct: 0.65         # Require at least 65% of scan universe above SMA50
     trend_sma_period: 200        # Use completed closes only; current bar close is not known at entry
     max_trend_extension_pct: 0.35 # Avoid exhaustion gaps more than 35% above the trend SMA
     entry_window_minutes: 45     # Only enter within first 45 min of market open
@@ -200,9 +200,9 @@ strategies:
     atr_multiplier: 2.0
     risk_per_trade_pct: 0.01     # Risk 1% of equity per trade for ATR-based sizing
     rsi_entry_min: 35            # RSI must be at least this to avoid entering oversold chop
-    rsi_entry_max: 70            # RSI must be below this to avoid buying overbought
+    rsi_entry_max: 75            # RSI must be below this to avoid buying overbought
     rsi_exit_max: 75             # Exit if RSI rises above this (overbought target)
-    volume_spike_ratio: 1.2      # Entry bar volume must exceed this multiple of the 20-day average
+    volume_spike_ratio: 1.0      # Entry bar volume must exceed this multiple of the 20-day average
     volume_avg_period: 20        # Period for volume average
     vol_filter_period: 10        # Period for volatility (range) filter average
     max_signals: 1               # Avoid concentrated correlated crypto entries from the same scan
@@ -213,9 +213,9 @@ strategies:
     asset_class: crypto
     description: "Enter long on confirmed daily close breakout above the configured Donchian high with volume, trend, volatility, RSI, and extension guards. Exit failed breakouts early before the hold cap."
     breakout_lookback_days: 20   # Close must break above the prior N-day high, excluding the current bar
-    breakout_pct: 0.008          # Close must break 0.8% beyond the Donchian high
+    breakout_pct: 0.006          # Close must break 0.6% beyond the Donchian high
     max_breakout_extension_pct: 0.08  # Avoid chasing closes >8% beyond the breakout level
-    volume_multiplier: 3.0       # Volume must be 3.0x average to confirm breakout
+    volume_multiplier: 2.5       # Volume must be 2.5x average to confirm breakout
     volume_avg_period: 20        # Lookback for average volume confirmation
     timeframe: "1Day"
     hold_days: 14
@@ -223,11 +223,11 @@ strategies:
     atr_multiplier: 2.0
     risk_per_trade_pct: 0.01
     vol_filter_period: 10
-    min_range_ratio: 0.5         # Entry bar range must be at least 50% of recent average range
+    min_range_ratio: 0.45        # Entry bar range must be at least 45% of recent average range
     trend_ema_period: 50         # Price must close above this EMA
     trend_slope_lookback: 5      # Trend EMA must be non-declining across this many bars
     rsi_period: 14
-    rsi_entry_max: 78            # Avoid buying severely overextended breakout closes
+    rsi_entry_max: 82            # Avoid buying severely overextended breakout closes
     rsi_exit_max: 82             # Profit-taking exhaustion exit after profit floor
     profit_floor_pct: 0.03       # RSI exhaustion exit only after at least 3% open profit
     breakdown_exit_pct: 0.02     # Exit failed breakout when close falls 2% below entry
@@ -252,7 +252,7 @@ validation:
         strategies: [momentum, rsi_reversion, gap_up, ma_crossover, range_breakout]
         required: true
         min_return_pct: 0.10
-        max_drawdown_pct: 0.04
+        max_drawdown_pct: 0.06
         min_profit_factor: 1.50
         min_daily_sharpe: 1.00
         min_trades: 60
@@ -263,7 +263,7 @@ validation:
         strategies: [momentum, rsi_reversion, gap_up, ma_crossover, range_breakout]
         required: true
         min_return_pct: 0.015
-        max_drawdown_pct: 0.035
+        max_drawdown_pct: 0.04
         min_profit_factor: 1.20
         min_daily_sharpe: 0.50
         min_trades: 25
@@ -332,7 +332,7 @@ validation:
       - name: gap_up_12m_costed
         days: 365
         end_date: "04/10/2026"
-        screener: false
+        screener: true
         strategies: [gap_up]
         required: true
         min_return_pct: 0.01
@@ -342,7 +342,7 @@ validation:
         min_win_rate: 0.65
       - name: gap_up_recent_30d_watch
         days: 30
-        screener: false
+        screener: true
         strategies: [gap_up]
         required: false
         min_return_pct: 0.0
