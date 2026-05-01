@@ -74,7 +74,7 @@ filter (≥0.5× 10-day avg range), RSI 35–70 band, and crypto regime gate
 
 ### 2.3 Range Breakout (crypto)
 
-Buys above a 20-day high plus a 0.8% breakout buffer, with 3.0× volume,
+Buys above a 20-day high plus a 0.6% breakout buffer, with 2.5× volume,
 EMA50 trend confirmation, volatility confirmation, ATR-risk sizing, and a
 14-day hold cap.
 
@@ -93,7 +93,7 @@ backtests produced few standalone RSI trades.
 ### 2.5 Gap Up (stocks, now enabled)
 
 The hardened implementation uses completed daily history plus current-session
-minute bars: a true opening gap of at least 6%, 1.5× opening-volume pace,
+minute bars: a true opening gap of at least 5%, 1.3× opening-volume pace,
 SMA200 trend, prior-day green close, one ranked signal per scan, and a 2-day
 hold cap. It is enabled in the all-strategy profile, but remains a monitored
 sleeve because short-window backtests are weak.
@@ -178,7 +178,7 @@ at each risk-check pass.
 Replace "prior day high" with "20-day high" (Donchian channel). A 20-day
 breakout is a much higher-signal setup than a 1-day one — well-supported in
 the trend-following literature. The implemented variant uses a 20-day high,
-0.8% breakout threshold, 3.0x volume confirmation, and a 14-day hold cap.
+0.6% breakout threshold, 2.5x volume confirmation, and a 14-day hold cap.
 
 **Config:**
 
@@ -186,8 +186,8 @@ the trend-following literature. The implemented variant uses a 20-day high,
 strategies:
   range_breakout:
     breakout_lookback_days: 20   # replace prior-day-high with N-day high
-    breakout_pct: 0.008
-    volume_multiplier: 3.0
+    breakout_pct: 0.006
+    volume_multiplier: 2.5
     hold_days: 14                # up from 3
 ```
 

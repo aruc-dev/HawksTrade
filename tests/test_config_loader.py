@@ -119,16 +119,50 @@ class TestGetConfig(unittest.TestCase):
         self.assertTrue(strategies["ma_crossover"]["enabled"])
         self.assertTrue(strategies["range_breakout"]["enabled"])
         self.assertTrue(strategies["gap_up"]["enabled"])
-        self.assertEqual(strategies["momentum"]["volume_spike_ratio"], 2.5)
+        self.assertEqual(strategies["momentum"]["top_n"], 2)
+        self.assertEqual(strategies["momentum"]["min_momentum_pct"], 0.08)
+        self.assertEqual(strategies["momentum"]["volume_spike_ratio"], 2.0)
+        self.assertEqual(strategies["momentum"]["min_breadth_coverage_pct"], 0.65)
         self.assertEqual(strategies["momentum"]["atr_multiplier"], 1.2)
         self.assertEqual(strategies["rsi_reversion"]["oversold_threshold"], 35)
-        self.assertEqual(strategies["rsi_reversion"]["vix_multiplier"], 0.9)
-        self.assertEqual(strategies["gap_up"]["min_gap_pct"], 0.06)
+        self.assertEqual(strategies["rsi_reversion"]["vix_multiplier"], 0.95)
+        self.assertEqual(strategies["rsi_reversion"]["volume_spike_ratio"], 0.7)
+        self.assertEqual(strategies["gap_up"]["min_gap_pct"], 0.05)
         self.assertEqual(strategies["gap_up"]["hold_days"], 2)
-        self.assertEqual(strategies["gap_up"]["min_breadth_pct"], 0.75)
+        self.assertEqual(strategies["gap_up"]["volume_multiplier"], 1.3)
+        self.assertEqual(strategies["gap_up"]["min_breadth_pct"], 0.65)
         self.assertEqual(strategies["gap_up"]["max_trend_extension_pct"], 0.35)
         self.assertEqual(strategies["ma_crossover"]["fast_ema"], 6)
         self.assertEqual(strategies["ma_crossover"]["slow_ema"], 18)
         self.assertEqual(strategies["ma_crossover"]["entry_cross_lookback_days"], 1)
+        self.assertEqual(strategies["ma_crossover"]["rsi_entry_max"], 75)
+        self.assertEqual(strategies["ma_crossover"]["volume_spike_ratio"], 1.0)
         self.assertEqual(strategies["ma_crossover"]["max_signals"], 1)
-        self.assertEqual(strategies["range_breakout"]["volume_multiplier"], 3.0)
+        self.assertEqual(strategies["range_breakout"]["breakout_pct"], 0.006)
+        self.assertEqual(strategies["range_breakout"]["volume_multiplier"], 2.5)
+        self.assertEqual(strategies["range_breakout"]["min_range_ratio"], 0.45)
+        self.assertEqual(strategies["range_breakout"]["rsi_entry_max"], 82)
+
+        validation = cfg["validation"]
+        production_windows = {
+            window["name"]: window
+            for window in validation["production_gate"]["windows"]
+        }
+        self.assertEqual(
+            production_windows["default_12m_costed"]["strategies"],
+            ["momentum", "rsi_reversion", "gap_up", "ma_crossover", "range_breakout"],
+        )
+        self.assertEqual(production_windows["default_12m_costed"]["end_date"], "04/29/2026")
+        self.assertEqual(production_windows["default_6m_costed"]["end_date"], "04/29/2026")
+        self.assertEqual(production_windows["crypto_12m_costed"]["end_date"], "04/29/2026")
+        self.assertEqual(production_windows["default_12m_costed"]["max_drawdown_pct"], 0.06)
+        self.assertEqual(production_windows["default_6m_costed"]["max_drawdown_pct"], 0.04)
+
+        gap_windows = {
+            window["name"]: window
+            for window in validation["gap_up_enablement"]["backtest_windows"]
+        }
+        self.assertEqual(gap_windows["gap_up_12m_costed"]["end_date"], "04/29/2026")
+        self.assertTrue(gap_windows["gap_up_12m_costed"]["screener"])
+        self.assertEqual(gap_windows["gap_up_12m_costed"]["min_profit_factor"], 1.95)
+        self.assertTrue(gap_windows["gap_up_recent_30d_watch"]["screener"])

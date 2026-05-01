@@ -30,7 +30,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener
 
 ## Backtesting & Performance
 
-HawksTrade includes a high-fidelity historical simulator. The current default strategy set achieved **+12.12% annual return** in the 12-month backtest ending 2026-04-10 on $10,000 starting capital, with the configured 8% max-position risk cap enforced.
+HawksTrade includes a high-fidelity historical simulator. The current default strategy set achieved **+22.87% annual return** in the 12-month backtest through 2026-04-29 on $10,000 starting capital, with the configured 8% max-position risk cap enforced.
 
 - **Backtest Summary**: [backtests.md](backtests.md)
 - **Configuration Guide**: [config.md](config.md)
@@ -42,11 +42,11 @@ HawksTrade includes a high-fidelity historical simulator. The current default st
 
 | Strategy | Market | Key Parameters | Approach |
 |----------|--------|----------------|----------|
-| **Momentum** | US Stocks | Top 1 by 5-day return, min 10% momentum, 2.5x volume spike, 75% breadth coverage, 1.2x ATR stop extension, profit-aware exit | Captures only high-conviction rallies, exits flat/losing trades after the minimum hold, and lets profitable trades run under trailing protection. |
-| **RSI Reversion** | US Stocks | Enabled; RSI < 35, %B < 20%, SMA-200 within +/-15%, 0.8x volume confirmation, 1-bar recovery, 0.8x ATR stop extension | Mean reversion with tighter regime filters and less permissive volatility stop extension after the latest tuning pass. |
-| **Gap-Up** | US Stocks | Enabled; true 6-15% opening gap, 1.5x opening-volume pace, 75% breadth guard, <=35% SMA-200 extension, top-1 ranked signal, 2-day hold, failed-gap exit | Opening momentum sleeve with completed-bar history, minute-bar entry confirmation, and ATR-risk sizing. |
-| **EMA Crossover** | Crypto | 6/18 EMA, latest completed cross only, top-1 ranked signal, RSI 35-70, slope + volatility filters, 1% daily-close max-loss exit | Bullish EMA crossover with BTC regime gate and tighter same-scan concentration control. |
-| **Range Breakout** | Crypto | Enabled; 20-day high close breakout, 3.0x volume, rising EMA-50, RSI/extension guards | Ranked Donchian-style breakout sleeve with failed-breakout and trend-loss exits. |
+| **Momentum** | US Stocks | Top 2 by 5-day return in green regimes, min 8% momentum, 2.0x volume spike, 65% breadth coverage, 1.2x ATR stop extension, profit-aware exit | Captures high-conviction rallies with a moderate opportunity increase while yellow regimes remain capped at one signal. |
+| **RSI Reversion** | US Stocks | Enabled; RSI < 35, %B < 20%, SMA-200 within +/-15%, 0.7x volume confirmation, 1-bar recovery, 0.8x ATR stop extension | Mean reversion with crash and realised-volatility guards, tuned to allow slightly more entries without removing fail-closed protections. |
+| **Gap-Up** | US Stocks | Enabled; true 5-15% opening gap, 1.3x opening-volume pace, 65% breadth guard, <=35% SMA-200 extension, top-1 ranked signal, 2-day hold, failed-gap exit | Opening momentum sleeve with completed-bar history, minute-bar entry confirmation, and ATR-risk sizing. |
+| **EMA Crossover** | Crypto | 6/18 EMA, latest completed cross only, top-1 ranked signal, RSI 35-75, slope + volatility filters, 1% daily-close max-loss exit | Bullish EMA crossover with BTC regime gate and tighter same-scan concentration control. |
+| **Range Breakout** | Crypto | Enabled; 20-day high close breakout, 2.5x volume, rising EMA-50, RSI/extension guards | Ranked Donchian-style breakout sleeve with failed-breakout and trend-loss exits. |
 
 **Crypto Universe**: `BTC/USD`, `SOL/USD`, `LINK/USD`, `DOGE/USD`, `LTC/USD`, `DOT/USD`.
 
@@ -76,14 +76,14 @@ Use `--no-screener` to backtest only the fixed configured stock universe, or `--
 ```bash
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
   --strategies momentum,rsi_reversion,gap_up,ma_crossover,range_breakout \
-  --set strategies.momentum.top_n=1 \
-  --set strategies.momentum.min_momentum_pct=0.10 \
-  --set strategies.momentum.volume_spike_ratio=2.5 \
-  --set strategies.momentum.min_breadth_coverage_pct=0.75 \
+  --set strategies.momentum.top_n=2 \
+  --set strategies.momentum.min_momentum_pct=0.08 \
+  --set strategies.momentum.volume_spike_ratio=2.0 \
+  --set strategies.momentum.min_breadth_coverage_pct=0.65 \
   --set strategies.ma_crossover.fast_ema=6 \
   --set strategies.ma_crossover.slow_ema=18 \
   --set strategies.ma_crossover.max_signals=1 \
-  --set strategies.range_breakout.volume_multiplier=3.0
+  --set strategies.range_breakout.volume_multiplier=2.5
 ```
 
 Before scaling live capital, run the cost-aware validation gate. It applies the
