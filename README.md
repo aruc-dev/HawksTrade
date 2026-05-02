@@ -144,7 +144,7 @@ Operational schedules are documented in [scheduler/README.md](scheduler/README.m
 
 ## Manual Position Exits
 
-To manually sell one or more currently open Alpaca positions at market, run:
+To manually exit one or more currently open Alpaca positions with a market or limit sell, run:
 
 ```bash
 python3 scripts/manual_market_sell.py
