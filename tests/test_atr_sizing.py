@@ -90,6 +90,9 @@ class ATRSizingTests(unittest.TestCase):
 
         self.assertIsNone(sized)
         logger.info.assert_called_once()
+        message = logger.info.call_args.args[0]
+        self.assertIn("1.2", message)
+        self.assertIn("expected 0 < pct < 1", message)
 
 
 if __name__ == "__main__":

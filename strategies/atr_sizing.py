@@ -50,9 +50,13 @@ def atr_stop_and_qty(
         logger.info(f"{prefix} {symbol} skipped: invalid ATR stop {atr_stop}.")
         return None
     if max_stop_loss_pct is not None:
+        raw_max_stop_loss_pct = max_stop_loss_pct
         max_stop_loss_pct = _finite_float(max_stop_loss_pct)
         if max_stop_loss_pct is None or max_stop_loss_pct <= 0 or max_stop_loss_pct >= 1:
-            logger.info(f"{prefix} {symbol} skipped: invalid max stop loss pct.")
+            logger.info(
+                f"{prefix} {symbol} skipped: invalid max stop loss pct "
+                f"{raw_max_stop_loss_pct!r}; expected 0 < pct < 1."
+            )
             return None
         max_loss_stop = round(price * (1 - max_stop_loss_pct), 4)
         atr_stop = max(atr_stop, max_loss_stop)

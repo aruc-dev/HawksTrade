@@ -394,8 +394,9 @@ class RSIReversionStrategy(BaseStrategy):
     def should_exit(self, symbol: str, entry_price: float) -> tuple:
         """
         Exit when the mean-reversion edge is gone:
-          (a) price reaches the SMA(bb_period) — mean reversion target achieved
-          (b) RSI(14) > overbought_threshold   — momentum neutral, edge evaporated
+          (a) close breaches max_loss_exit_pct, when configured
+          (b) price reaches the SMA(bb_period) - mean reversion target achieved
+          (c) RSI(14) > overbought_threshold - momentum neutral, edge evaporated
         The hold cap is enforced externally by the hold_days mechanism.
         """
         period     = SCFG["rsi_period"]

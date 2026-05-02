@@ -100,6 +100,9 @@ class MACrossoverStrategy(BaseStrategy):
         min_price_above_slow = float(SCFG.get("min_price_above_slow_pct", 0.0))
         max_signals      = int(SCFG.get("max_signals", 0) or 0)
         min_trade_value  = float(CFG["trading"].get("min_trade_value_usd", 100))
+        min_signal_bars  = max(slow_span, atr_period, vol_avg_period, vol_filter_period) + 5
+        if trend_return_lookback > 0:
+            min_signal_bars = max(min_signal_bars, trend_return_lookback + 1)
 
         log.info(f"[MACross] Scanning {len(universe)} crypto pairs "
                  f"(EMA {fast_span}/{slow_span}, {timeframe})...")
@@ -107,7 +110,7 @@ class MACrossoverStrategy(BaseStrategy):
         signals = []
 
         try:
-            bars_data = ac.get_crypto_bars(universe, timeframe=timeframe, limit=max(slow_span, atr_period) + 100)
+            bars_data = ac.get_crypto_bars(universe, timeframe=timeframe, limit=min_signal_bars + 100)
         except Exception as e:
             log.error(f"[MACross] Failed to fetch bars: {e}")
             return []
@@ -129,7 +132,7 @@ class MACrossoverStrategy(BaseStrategy):
         for symbol in universe:
             try:
                 bars = _bars_for_symbol(bars_data, symbol)
-                if bars is None or len(bars) < max(slow_span, atr_period, vol_avg_period, vol_filter_period) + 5:
+                if bars is None or len(bars) < min_signal_bars:
                     continue
 
                 closes = pd.Series([
@@ -174,10 +177,10 @@ class MACrossoverStrategy(BaseStrategy):
                 slow_v  = float(slow.iloc[-1])
                 price   = float(closes.iloc[-1])
                 price_above_slow_pct = (price / slow_v) - 1 if slow_v > 0 else 0.0
-                if trend_return_lookback > 0 and len(closes) > trend_return_lookback:
-                    trend_return = (price / float(closes.iloc[-(trend_return_lookback + 1)])) - 1
-                else:
-                    trend_return = 0.0
+                trend_return = 0.0
+                if trend_return_lookback > 0:
+                    trend_reference = float(closes.iloc[-(trend_return_lookback + 1)])
+                    trend_return = (price / trend_reference) - 1 if trend_reference > 0 else float("-inf")
 
                 rsi_val = _calc_rsi(closes, 14)
 
