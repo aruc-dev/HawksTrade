@@ -412,6 +412,7 @@ def exit_position(
     dry_run: bool = False,
     open_trades_callback=None,
     force_market: bool = False,
+    limit_price: float | None = None,
 ) -> Optional[dict]:
     """
     Close an open position fully.
@@ -489,6 +490,28 @@ def exit_position(
 
         order_symbol = trade_symbol if asset_class == "crypto" else symbol
 
+        if limit_price is not None:
+            try:
+                limit_price = float(limit_price)
+            except (TypeError, ValueError):
+                limit_price = 0.0
+            if limit_price <= 0:
+                log.error(f"Invalid limit price for exit {symbol}: {limit_price}. Skipping exit.")
+                return _exit_failure_result(
+                    symbol=symbol,
+                    strategy=strategy,
+                    asset_class=asset_class,
+                    reason=reason,
+                    status="invalid_limit_price",
+                    error_type="InvalidLimitPrice",
+                    error=f"Invalid limit price: {limit_price}",
+                    qty=qty,
+                    entry_price=entry_price,
+                    current_price=current_price,
+                )
+
+        order_type = "market" if force_market or (limit_price is None and ORDER_TYPE == "market") else "limit"
+
         if dry_run:
             trade = {
                 "timestamp":     _utc_now().isoformat(),
@@ -504,9 +527,12 @@ def exit_position(
                 "exit_reason":   reason,
                 "order_id":      "DRY-RUN",
                 "status":        "dry_run",
+                "order_type":     order_type,
             }
+            if limit_price is not None:
+                trade["limit_price"] = limit_price
             log.info(
-                f"DRY RUN: would exit {trade_symbol} | strategy={strategy} | reason={reason} | "
+                f"DRY RUN: would {order_type}-exit {trade_symbol} | strategy={strategy} | reason={reason} | "
                 f"entry={entry_price} exit={current_price} pnl={pnl_pct:.2%}"
             )
             return trade
@@ -548,7 +574,7 @@ def exit_position(
                 "status": "pending_exit",
             }
 
-        if force_market or ORDER_TYPE == "market":
+        if order_type == "market":
             intent = _create_order_intent(order_symbol, "sell", strategy, asset_class, qty)
             try:
                 order = ac.place_market_order(
@@ -563,7 +589,7 @@ def exit_position(
                 _mark_order_intent_failed(intent, e)
                 raise
         else:
-            limit_px = current_price * (1 - SLIPPAGE)
+            limit_px = limit_price if limit_price is not None else current_price * (1 - SLIPPAGE)
             intent = _create_order_intent(order_symbol, "sell", strategy, asset_class, qty, limit_price=limit_px)
             try:
                 order = ac.place_limit_order(
@@ -584,6 +610,8 @@ def exit_position(
         filled_qty = _exit_fill_qty(order, qty)
         action_status = _exit_log_status(order, qty, filled_qty)
         logged_qty = filled_qty if filled_qty > 0 else qty
+        exit_price = _order_filled_avg_price(order, current_price) if filled_qty > 0 else current_price
+        pnl_pct = (exit_price - entry_price) / entry_price
         trade = {
             "timestamp":     _utc_now().isoformat(),
             "mode":          MODE,
@@ -593,18 +621,21 @@ def exit_position(
             "side":          "sell",
             "qty":           logged_qty,
             "entry_price":   entry_price,
-            "exit_price":    current_price,
+            "exit_price":    exit_price,
             "pnl_pct":       round(pnl_pct, 6),
             "exit_reason":   reason,
             "order_id":      order_id,
             "status":        action_status,
+            "order_type":     order_type,
         }
+        if limit_price is not None:
+            trade["limit_price"] = limit_price
         log_trade(trade)
         if filled_qty > 0:
-            mark_trade_closed(trade_symbol, current_price, pnl_pct, reason, closed_qty=filled_qty)
+            mark_trade_closed(trade_symbol, exit_price, pnl_pct, reason, closed_qty=filled_qty)
             log.info(
                 f"EXITED {trade_symbol} | reason={reason} | qty={filled_qty} | "
-                f"entry={entry_price} exit={current_price} pnl={pnl_pct:.2%}"
+                f"entry={entry_price} exit={exit_price} pnl={pnl_pct:.2%}"
             )
         else:
             exit_log = log.info if _submitted_order_is_transient(order) else log.warning

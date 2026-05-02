@@ -15,6 +15,7 @@ FILES_REQUIRING_POSTPONED_ANNOTATIONS = [
     "scheduler/run_risk_check.py",
     "scheduler/run_scan.py",
     "scripts/check_health_linux.py",
+    "scripts/manual_market_sell.py",
     "strategies/gap_up.py",
     "strategies/ma_crossover.py",
     "strategies/range_breakout.py",

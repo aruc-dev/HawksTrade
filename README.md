@@ -142,6 +142,18 @@ Operational schedules are documented in [scheduler/README.md](scheduler/README.m
 
 ---
 
+## Manual Position Exits
+
+To manually exit one or more currently open Alpaca positions with a market or limit sell, run:
+
+```bash
+python3 scripts/manual_market_sell.py
+```
+
+The script lists open positions as numbered choices, asks whether to submit a market sell or a limit sell, prompts for a limit price when needed, records the exit reason as `manually triggered market sell`, and reconciles `data/trades.csv` so closed-trade P/L reports include the manual exit. Use `--dry-run` to test the interactive flow without submitting orders.
+
+---
+
 ## Cloud Deployment
 
 For running HawksTrade on AWS EC2 with IAM-based secrets management (no keys on disk), see [cloud-setup/aws-setup.md](cloud-setup/aws-setup.md).
