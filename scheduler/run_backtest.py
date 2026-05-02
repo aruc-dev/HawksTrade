@@ -259,7 +259,44 @@ def _run_backtest_risk_exits(sim: "BacktestSimulator", *, market_open: bool) -> 
         price = sim.get_current_price(symbol)
         if price <= 0:
             continue
-        update_high_water_price(pos, price)
+        bar = sim.get_current_bar(symbol)
+        observed_high = price
+        if bar is not None:
+            observed_high = max(observed_high, float(bar["high"]))
+        update_high_water_price(pos, observed_high)
+        stop_price, stop_label = _effective_stop_for_backtest(pos)
+        take_profit = rm.take_profit_price(pos["entry_price"])
+
+        if bar is not None:
+            low = float(bar["low"])
+            high = float(bar["high"])
+            if low <= stop_price:
+                reason = f"{stop_label} hit intraday: {low:.4f} <= {stop_price:.4f}"
+                sim.pending_exit_prices[symbol] = stop_price
+                try:
+                    oe.exit_position(
+                        symbol,
+                        reason,
+                        pos["asset_class"],
+                        open_trades_callback=sim.get_open_trades_for_backtest,
+                    )
+                finally:
+                    sim.pending_exit_prices.pop(symbol, None)
+                continue
+            if high >= take_profit:
+                reason = f"Take-profit hit intraday: {high:.4f} >= {take_profit:.4f}"
+                sim.pending_exit_prices[symbol] = take_profit
+                try:
+                    oe.exit_position(
+                        symbol,
+                        reason,
+                        pos["asset_class"],
+                        open_trades_callback=sim.get_open_trades_for_backtest,
+                    )
+                finally:
+                    sim.pending_exit_prices.pop(symbol, None)
+                continue
+
         should_exit, reason = rm.should_exit_position(
             symbol,
             pos["entry_price"],
@@ -273,6 +310,16 @@ def _run_backtest_risk_exits(sim: "BacktestSimulator", *, market_open: bool) -> 
                 pos["asset_class"],
                 open_trades_callback=sim.get_open_trades_for_backtest,
             )
+
+
+def _effective_stop_for_backtest(pos: dict) -> tuple[float, str]:
+    global_stop = rm.stop_loss_price(pos["entry_price"])
+    custom_stop = pos.get("custom_stop_price")
+    if custom_stop is not None and not math.isfinite(custom_stop):
+        custom_stop = None
+    if custom_stop is not None and custom_stop < global_stop:
+        return custom_stop, "Custom stop-loss"
+    return global_stop, "Stop-loss"
 
 
 def _run_backtest_strategy_exits(
@@ -474,6 +521,7 @@ class BacktestSimulator:
         self.equity_curve = []
         self.cost_model = _normalise_cost_model(cost_model)
         self.pending_entry_prices = {}
+        self.pending_exit_prices = {}
 
     def get_portfolio_value(self):
         pos_value = 0
@@ -545,6 +593,8 @@ class BacktestSimulator:
         return float(np.busday_count(entry_date, curr_date))
 
     def get_current_price(self, symbol):
+        if symbol in self.pending_exit_prices:
+            return float(self.pending_exit_prices[symbol])
         if symbol in self.pending_entry_prices:
             return float(self.pending_entry_prices[symbol])
         df = self.historical_data.get(symbol)
@@ -553,6 +603,16 @@ class BacktestSimulator:
         valid_bars = df[mask]
         if valid_bars.empty: return 0.0
         return float(valid_bars.iloc[-1]["close"])
+
+    def get_current_bar(self, symbol):
+        df = self.historical_data.get(symbol)
+        if df is None or df.empty:
+            return None
+        mask = df.index <= self.current_date
+        valid_bars = df[mask]
+        if valid_bars.empty:
+            return None
+        return valid_bars.iloc[-1]
 
     def _execution_price(self, price: float, side: str) -> float:
         slippage = self.cost_model["slippage_bps"] / 10000.0

@@ -745,7 +745,7 @@ class RunScanTests(unittest.TestCase):
 
         with (
             patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
-            patch.object(run_scan, "get_trade_age_days", return_value=13),  # > hold_days=12
+            patch.object(run_scan, "get_trade_age_days", return_value=17),  # > hold_days=16
             patch.object(run_scan, "_latest_price_for_trade", return_value=48000),  # flat/losing
             patch.object(run_scan, "_estimate_peak_price_since_entry", return_value=51000),
             patch.object(run_scan.oe, "exit_position") as exit_position,
@@ -764,7 +764,7 @@ class RunScanTests(unittest.TestCase):
 
         with (
             patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
-            patch.object(run_scan, "get_trade_age_days", return_value=5),  # < hold_days=12
+            patch.object(run_scan, "get_trade_age_days", return_value=15),  # < hold_days=16
             patch.object(run_scan, "_latest_price_for_trade", return_value=48000),
             patch.object(run_scan, "_estimate_peak_price_since_entry", return_value=51000),
             patch.object(run_scan.oe, "exit_position") as exit_position,

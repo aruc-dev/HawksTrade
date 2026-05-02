@@ -30,7 +30,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener
 
 ## Backtesting & Performance
 
-HawksTrade includes a high-fidelity historical simulator. The current default strategy set achieved **+22.87% annual return** in the 12-month backtest through 2026-04-29 on $10,000 starting capital, with the configured 8% max-position risk cap enforced.
+HawksTrade includes a high-fidelity historical simulator. The current tail-risk-hardened default strategy set achieved **+20.70% annual return** in the 12-month backtest through 2026-04-30 on $10,000 starting capital, with the configured 8% max-position risk cap enforced.
 
 - **Backtest Summary**: [backtests.md](backtests.md)
 - **Configuration Guide**: [config.md](config.md)
@@ -43,10 +43,10 @@ HawksTrade includes a high-fidelity historical simulator. The current default st
 | Strategy | Market | Key Parameters | Approach |
 |----------|--------|----------------|----------|
 | **Momentum** | US Stocks | Top 2 by 5-day return in green regimes, min 8% momentum, 2.0x volume spike, 65% breadth coverage, 1.2x ATR stop extension, profit-aware exit | Captures high-conviction rallies with a moderate opportunity increase while yellow regimes remain capped at one signal. |
-| **RSI Reversion** | US Stocks | Enabled; RSI < 35, %B < 20%, SMA-200 within +/-15%, 0.7x volume confirmation, 1-bar recovery, 0.8x ATR stop extension | Mean reversion with crash and realised-volatility guards, tuned to allow slightly more entries without removing fail-closed protections. |
-| **Gap-Up** | US Stocks | Enabled; true 5-15% opening gap, 1.3x opening-volume pace, 65% breadth guard, <=35% SMA-200 extension, top-1 ranked signal, 2-day hold, failed-gap exit | Opening momentum sleeve with completed-bar history, minute-bar entry confirmation, and ATR-risk sizing. |
-| **EMA Crossover** | Crypto | 6/18 EMA, latest completed cross only, top-1 ranked signal, RSI 35-75, slope + volatility filters, 1% daily-close max-loss exit | Bullish EMA crossover with BTC regime gate and tighter same-scan concentration control. |
-| **Range Breakout** | Crypto | Enabled; 20-day high close breakout, 2.5x volume, rising EMA-50, RSI/extension guards | Ranked Donchian-style breakout sleeve with failed-breakout and trend-loss exits. |
+| **RSI Reversion** | US Stocks | Enabled; RSI < 40, %B < 20%, SMA-200 within +/-15%, 0.7x volume confirmation, 1-bar recovery, 5-day drawdown <= 10%, ATR/price <= 5%, 0.8x ATR stop capped at 6% | Mean reversion with crash, realised-volatility, and tail-loss guards. |
+| **Gap-Up** | US Stocks | Enabled; true 5-15% opening gap, 1.3x opening-volume pace, 65% breadth guard, prior close above SMA-200, <=35% SMA-200 extension, top-1 ranked signal, 2-day hold, failed-gap exit | Opening momentum sleeve with completed-bar trend confirmation, minute-bar entry confirmation, and ATR-risk sizing. |
+| **EMA Crossover** | Crypto | 6/18 EMA, latest completed cross only, top-1 ranked signal, RSI 35-75, slope + volatility filters, 3-day drawdown guard, price/EMA confirmation, 2% daily-close max-loss exit, 16-day hold cap | Bullish EMA crossover with BTC regime gate and tighter same-scan concentration control. |
+| **Range Breakout** | Crypto | Enabled; 20-day high close breakout, 2.5x volume, rising EMA-50, RSI, 0.8%-8% breakout-extension, and upper-range close guards | Ranked Donchian-style breakout sleeve with failed-breakout and trend-loss exits. |
 
 **Crypto Universe**: `BTC/USD`, `SOL/USD`, `LINK/USD`, `DOGE/USD`, `LTC/USD`, `DOT/USD`.
 
@@ -117,7 +117,7 @@ python3 scheduler/run_validation_gate.py --profile range
 
 - **Asymmetric Reward**: 3.5% stop-loss / 12% take-profit.
 - **Capital Protection**: SMA-based trend filters on all strategies.
-- **Strategy-Local Loss Defense**: Momentum and RSI use less-permissive ATR stop extensions on top of the global stop layer, Gap-Up exits failed continuations, and MA Crossover exits on a daily close at least 1% below entry.
+- **Strategy-Local Loss Defense**: Momentum and RSI use less-permissive ATR stop extensions on top of the global stop layer, RSI blocks high-ATR and unresolved waterfall entries and exits daily closes 6% below entry, Gap-Up exits failed continuations, and MA Crossover exits on a daily close at least 2% below entry.
 - **Position Limits**: Max 8% of portfolio per trade, cap of 10 concurrent positions.
 - **Daily Guardrail**: 5% daily loss limit (hard stop for the day), keyed to the `America/New_York` trading-session date so UTC cloud hosts do not reset the baseline at UTC midnight. The baseline is the first observed account value for that trading date and is persisted in `data/daily_loss_baseline.json`; it is not reconstructed from the prior close.
 - **Broker Resilience**: Alpaca timeouts, rate limits, and 5xx outages use bounded retry; auth failures, not-found responses, and broker rejections are classified for fail-closed logging.

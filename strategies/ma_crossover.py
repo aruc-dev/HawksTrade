@@ -95,8 +95,14 @@ class MACrossoverStrategy(BaseStrategy):
         vol_avg_period   = int(SCFG.get("volume_avg_period", 20))
         vol_filter_period = int(SCFG.get("vol_filter_period", 10))
         cross_lookback   = int(SCFG.get("entry_cross_lookback_days", 1))
+        trend_return_lookback = int(SCFG.get("trend_return_lookback_days", 3))
+        min_trend_return = float(SCFG.get("min_trend_return_pct", 0.0))
+        min_price_above_slow = float(SCFG.get("min_price_above_slow_pct", 0.0))
         max_signals      = int(SCFG.get("max_signals", 0) or 0)
         min_trade_value  = float(CFG["trading"].get("min_trade_value_usd", 100))
+        min_signal_bars  = max(slow_span, atr_period, vol_avg_period, vol_filter_period) + 5
+        if trend_return_lookback > 0:
+            min_signal_bars = max(min_signal_bars, trend_return_lookback + 1)
 
         log.info(f"[MACross] Scanning {len(universe)} crypto pairs "
                  f"(EMA {fast_span}/{slow_span}, {timeframe})...")
@@ -104,7 +110,7 @@ class MACrossoverStrategy(BaseStrategy):
         signals = []
 
         try:
-            bars_data = ac.get_crypto_bars(universe, timeframe=timeframe, limit=max(slow_span, atr_period) + 100)
+            bars_data = ac.get_crypto_bars(universe, timeframe=timeframe, limit=min_signal_bars + 100)
         except Exception as e:
             log.error(f"[MACross] Failed to fetch bars: {e}")
             return []
@@ -126,7 +132,7 @@ class MACrossoverStrategy(BaseStrategy):
         for symbol in universe:
             try:
                 bars = _bars_for_symbol(bars_data, symbol)
-                if bars is None or len(bars) < max(slow_span, atr_period, vol_avg_period, vol_filter_period) + 5:
+                if bars is None or len(bars) < min_signal_bars:
                     continue
 
                 closes = pd.Series([
@@ -170,10 +176,23 @@ class MACrossoverStrategy(BaseStrategy):
                 fast_v  = float(fast.iloc[-1])
                 slow_v  = float(slow.iloc[-1])
                 price   = float(closes.iloc[-1])
+                price_above_slow_pct = (price / slow_v) - 1 if slow_v > 0 else 0.0
+                trend_return = 0.0
+                if trend_return_lookback > 0:
+                    trend_reference = float(closes.iloc[-(trend_return_lookback + 1)])
+                    trend_return = (price / trend_reference) - 1 if trend_reference > 0 else float("-inf")
 
                 rsi_val = _calc_rsi(closes, 14)
 
-                if cross == "bullish" and is_trending_up and is_volatile and volume_ok and rsi_min <= rsi_val <= rsi_max:
+                if (
+                    cross == "bullish"
+                    and is_trending_up
+                    and is_volatile
+                    and volume_ok
+                    and trend_return >= min_trend_return
+                    and price_above_slow_pct >= min_price_above_slow
+                    and rsi_min <= rsi_val <= rsi_max
+                ):
                     atr = _calc_atr(bars, atr_period)
 
                     # Guard against zero slow EMA (theoretical edge case on micro-cap assets)
@@ -197,8 +216,9 @@ class MACrossoverStrategy(BaseStrategy):
                     vol_ratio = curr_vol / avg_vol if avg_vol > 0 else 0.0
                     confidence = min(
                         1.0,
-                        (0.55 * min(ema_divergence * 10, 1.0))
-                        + (0.30 * min(vol_ratio / max(vol_spike_ratio, 1.0), 2.0) / 2.0)
+                        (0.45 * min(ema_divergence * 10, 1.0))
+                        + (0.25 * min(vol_ratio / max(vol_spike_ratio, 1.0), 2.0) / 2.0)
+                        + (0.15 * min(max(trend_return, 0.0) / 0.08, 1.0))
                         + (0.15 * (1.0 - min(abs(rsi_val - 55.0) / 20.0, 1.0))),
                     )
                     sig = {
@@ -208,14 +228,21 @@ class MACrossoverStrategy(BaseStrategy):
                         "asset_class":    self.asset_class,
                         "confidence":     round(confidence, 3),
                         "atr_stop_price": atr_stop,
-                        "reason":         f"BULLISH {fast_span}/{slow_span} EMA Crossover | Slope UP | Vol Confirm | RSI={rsi_val:.1f} | ATR Stop={atr_stop}",
+                        "reason": (
+                            f"BULLISH {fast_span}/{slow_span} EMA Crossover | Slope UP | "
+                            f"{trend_return_lookback}d return={trend_return:.1%} | "
+                            f"price/EMA{slow_span}={price_above_slow_pct:.1%} | "
+                            f"Vol Confirm | RSI={rsi_val:.1f} | ATR Stop={atr_stop}"
+                        ),
                     }
                     sig["atr_risk_qty"] = atr_risk_qty
 
                     signals.append(sig)
                     log.info(
                         f"[MACross] BULLISH crossover on {symbol} | Trend UP | Vol Confirm | "
-                        f"RSI={rsi_val:.1f} | ATR Stop={atr_stop} | risk_qty={atr_risk_qty}"
+                        f"RSI={rsi_val:.1f} | {trend_return_lookback}d={trend_return:.1%} | "
+                        f"price/EMA{slow_span}={price_above_slow_pct:.1%} | "
+                        f"ATR Stop={atr_stop} | risk_qty={atr_risk_qty}"
                     )
 
             except Exception as e:

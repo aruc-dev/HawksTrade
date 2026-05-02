@@ -102,7 +102,9 @@ class RangeBreakoutStrategy(BaseStrategy):
 
         breakout_pct       = float(SCFG.get("breakout_pct", 0.008))
         breakout_lookback  = max(1, int(SCFG.get("breakout_lookback_days", 1)))
+        min_extension_pct  = float(SCFG.get("min_breakout_extension_pct", 0.0))
         max_extension_pct  = float(SCFG.get("max_breakout_extension_pct", 0.08))
+        min_close_location = float(SCFG.get("min_close_location", 0.0))
         vol_mult           = float(SCFG.get("volume_multiplier", 1.8))
         timeframe          = SCFG.get("timeframe", "1Day")
         risk_pct           = float(SCFG.get("risk_per_trade_pct", 0.01))
@@ -182,13 +184,21 @@ class RangeBreakoutStrategy(BaseStrategy):
                 breakout_level = breakout_high * (1 + breakout_pct)
                 broke_out = today_cls >= breakout_level
                 extension_pct = _safe_ratio(today_cls - breakout_level, breakout_level)
-                extension_ok = max_extension_pct <= 0 or extension_pct <= max_extension_pct
+                extension_ok = (
+                    extension_pct >= min_extension_pct
+                    and (max_extension_pct <= 0 or extension_pct <= max_extension_pct)
+                )
+                close_location = _safe_ratio(
+                    today_cls - df["low"].iloc[-1],
+                    df["high"].iloc[-1] - df["low"].iloc[-1],
+                )
+                close_location_ok = min_close_location <= 0 or close_location >= min_close_location
                 rsi_val = _calc_rsi(df["close"], rsi_period)
                 rsi_ok = rsi_val <= rsi_entry_max
                 vol_ratio = _safe_ratio(today_vol, avg_vol)
                 trend_spread = _safe_ratio(today_cls - trend_now, trend_now)
 
-                if broke_out and volume_ok and trend_ok and is_volatile and extension_ok and rsi_ok:
+                if broke_out and volume_ok and trend_ok and is_volatile and extension_ok and close_location_ok and rsi_ok:
                     if portfolio_equity is None:
                         try:
                             portfolio_equity = ac.get_portfolio_value()
@@ -218,7 +228,8 @@ class RangeBreakoutStrategy(BaseStrategy):
                         1.0,
                         (0.45 * min(excess_pct / max(breakout_pct, 0.001), 2.0) / 2.0)
                         + (0.35 * min(vol_ratio / max(vol_mult, 1.0), 2.0) / 2.0)
-                        + (0.20 * min(max(trend_spread, 0.0) / 0.05, 1.0)),
+                        + (0.10 * min(max(trend_spread, 0.0) / 0.05, 1.0))
+                        + (0.10 * min(max(close_location, 0.0), 1.0)),
                     )
                     signals.append({
                         "symbol":         symbol,
@@ -231,6 +242,7 @@ class RangeBreakoutStrategy(BaseStrategy):
                         "reason":         (
                             f"Breakout close {today_cls:.4f} above level {breakout_level:.4f} | "
                             f"{breakout_lookback}d high={breakout_high:.4f} | "
+                            f"extension={extension_pct:.1%} | close_loc={close_location:.0%} | "
                             f"vol={vol_ratio:.1f}x avg | EMA{trend_ema_period} rising | "
                             f"RSI={rsi_val:.1f} | ATR Stop={atr_stop}"
                         ),
@@ -238,6 +250,7 @@ class RangeBreakoutStrategy(BaseStrategy):
                     log.info(
                         f"[Breakout] Signal: BUY {symbol} | qty={atr_risk_qty} | stop={atr_stop} | "
                         f"close={today_cls:.4f} > level={breakout_level:.4f} "
+                        f"ext={extension_pct:.1%} | close_loc={close_location:.0%} | "
                         f"vol={vol_ratio:.1f}x | EMA{trend_ema_period} rising | RSI={rsi_val:.1f}"
                     )
 

@@ -28,6 +28,7 @@ def atr_stop_and_qty(
     min_trade_value: float,
     logger,
     prefix: str,
+    max_stop_loss_pct: float | None = None,
 ):
     """Return (atr_stop, atr_risk_qty) or None when sizing is not tradeable."""
     price = _finite_float(price)
@@ -48,6 +49,17 @@ def atr_stop_and_qty(
     if not math.isfinite(atr_stop) or atr_stop >= price:
         logger.info(f"{prefix} {symbol} skipped: invalid ATR stop {atr_stop}.")
         return None
+    if max_stop_loss_pct is not None:
+        raw_max_stop_loss_pct = max_stop_loss_pct
+        max_stop_loss_pct = _finite_float(max_stop_loss_pct)
+        if max_stop_loss_pct is None or max_stop_loss_pct <= 0 or max_stop_loss_pct >= 1:
+            logger.info(
+                f"{prefix} {symbol} skipped: invalid max stop loss pct "
+                f"{raw_max_stop_loss_pct!r}; expected 0 < pct < 1."
+            )
+            return None
+        max_loss_stop = round(price * (1 - max_stop_loss_pct), 4)
+        atr_stop = max(atr_stop, max_loss_stop)
 
     risk_dollars = portfolio_equity * risk_per_trade_pct
     risk_per_share = price - atr_stop

@@ -277,6 +277,42 @@ class GapUpStrategyTests(unittest.TestCase):
         self.assertEqual(signals, [])
         get_portfolio_value.assert_not_called()
 
+    def test_scan_blocks_gap_through_trend_when_prior_close_below_sma(self):
+        bars = [_bar(155, 156, 154, 155, 1000) for _ in range(199)]
+        bars.append(_bar(145, 150, 144, 149, 1000))
+        opening = _opening_bar(157, volume=40)
+
+        with (
+            patch(
+                "strategies.gap_up.ac.get_stock_bars",
+                side_effect=_stock_bars_side_effect({"AAPL": bars}, {"AAPL": opening}),
+            ),
+            patch("strategies.gap_up.rm.market_regime_ok", return_value=True),
+            patch("strategies.gap_up.ac.get_portfolio_value") as get_portfolio_value,
+            patch.dict(
+                "strategies.gap_up.SCFG",
+                {
+                    "enabled": True,
+                    "min_gap_pct": 0.04,
+                    "max_gap_pct": 0.15,
+                    "volume_multiplier": 1.5,
+                    "volume_avg_period": 20,
+                    "entry_window_minutes": 45,
+                    "atr_period": 14,
+                    "atr_multiplier": 2.0,
+                    "trend_sma_period": 200,
+                    "require_prior_close_above_trend": True,
+                    "require_true_gap": True,
+                    "risk_per_trade_pct": 0.01,
+                    "max_signals": 0,
+                },
+            ),
+        ):
+            signals = GapUpStrategy().scan(["AAPL"], current_time=datetime(2026, 4, 20, 13, 35))
+
+        self.assertEqual(signals, [])
+        get_portfolio_value.assert_not_called()
+
     def test_scan_reuses_single_portfolio_value_for_multiple_candidates(self):
         bars = _eligible_daily_bars()
         opening = _opening_bar(105, volume=40)
