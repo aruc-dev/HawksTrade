@@ -29,7 +29,7 @@ from scheduler.reconcile_trade_log import safe_reconcile  # noqa: E402
 
 
 LOG_DIR = BASE_DIR / "logs"
-MANUAL_SELL_REASON = "manually triggered market sell"
+MANUAL_SELL_REASON = "manually triggered sell"
 EXIT_CHOICE = "x"
 CANCEL_CHOICE = "x"
 MARKET_CHOICE = "1"
