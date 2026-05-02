@@ -1,6 +1,6 @@
 # HawksTrade Configuration Guide
 
-> **Updated:** May 1, 2026
+> **Updated:** May 2, 2026
 > **Primary config file:** `config/config.yaml`
 > **Local config:** `config/config.local.yaml` — if present, deep-merged over `config/config.yaml`. Include only the keys you want to override. Gitignored; use for per-machine settings without modifying the committed file.
 > **Recommended profile:** tail-risk-hardened paper trading profile validated by the latest 12-month backtest.
@@ -19,7 +19,7 @@ The latest validated default configuration is:
 | Intraday trading | `intraday.enabled: false` | The system is validated as a swing-trading bot. |
 | Screener | `screener.enabled: true` | The tightened screener improved 12-month return versus the old screener and recent fixed-universe test. |
 | Momentum | enabled, `top_n: 2`, `min_momentum_pct: 0.08`, `volume_spike_ratio: 2.0`, `min_breadth_coverage_pct: 0.65` | Allows a second green-regime stock candidate while keeping yellow regimes capped at one signal and preserving sector/risk guards. |
-| RSI Reversion | enabled, `max_entry_atr_pct: 0.07`, `max_stop_loss_pct: 0.06` | Active mean-reversion stock sleeve with crash, realised-volatility, high-ATR entry, and max-loss guards. |
+| RSI Reversion | enabled, `oversold_threshold: 40`, `max_entry_atr_pct: 0.05`, `max_recent_drawdown_pct: 0.10` | Active mean-reversion stock sleeve with crash, realised-volatility, high-ATR, recent-waterfall, and max-loss guards. |
 | Gap-Up | enabled, `require_prior_close_above_trend: true` | Opening-momentum sleeve with true-gap, opening-volume pace, completed-bar trend, and top-1 ranking guards. |
 | MA Crossover | enabled, `hold_days: 16`, `max_loss_exit_pct: 0.02` | Positive crypto contribution with recent-window weakness reduced while avoiding the older large-loss tail seen with a 3% exit. |
 | Range Breakout | enabled | Crypto Donchian breakout sleeve with volume, trend, RSI, 0.8%-8% extension, close-location, and failed-breakout guards. |
@@ -29,7 +29,7 @@ Latest recommended 12-month result:
 
 | Final Value | Return | Trades | Win Rate | Max Drawdown |
 |---:|---:|---:|---:|---:|
-| $11,329.10 | +13.29% | 102 | 46.1% | -4.14% |
+| $11,340.03 | +13.40% | 107 | 49.5% | -2.14% |
 
 These results enforce `trading.max_position_pct: 0.08` for all entries, including momentum/Kelly sizing, with all configured strategies enabled. Stop-loss, take-profit, daily-loss halt, and mode remain unchanged.
 
@@ -235,25 +235,28 @@ Momentum is the primary stock contributor. The moderate-growth profile uses `top
 rsi_reversion:
   enabled: true
   rsi_period: 14
-  oversold_threshold: 35
+  oversold_threshold: 40
   overbought_threshold: 50
   hold_days: 10
   vix_multiplier: 0.95
   atr_multiplier: 0.8
-  max_entry_atr_pct: 0.07
+  max_entry_atr_pct: 0.05
   max_stop_loss_pct: 0.06
   max_loss_exit_pct: 0.06
   volume_spike_ratio: 0.7
+  recent_drawdown_lookback_days: 5
+  max_recent_drawdown_pct: 0.10
 ```
 
 Recommended: enabled in the active profile, with continued monitoring through
 `python3 scheduler/run_validation_gate.py --profile rsi` before scaling its
 capital allocation.
 
-The latest 12-month default produced 21 RSI Reversion trades, 52.4% win rate,
-and $124.55 total P&L. The high-ATR entry ceiling and 6% max-loss exit reduced
-the observed worst RSI trade from -12.69% to -5.59%; keep treating it as a
-monitored sleeve until the RSI validation profile confirms the edge.
+The latest costed 12-month RSI-only backtest produced 29 trades, 62.1% win rate,
+2.02 profit factor, +3.44% return, and -0.86% max drawdown. The high-ATR entry
+ceiling, 5-day drawdown guard, and 6% max-loss exit reduced the observed worst
+RSI trade while keeping the sleeve enabled. The forward paper-trading gate still
+requires 60 paper days and 20 closed RSI trades before scaling allocation.
 
 ### Gap-Up
 

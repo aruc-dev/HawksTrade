@@ -141,9 +141,9 @@ strategies:
   rsi_reversion:
     enabled: true
     asset_class: stocks
-    description: "Conservative RSI mean reversion. Entry: RSI<35, %B<20%, liquidity confirmation, 1-bar recovery, price within 15% below and 15% above SMA200, and ATR/price <=7%. ATR stop extension: 0.8×ATR(14), capped at 6% max stop distance, with the global stop still governing when stricter. Exit: price reaches SMA20, RSI>50, 6% daily-close max-loss, or 10-day cap. Regime: skip on severe crash (SPY >20% below 252d peak) or elevated realised-volatility proxy."
+    description: "Balanced RSI mean reversion. Entry: RSI<40, %B<20%, liquidity confirmation, 1-bar recovery, price within 15% below and 15% above SMA200, 5-day drawdown <=10%, and ATR/price <=5%. ATR stop extension: 0.8×ATR(14), capped at 6% max stop distance, with the global stop still governing when stricter. Exit: price reaches SMA20, RSI>50, 6% daily-close max-loss, or 10-day cap. Regime: skip on severe crash (SPY >20% below 252d peak) or elevated realised-volatility proxy."
     rsi_period: 14
-    oversold_threshold: 35          # Entry: RSI below this level (oversold/recovering)
+    oversold_threshold: 40          # Entry: RSI below this level (oversold/recovering)
     overbought_threshold: 50        # Exit: RSI above this (momentum neutral = edge evaporated)
     hold_days: 10                   # Hard exit after 10 business days
     bb_period: 20                   # Bollinger Band lookback period
@@ -151,13 +151,18 @@ strategies:
     vix_multiplier: 0.95            # HV20 must be below HV_MA × this to allow entries
     atr_period: 14                  # ATR lookback for volatility-adjusted stop
     atr_multiplier: 0.8             # Stop = entry - atr_multiplier × ATR
-    max_entry_atr_pct: 0.07          # Skip legacy/high-volatility names above 7% ATR/price
+    max_entry_atr_pct: 0.05          # Skip legacy/high-volatility names above 5% ATR/price
     max_stop_loss_pct: 0.06          # Cap RSI-specific ATR stop extension at 6% below entry
     max_loss_exit_pct: 0.06          # Strategy fail-safe exit on daily close >=6% below entry
     risk_per_trade_pct: 0.01        # Risk 1% of equity per trade for ATR-based sizing
     sma200_lower_buffer_pct: 0.15   # Entry blocked if price < SMA200 × (1 - this); prevents buying broken stocks
     sma200_upper_buffer_pct: 0.15   # Entry blocked if price > SMA200 × (1 + this); prevents buying overextended stocks
     volume_spike_ratio: 0.7         # Entry bar volume must exceed this multiple of the 20-day average
+    min_recovery_bars: 1            # Require this many consecutive improving closes before entry
+    min_recovery_pct: 0.0           # Each recovery close must improve by more than this percentage
+    min_close_location: 0.0         # Optional close-location gate; 0 disables it
+    recent_drawdown_lookback_days: 5 # Drawdown window used to avoid unresolved waterfalls
+    max_recent_drawdown_pct: 0.10   # Skip entries still more than 10% below the recent 5-day peak
     profit_floor_pct: 0.015         # Exit via SMA target must exceed entry × (1 + this) to cover slippage
     weight: 1.0
 

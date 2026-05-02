@@ -1,6 +1,6 @@
 # HawksTrade Backtest Summary
 
-> **Updated:** May 1, 2026
+> **Updated:** May 2, 2026
 > **Starting Capital:** $10,000
 > **Momentum Exit Policy:** `profit_trailing`
 > **Screener:** enabled for the recommended default
@@ -14,19 +14,19 @@ The current recommended configuration uses:
 
 - Dynamic screener enabled with tightened liquidity, trend, volatility, and overextension filters
 - `momentum` enabled with `top_n: 2`, `min_momentum_pct: 0.08`, `volume_spike_ratio: 2.0`, and `min_breadth_coverage_pct: 0.65`
-- `rsi_reversion` enabled with crash, realised-volatility, high-ATR entry, and 6% tail-loss guards
+- `rsi_reversion` enabled with RSI<40 entries, crash, realised-volatility, 5-day drawdown, high-ATR entry, and 6% tail-loss guards
 - `gap_up` enabled with true-gap, opening-volume pace, SMA200, and top-1 ranking guards
 - `ma_crossover` enabled with 3-day follow-through, price/EMA confirmation, a 2% daily-close max-loss exit, and a 16-day hold cap
 - `range_breakout` enabled with 20-day Donchian breakout, trend, volume, RSI, extension, upper-range close, and failed-breakout guards
 
-These results enforce `trading.max_position_pct: 0.08` for every entry, including momentum/Kelly sizing. The active default enables every configured strategy. The latest tuning hardens RSI and crypto tail risk while preserving a positive recent crypto sleeve. Global stop-loss, take-profit, daily-loss halt, max-position cap, and mode remain unchanged.
+These costed results enforce `trading.max_position_pct: 0.08` for every entry, including momentum/Kelly sizing, and assume 10 bps adverse slippage plus 5 bps fees per side. The active default enables every configured strategy. The latest tuning hardens RSI tail risk while preserving a positive recent crypto sleeve. Global stop-loss, take-profit, daily-loss halt, max-position cap, and mode remain unchanged.
 
 | Period | Final Value | Return | Trades | Win Rate | Max Drawdown |
 |---|---:|---:|---:|---:|---:|
-| 1 month | $10,316.62 | +3.17% | 10 | 50.0% | -1.13% |
-| 2 months | $10,252.54 | +2.53% | 13 | 38.5% | -1.25% |
-| 6 months | $10,578.90 | +5.79% | 38 | 47.4% | -1.82% |
-| 12 months | $11,329.10 | +13.29% | 102 | 46.1% | -4.14% |
+| 1 month | $10,256.04 | +2.56% | 7 | 57.1% | -0.50% |
+| 2 months | $10,186.38 | +1.86% | 10 | 40.0% | -1.30% |
+| 6 months | $10,503.47 | +5.03% | 37 | 48.6% | -2.04% |
+| 12 months | $11,340.03 | +13.40% | 107 | 49.5% | -2.14% |
 
 ---
 
@@ -34,21 +34,21 @@ These results enforce `trading.max_position_pct: 0.08` for every entry, includin
 
 | Strategy | Trades | Win Rate | Avg P&L % | Total P&L | Best | Worst |
 |---|---:|---:|---:|---:|---:|---:|
-| `gap_up` | 11 | 63.6% | +1.08% | $83.28 | +8.40% | -4.55% |
-| `ma_crossover` | 20 | 45.0% | +2.76% | $472.28 | +19.33% | -4.13% |
-| `momentum` | 43 | 34.9% | +0.87% | $315.83 | +20.95% | -9.17% |
-| `range_breakout` | 7 | 71.4% | +5.75% | $333.16 | +12.64% | -4.44% |
-| `rsi_reversion` | 21 | 52.4% | +0.70% | $124.55 | +11.85% | -5.59% |
+| `gap_up` | 11 | 72.7% | +1.88% | $157.90 | +8.07% | -3.69% |
+| `ma_crossover` | 20 | 40.0% | +1.85% | $317.98 | +11.78% | -4.42% |
+| `momentum` | 40 | 35.0% | +0.39% | $141.61 | +11.78% | -10.37% |
+| `range_breakout` | 7 | 71.4% | +5.85% | $334.83 | +11.78% | -4.73% |
+| `rsi_reversion` | 29 | 62.1% | +1.47% | $364.84 | +11.51% | -4.24% |
 
 ## 12-Month Quarterly Breakdown
 
 | Quarter | Start Value | End Value | Return | Trades | Win Rate |
 |---|---:|---:|---:|---:|---:|
-| Q2 2025 | $10,000.00 | $10,408.94 | +4.09% | 12 | 58.3% |
-| Q3 2025 | $10,349.43 | $11,005.24 | +6.34% | 42 | 45.2% |
-| Q4 2025 | $11,004.32 | $10,866.69 | -1.25% | 20 | 40.0% |
-| Q1 2026 | $10,864.44 | $10,981.40 | +1.08% | 18 | 44.4% |
-| Q2 2026 | $10,981.40 | $11,329.10 | +3.17% | 10 | 50.0% |
+| Q2 2025 | $10,000.00 | $10,322.53 | +3.23% | 12 | 58.3% |
+| Q3 2025 | $10,259.82 | $10,718.42 | +4.47% | 46 | 45.7% |
+| Q4 2025 | $10,706.11 | $10,996.36 | +2.71% | 20 | 60.0% |
+| Q1 2026 | $10,994.09 | $11,056.93 | +0.57% | 22 | 40.9% |
+| Q2 2026 | $11,056.93 | $11,340.03 | +2.56% | 7 | 57.1% |
 
 ---
 
@@ -56,7 +56,7 @@ These results enforce `trading.max_position_pct: 0.08` for every entry, includin
 
 | Scenario | Screener | Strategies | Return | Trades | Win Rate | Max Drawdown |
 |---|---|---|---:|---:|---:|---:|
-| Current tail-risk-hardened all-enabled strategy set | On | `momentum`, `rsi_reversion`, `gap_up`, `ma_crossover`, `range_breakout` | +13.29% | 102 | 46.1% | -4.14% |
+| Current tail-risk-hardened all-enabled strategy set | On | `momentum`, `rsi_reversion`, `gap_up`, `ma_crossover`, `range_breakout` | +13.40% | 107 | 49.5% | -2.14% |
 | Previous moderate-risk all-enabled strategy set | On | `momentum`, `rsi_reversion`, `gap_up`, `ma_crossover`, `range_breakout` | +22.87% | 111 | 48.6% | -4.12% |
 | Previous all-enabled strategy set | On | `momentum`, `rsi_reversion`, `gap_up`, `ma_crossover`, `range_breakout` | +9.43% | 91 | 40.7% | -5.11% |
 | Previous default strategy set | On | `momentum`, `rsi_reversion`, `ma_crossover` | +12.12% | 56 | 42.9% | -2.09% |
@@ -70,10 +70,10 @@ These results enforce `trading.max_position_pct: 0.08` for every entry, includin
 
 Interpretation:
 
-- The current all-enabled profile returns +13.29% over 12 months with a -4.14% max drawdown. It gives up some prior moderate-risk upside to reduce the observed RSI tail from -12.69% to -5.59% and remove the MA Crossover -18.65% tail seen under a looser 3% crypto max-loss setting.
+- The current all-enabled profile returns +13.40% over 12 months with a -2.14% max drawdown under the costed model. It improves RSI contribution while preserving the MA Crossover tail controls added under the 2% crypto max-loss setting.
 - Range Breakout and MA Crossover remain positive crypto contributors. Range Breakout still has only 7 closed trades, so its edge needs continued forward validation before scaling allocation.
 - Gap-Up was profitable over 12 months and improved after requiring the prior completed close to already be above SMA200, which removed recent gap-through-trend weakness. Keep its dedicated gate in the monitoring loop before scaling allocation.
-- RSI Reversion contributed $124.55 with its worst trade reduced to -5.59% after the 7% ATR/price entry ceiling and 6% max-loss controls. Keep monitoring the dedicated RSI gate before scaling allocation.
+- RSI Reversion contributed $364.84 with 29 trades, 62.1% win rate, and a -4.24% worst trade after moving to RSI<40, a 5% ATR/price ceiling, and a 10% recent-drawdown guard. Keep monitoring the dedicated RSI gate before scaling allocation.
 - Use the current row above for live/paper expectations and treat older rows as historical baselines only.
 - The configured position cap remains 8%. With `max_positions: 10`, this caps fully deployed gross long exposure at roughly 80% before cash, position, and asset-class constraints.
 
@@ -84,7 +84,8 @@ Interpretation:
 Recommended default:
 
 ```bash
-python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/29/2026 --exit-policy profit_trailing --screener
+python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/29/2026 --exit-policy profit_trailing --screener \
+  --slippage-bps 10 --fee-bps 5 --min-fee 0
 ```
 
 Fixed-universe comparison:
@@ -102,7 +103,8 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/29/2026 
   --set strategies.momentum.min_momentum_pct=0.08 \
   --set strategies.momentum.volume_spike_ratio=2.0 \
   --set strategies.momentum.min_breadth_coverage_pct=0.65 \
-  --set strategies.ma_crossover.max_loss_exit_pct=0.02
+  --set strategies.ma_crossover.max_loss_exit_pct=0.02 \
+  --slippage-bps 10 --fee-bps 5 --min-fee 0
 ```
 
 ---
@@ -124,8 +126,9 @@ python3 scheduler/run_scan.py --dry-run
 python3 scheduler/run_risk_check.py --dry-run
 python3 scheduler/run_report.py
 python3 scheduler/run_backtest.py --days 30 --fund 10000
-python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/29/2026 --exit-policy profit_trailing --screener
+python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/29/2026 --exit-policy profit_trailing --screener --slippage-bps 10 --fee-bps 5 --min-fee 0
 python3 scheduler/run_validation_gate.py --profile production
+python3 scheduler/run_validation_gate.py --profile rsi
 python3 scheduler/run_validation_gate.py --profile gap
 ```
 
@@ -143,15 +146,17 @@ Latest production-gate result:
 
 | Gate | Result | Return | Max Drawdown | Trades | Win Rate | Profit Factor | Daily Sharpe |
 |---|---|---:|---:|---:|---:|---:|---:|
-| `default_12m_costed` | PASS | +10.41% | -4.78% | 103 | 43.7% | 1.51 | 1.49 |
-| `default_6m_costed` | PASS | +4.70% | -1.97% | 39 | 43.6% | 1.67 | 1.61 |
-| `crypto_12m_costed` | PASS | +7.23% | -1.55% | 27 | 48.1% | 3.04 | 2.03 |
-| `crypto_recent_30d_watch` | PASS | +0.51% | -0.69% | 3 | 66.7% | 3.12 | 1.75 |
+| `default_12m_costed` | PASS | +13.40% | -2.14% | 107 | 49.5% | 1.79 | 2.29 |
+| `default_6m_costed` | PASS | +5.03% | -2.04% | 37 | 48.6% | 2.00 | 2.29 |
+| `crypto_12m_costed` | PASS | +6.48% | -1.61% | 27 | 48.1% | 2.84 | 2.23 |
+| `crypto_recent_30d_watch` | PASS | +0.77% | -0.69% | 3 | 66.7% | 4.20 | 2.46 |
 
 RSI Reversion is enabled in the active profile by configuration, but the dedicated
 `--profile rsi` gate should still be used before scaling its allocation. The
-latest default 12-month run had 21 RSI trades, 52.4% win rate, and $124.55
-total P&L, with the worst observed trade reduced to -5.59%.
+latest costed RSI-only 12-month backtest gate passed at +3.44% return, -0.86%
+max drawdown, 29 trades, 62.1% win rate, 2.02 profit factor, and 1.55 daily
+Sharpe. The forward paper-trading gate remains pending until it accumulates
+60 paper days and 20 closed RSI trades.
 
 Range Breakout is enabled in the active profile. Its dedicated gate validates
 the hardened Donchian-style implementation before scaling allocation:

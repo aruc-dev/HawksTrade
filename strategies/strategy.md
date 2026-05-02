@@ -102,8 +102,8 @@ room while the global 3.5% stop remains the absolute floor.
 
 **Type:** Mean reversion, swing trade.
 
-**Entry:** Five conditions must all be true simultaneously:
-1. RSI(14) < 35 — oversold with room for recovery.
+**Entry:** Seven conditions must all be true simultaneously:
+1. RSI(14) < 40 — oversold/recovering with enough signal frequency for the sleeve.
 2. Bollinger Band %B < 20% — price in the lower quintile of the 20-day, 2σ band.
 3. Volume ≥ 0.7× 20-day average — sufficient liquidity confirmation.
 4. Last close > prior close — 1-bar recovery; freefall has paused.
@@ -111,7 +111,8 @@ room while the global 3.5% stop remains the absolute floor.
    - Entry blocked if `price < SMA200 × (1 - sma200_lower_buffer_pct)` (broken stocks).
    - Entry blocked if `price > SMA200 × (1 + sma200_upper_buffer_pct)` (overextended stocks).
    - Default buffers: ±15%.
-6. ATR/price ≤ 7% — blocks legacy or high-volatility names where mean reversion
+6. Recent 5-day drawdown ≤ 10% — avoids entries still buried in unresolved waterfall moves.
+7. ATR/price ≤ 5% — blocks legacy or high-volatility names where mean reversion
    tail risk is too wide for the sleeve.
 
 **Stop:** The 0.8 × ATR(14) stop extension flows through
@@ -131,20 +132,22 @@ below entry, and the global 3.5% stop still governs whenever it is stricter.
 | Parameter | Value |
 |---|---|
 | `rsi_period` | 14 |
-| `oversold_threshold` | 35 |
+| `oversold_threshold` | 40 |
 | `overbought_threshold` | 50 (RSI neutral exit) |
 | `hold_days` | 10 business days |
 | `bb_period` | 20 |
 | `bb_std` | 2.0 |
 | `atr_period` | 14 |
 | `atr_multiplier` | 0.8 ATR stop extension |
-| `max_entry_atr_pct` | 7% ATR/price ceiling |
+| `max_entry_atr_pct` | 5% ATR/price ceiling |
 | `max_stop_loss_pct` | 6% RSI ATR stop cap |
 | `max_loss_exit_pct` | 6% below entry on latest daily close |
 | `vix_multiplier` | 0.95 |
 | `sma200_lower_buffer_pct` | 15% |
 | `sma200_upper_buffer_pct` | 15% |
 | `volume_spike_ratio` | 0.7 |
+| `recent_drawdown_lookback_days` | 5 |
+| `max_recent_drawdown_pct` | 10% |
 
 **Regime filters:**
 - Crash filter: skip if SPY is >20% below its 252-day peak.

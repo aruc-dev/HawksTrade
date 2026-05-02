@@ -1,9 +1,10 @@
 """
-HawksTrade - RSI Mean Reversion Strategy (Stocks) — Conservative
-=================================================================
-Entry: RSI(14) < 35 (oversold/recovering), %B < 20% (near lower Bollinger Band,
-       20-period 2σ), volume ≥ 0.8× 20-day average, 1-bar price recovery,
-       stock within 15% of SMA200.
+HawksTrade - RSI Mean Reversion Strategy (Stocks) — Balanced
+============================================================
+Entry: RSI(14) < 40 (oversold/recovering), %B < 20% (near lower Bollinger Band,
+       20-period 2σ), volume ≥ 0.7× 20-day average, configured price recovery,
+       recent-drawdown and optional close-location quality gates, ATR/price
+       ceiling, stock within 15% of SMA200.
 
 Stop:  0.8 × ATR(14) below entry is available as a volatility stop extension,
        capped by the strategy max stop distance. The global 3.5% stop still
@@ -16,7 +17,7 @@ Exit:  FIRST of:
 
 Regime filters (both must pass):
   1. Crash filter  — skip if SPY >20% below its 252-day peak.
-  2. VIX proxy     — skip if SPY realised HV(20) > its 200-day MA × 0.9.
+  2. VIX proxy     — skip if SPY realised HV(20) > its 200-day MA × 0.95.
                      Backtests pass enough SPY history after warmup for both
                      filters to run; early warmup still passes through.
 
@@ -234,10 +235,16 @@ class RSIReversionStrategy(BaseStrategy):
         sma200_upper  = float(SCFG.get("sma200_upper_buffer_pct", 0.15))
         sma200_lower  = float(SCFG.get("sma200_lower_buffer_pct", 0.15))
         volume_spike_ratio = float(SCFG.get("volume_spike_ratio", 1.5))
+        min_recovery_bars = max(1, int(SCFG.get("min_recovery_bars", 1)))
+        min_recovery_pct = float(SCFG.get("min_recovery_pct", 0.0) or 0.0)
+        min_close_location = float(SCFG.get("min_close_location", 0.0) or 0.0)
+        recent_drawdown_lookback = max(1, int(SCFG.get("recent_drawdown_lookback_days", 5)))
+        max_recent_drawdown_pct = float(SCFG.get("max_recent_drawdown_pct", 0.0) or 0.0)
 
         log.info(
             f"[RSI] Scanning {len(universe)} symbols "
-            f"(RSI<{oversold}, %B<20%, vol>{volume_spike_ratio:.1f}x, 1-bar recovery, SMA200 -{sma200_lower:.0%}/+{sma200_upper:.0%}, "
+            f"(RSI<{oversold}, %B<20%, vol>{volume_spike_ratio:.1f}x, "
+            f"{min_recovery_bars}-bar recovery, SMA200 -{sma200_lower:.0%}/+{sma200_upper:.0%}, "
             f"{atr_mult:.1f}×ATR stop extension, exit@SMA20 or RSI>50)..."
         )
 
@@ -326,16 +333,41 @@ class RSIReversionStrategy(BaseStrategy):
                         )
                     continue
 
-                if len(bars) >= 2:
-                    c_prev = float(bars[-2].close) if hasattr(bars[-2], "close") else float(bars[-2]["close"])
-                    c_last = float(bars[-1].close) if hasattr(bars[-1], "close") else float(bars[-1]["close"])
-                    recovering = c_last > c_prev
-                else:
-                    recovering = False
+                recovery_window = closes.iloc[-(min_recovery_bars + 1):]
+                recovery_moves = recovery_window.pct_change().dropna()
+                recovering = (
+                    len(recovery_moves) == min_recovery_bars
+                    and bool((recovery_moves > min_recovery_pct).all())
+                )
 
                 if not recovering:
-                    log.debug(f"[RSI] {symbol} skipped — no 1-bar recovery (last close not above prior)")
+                    log.debug(
+                        f"[RSI] {symbol} skipped — no {min_recovery_bars}-bar recovery "
+                        f"(each close must improve by >{min_recovery_pct:.2%})"
+                    )
                     continue
+
+                latest_bar = bars[-1]
+                latest_high = float(latest_bar.high if hasattr(latest_bar, "high") else latest_bar["high"])
+                latest_low = float(latest_bar.low if hasattr(latest_bar, "low") else latest_bar["low"])
+                day_range = latest_high - latest_low
+                close_location = (price - latest_low) / day_range if day_range > 0 else 1.0
+                if min_close_location > 0 and close_location < min_close_location:
+                    log.debug(
+                        f"[RSI] {symbol} skipped — close_location={close_location:.1%} "
+                        f"< min {min_close_location:.1%}"
+                    )
+                    continue
+
+                if max_recent_drawdown_pct > 0 and len(closes) >= recent_drawdown_lookback + 1:
+                    recent_peak = float(closes.iloc[-(recent_drawdown_lookback + 1):-1].max())
+                    recent_drawdown = 1.0 - (price / recent_peak) if recent_peak > 0 else 0.0
+                    if recent_drawdown > max_recent_drawdown_pct:
+                        log.debug(
+                            f"[RSI] {symbol} skipped — {recent_drawdown_lookback}d drawdown="
+                            f"{recent_drawdown:.1%} > max {max_recent_drawdown_pct:.1%}"
+                        )
+                        continue
 
                 # ATR-based stop and 1%-risk position sizing
                 atr        = _calc_atr(bars, atr_period)
@@ -373,7 +405,8 @@ class RSIReversionStrategy(BaseStrategy):
                     "atr_stop_price": atr_stop,
                     "reason": (
                         f"RSI={rsi:.1f}<{oversold}, %B={pct_b:.2%} (lower-BB={lower_band:.2f}), "
-                        f"vol={vol_ratio:.1f}×, ATR={atr:.2f} stop@{atr_stop:.2f}"
+                        f"vol={vol_ratio:.1f}×, close_loc={close_location:.0%}, "
+                        f"ATR={atr:.2f} stop@{atr_stop:.2f}"
                     ),
                 }
                 sig["atr_risk_qty"] = atr_risk_qty

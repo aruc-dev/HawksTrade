@@ -29,6 +29,7 @@ from scheduler.run_backtest import (
     _compute_profit_factor,
     _compute_quarterly_performance,
     _patch_runtime_risk_config,
+    _run_backtest_risk_exits,
     _run_backtest_hold_exits,
     _run_backtest_strategy_exits,
     _stock_market_open_for_backtest,
@@ -232,6 +233,43 @@ class TestBacktestLiveFidelity(unittest.TestCase):
             )
 
         exit_position.assert_not_called()
+
+    def test_risk_exit_uses_intraday_stop_price_when_bar_low_crosses_stop(self):
+        sim = BacktestSimulator(initial_fund=10000.0)
+        sim.current_date = datetime(2026, 4, 24, tzinfo=timezone.utc)
+        sim.historical_data = {
+            "AAPL": pd.DataFrame(
+                {
+                    "open": [100.0],
+                    "high": [101.0],
+                    "low": [95.0],
+                    "close": [99.0],
+                    "volume": [1000],
+                },
+                index=pd.DatetimeIndex([sim.current_date]),
+            )
+        }
+        sim.positions = {
+            "AAPL": {
+                "qty": 1,
+                "entry_price": 100.0,
+                "entry_date": sim.current_date,
+                "asset_class": "stock",
+                "strategy": "rsi_reversion",
+            },
+        }
+        observed_prices = []
+
+        def _capture_exit(symbol, reason, asset_class, open_trades_callback=None):
+            observed_prices.append(sim.get_current_price(symbol))
+
+        with patch("scheduler.run_backtest.oe.exit_position", side_effect=_capture_exit) as exit_position:
+            _run_backtest_risk_exits(sim, market_open=True)
+
+        exit_position.assert_called_once()
+        self.assertIn("intraday", exit_position.call_args.args[1])
+        self.assertEqual(observed_prices, [rm.stop_loss_price(100.0)])
+        self.assertEqual(sim.pending_exit_prices, {})
 
     def test_stock_hold_exits_are_skipped_when_market_closed(self):
         sim = BacktestSimulator(initial_fund=10000.0)

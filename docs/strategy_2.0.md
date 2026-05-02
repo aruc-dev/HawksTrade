@@ -85,10 +85,12 @@ EMA50 trend confirmation, volatility confirmation, ATR-risk sizing, and a
 
 ### 2.4 RSI Reversion (stocks, now enabled)
 
-Requires RSI < 35, %B < 20%, one-bar recovery, volume above 0.8× average,
-price within the SMA200 band, and crash/realised-volatility guards. It is
-enabled in the all-strategy profile, but should remain monitored because recent
-backtests produced few standalone RSI trades.
+Requires RSI < 40, %B < 20%, one-bar recovery, volume above 0.7× average,
+price within the SMA200 band, ATR/price ≤ 5%, a 5-day drawdown cap of 10%,
+and crash/realised-volatility guards. It is enabled in the all-strategy
+profile. The costed 12-month RSI-only backtest gate now passes, while the
+forward paper-trading evidence gate remains pending until enough closed RSI
+paper trades accumulate.
 
 ### 2.5 Gap Up (stocks, now enabled)
 
@@ -191,11 +193,11 @@ strategies:
     hold_days: 14                # up from 3
 ```
 
-### 3.5 Re-enable rsi_reversion as a diversifier — MEDIUM impact, MEDIUM effort
+### 3.5 Re-enable rsi_reversion as a diversifier — IMPLEMENTED
 
-Relax the current over-filtered rules and *only* allow it to fire when
-momentum has been flat/negative for the last 5 days. This turns it into a
-counter-weight to the momentum book rather than an additive long.
+The current implementation keeps RSI Reversion enabled with broader RSI<40
+entries plus ATR and recent-drawdown quality gates. The earlier momentum-cold
+proposal below is retained as historical context, not the active config.
 
 **Config:**
 
@@ -399,7 +401,7 @@ Then, in order:
 5. §3.3 — Stale-days exit for momentum (requires trade-log schema update)
 6. §3.7 — New RS momentum strategy (new file + dedupe wiring)
 7. §3.6 — Regime-aware position sizer (touches core/order_executor.py)
-8. §3.5 — rsi_reversion revival (needs the "momentum cold" gate wired first)
+8. §3.5 — rsi_reversion revival (implemented with RSI<40 plus ATR/drawdown gates)
 
 Items 1–4 are independent and can land in any order. Items 5–8 depend on
 earlier items or on core plumbing changes — sequence them as above.
