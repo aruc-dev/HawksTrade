@@ -30,7 +30,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener
 
 ## Backtesting & Performance
 
-HawksTrade includes a high-fidelity historical simulator. The current tail-risk-hardened default strategy set achieved **+13.29% annual return** in the 12-month backtest through 2026-04-29 on $10,000 starting capital, with the configured 8% max-position risk cap enforced.
+HawksTrade includes a high-fidelity historical simulator. The current tail-risk-hardened default strategy set achieved **+20.70% annual return** in the 12-month backtest through 2026-04-30 on $10,000 starting capital, with the configured 8% max-position risk cap enforced.
 
 - **Backtest Summary**: [backtests.md](backtests.md)
 - **Configuration Guide**: [config.md](config.md)

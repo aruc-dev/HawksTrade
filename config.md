@@ -29,7 +29,7 @@ Latest recommended 12-month result:
 
 | Final Value | Return | Trades | Win Rate | Max Drawdown |
 |---:|---:|---:|---:|---:|
-| $11,340.03 | +13.40% | 107 | 49.5% | -2.14% |
+| $12,070.22 | +20.70% | 112 | 53.6% | -1.92% |
 
 These results enforce `trading.max_position_pct: 0.08` for all entries, including momentum/Kelly sizing, with all configured strategies enabled. Stop-loss, take-profit, daily-loss halt, and mode remain unchanged.
 

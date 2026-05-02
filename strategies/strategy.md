@@ -118,7 +118,8 @@ room while the global 3.5% stop remains the absolute floor.
 **Stop:** The 0.8 × ATR(14) stop extension flows through
 `order_executor.enter_position` into the trade log and is picked up by
 `run_risk_check` in both backtest and live/paper modes. It is capped at 6%
-below entry, and the global 3.5% stop still governs whenever it is stricter.
+below entry. The global 3.5% stop governs when the ATR stop is tighter or
+absent; otherwise the ATR stop can widen the trade's breathing room.
 
 **Exit:** Whichever fires first:
 - Price ≥ SMA(`bb_period`) — mean-reversion target reached (default: SMA20).

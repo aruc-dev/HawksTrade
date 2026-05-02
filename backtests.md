@@ -23,10 +23,10 @@ These costed results enforce `trading.max_position_pct: 0.08` for every entry, i
 
 | Period | Final Value | Return | Trades | Win Rate | Max Drawdown |
 |---|---:|---:|---:|---:|---:|
-| 1 month | $10,256.04 | +2.56% | 7 | 57.1% | -0.50% |
+| 1 month | $10,403.21 | +4.03% | 10 | 70.0% | -0.68% |
 | 2 months | $10,186.38 | +1.86% | 10 | 40.0% | -1.30% |
 | 6 months | $10,503.47 | +5.03% | 37 | 48.6% | -2.04% |
-| 12 months | $11,340.03 | +13.40% | 107 | 49.5% | -2.14% |
+| 12 months | $12,070.22 | +20.70% | 112 | 53.6% | -1.92% |
 
 ---
 
@@ -34,21 +34,21 @@ These costed results enforce `trading.max_position_pct: 0.08` for every entry, i
 
 | Strategy | Trades | Win Rate | Avg P&L % | Total P&L | Best | Worst |
 |---|---:|---:|---:|---:|---:|---:|
-| `gap_up` | 11 | 72.7% | +1.88% | $157.90 | +8.07% | -3.69% |
-| `ma_crossover` | 20 | 40.0% | +1.85% | $317.98 | +11.78% | -4.42% |
-| `momentum` | 40 | 35.0% | +0.39% | $141.61 | +11.78% | -10.37% |
-| `range_breakout` | 7 | 71.4% | +5.85% | $334.83 | +11.78% | -4.73% |
-| `rsi_reversion` | 29 | 62.1% | +1.47% | $364.84 | +11.51% | -4.24% |
+| `gap_up` | 12 | 75.0% | +3.74% | $363.73 | +12.00% | -3.50% |
+| `ma_crossover` | 20 | 45.0% | +2.12% | $367.42 | +12.00% | -4.13% |
+| `momentum` | 44 | 43.2% | +1.32% | $544.00 | +12.00% | -10.11% |
+| `range_breakout` | 7 | 71.4% | +6.12% | $350.64 | +12.00% | -4.44% |
+| `rsi_reversion` | 29 | 62.1% | +1.74% | $444.42 | +12.00% | -3.95% |
 
 ## 12-Month Quarterly Breakdown
 
 | Quarter | Start Value | End Value | Return | Trades | Win Rate |
 |---|---:|---:|---:|---:|---:|
-| Q2 2025 | $10,000.00 | $10,322.53 | +3.23% | 12 | 58.3% |
-| Q3 2025 | $10,259.82 | $10,718.42 | +4.47% | 46 | 45.7% |
-| Q4 2025 | $10,706.11 | $10,996.36 | +2.71% | 20 | 60.0% |
-| Q1 2026 | $10,994.09 | $11,056.93 | +0.57% | 22 | 40.9% |
-| Q2 2026 | $11,056.93 | $11,340.03 | +2.56% | 7 | 57.1% |
+| Q2 2025 | $10,000.00 | $10,486.19 | +4.86% | 14 | 71.4% |
+| Q3 2025 | $10,408.02 | $11,026.44 | +5.94% | 45 | 44.4% |
+| Q4 2025 | $11,092.81 | $11,442.38 | +3.15% | 21 | 61.9% |
+| Q1 2026 | $11,442.38 | $11,602.40 | +1.40% | 22 | 45.5% |
+| Q2 2026 | $11,602.40 | $12,070.22 | +4.03% | 10 | 70.0% |
 
 ---
 
@@ -56,7 +56,7 @@ These costed results enforce `trading.max_position_pct: 0.08` for every entry, i
 
 | Scenario | Screener | Strategies | Return | Trades | Win Rate | Max Drawdown |
 |---|---|---|---:|---:|---:|---:|
-| Current tail-risk-hardened all-enabled strategy set | On | `momentum`, `rsi_reversion`, `gap_up`, `ma_crossover`, `range_breakout` | +13.40% | 107 | 49.5% | -2.14% |
+| Current tail-risk-hardened all-enabled strategy set | On | `momentum`, `rsi_reversion`, `gap_up`, `ma_crossover`, `range_breakout` | +20.70% | 112 | 53.6% | -1.92% |
 | Previous moderate-risk all-enabled strategy set | On | `momentum`, `rsi_reversion`, `gap_up`, `ma_crossover`, `range_breakout` | +22.87% | 111 | 48.6% | -4.12% |
 | Previous all-enabled strategy set | On | `momentum`, `rsi_reversion`, `gap_up`, `ma_crossover`, `range_breakout` | +9.43% | 91 | 40.7% | -5.11% |
 | Previous default strategy set | On | `momentum`, `rsi_reversion`, `ma_crossover` | +12.12% | 56 | 42.9% | -2.09% |
@@ -70,10 +70,10 @@ These costed results enforce `trading.max_position_pct: 0.08` for every entry, i
 
 Interpretation:
 
-- The current all-enabled profile returns +13.40% over 12 months with a -2.14% max drawdown under the costed model. It improves RSI contribution while preserving the MA Crossover tail controls added under the 2% crypto max-loss setting.
+- The current all-enabled profile returns +20.70% over 12 months with a -1.92% max drawdown under the costed model. It improves RSI contribution while preserving the MA Crossover tail controls added under the 2% crypto max-loss setting.
 - Range Breakout and MA Crossover remain positive crypto contributors. Range Breakout still has only 7 closed trades, so its edge needs continued forward validation before scaling allocation.
 - Gap-Up was profitable over 12 months and improved after requiring the prior completed close to already be above SMA200, which removed recent gap-through-trend weakness. Keep its dedicated gate in the monitoring loop before scaling allocation.
-- RSI Reversion contributed $364.84 with 29 trades, 62.1% win rate, and a -4.24% worst trade after moving to RSI<40, a 5% ATR/price ceiling, and a 10% recent-drawdown guard. Keep monitoring the dedicated RSI gate before scaling allocation.
+- RSI Reversion contributed $444.42 with 29 trades, 62.1% win rate, and a -3.95% worst trade after moving to RSI<40, a 5% ATR/price ceiling, and a 10% recent-drawdown guard. Keep monitoring the dedicated RSI gate before scaling allocation.
 - Use the current row above for live/paper expectations and treat older rows as historical baselines only.
 - The configured position cap remains 8%. With `max_positions: 10`, this caps fully deployed gross long exposure at roughly 80% before cash, position, and asset-class constraints.
 
@@ -146,7 +146,7 @@ Latest production-gate result:
 
 | Gate | Result | Return | Max Drawdown | Trades | Win Rate | Profit Factor | Daily Sharpe |
 |---|---|---:|---:|---:|---:|---:|---:|
-| `default_12m_costed` | PASS | +13.40% | -2.14% | 107 | 49.5% | 1.79 | 2.29 |
+| `default_12m_costed` | PASS | +20.70% | -1.92% | 112 | 53.6% | 2.29 | 3.31 |
 | `default_6m_costed` | PASS | +5.03% | -2.04% | 37 | 48.6% | 2.00 | 2.29 |
 | `crypto_12m_costed` | PASS | +6.48% | -1.61% | 27 | 48.1% | 2.84 | 2.23 |
 | `crypto_recent_30d_watch` | PASS | +0.77% | -0.69% | 3 | 66.7% | 4.20 | 2.46 |

@@ -7,13 +7,15 @@ Entry: RSI(14) < 40 (oversold/recovering), %B < 20% (near lower Bollinger Band,
        ceiling, stock within 15% of SMA200.
 
 Stop:  0.8 × ATR(14) below entry is available as a volatility stop extension,
-       capped by the strategy max stop distance. The global 3.5% stop still
-       governs whenever it is stricter.
+       capped by the strategy max stop distance. The global 3.5% stop governs
+       when the ATR stop is tighter or absent; otherwise the ATR stop can widen
+       the trade's breathing room.
 
 Exit:  FIRST of:
-         (a) Price reaches the 20-day SMA  — mean reversion target achieved.
-         (b) RSI(14) > 50                  — momentum neutralised, edge gone.
-         (c) 10-day hold_days cap          — time exit.
+         (a) Latest daily close breaches max_loss_exit_pct, when configured.
+         (b) Price reaches the 20-day SMA  — mean reversion target achieved.
+         (c) RSI(14) > 50                  — momentum neutralised, edge gone.
+         (d) 10-day hold_days cap          — time exit.
 
 Regime filters (both must pass):
   1. Crash filter  — skip if SPY >20% below its 252-day peak.
@@ -230,6 +232,7 @@ class RSIReversionStrategy(BaseStrategy):
         atr_period    = SCFG.get("atr_period", 14)
         atr_mult      = SCFG.get("atr_multiplier", 2.0)
         max_stop_loss_pct = float(SCFG.get("max_stop_loss_pct", 0.0) or 0.0)
+        max_loss_exit_pct = float(SCFG.get("max_loss_exit_pct", 0.0) or 0.0)
         max_entry_atr_pct = float(SCFG.get("max_entry_atr_pct", 0.0) or 0.0)
         risk_pct      = float(SCFG.get("risk_per_trade_pct", 0.01))
         sma200_upper  = float(SCFG.get("sma200_upper_buffer_pct", 0.15))
@@ -240,12 +243,17 @@ class RSIReversionStrategy(BaseStrategy):
         min_close_location = float(SCFG.get("min_close_location", 0.0) or 0.0)
         recent_drawdown_lookback = max(1, int(SCFG.get("recent_drawdown_lookback_days", 5)))
         max_recent_drawdown_pct = float(SCFG.get("max_recent_drawdown_pct", 0.0) or 0.0)
+        max_loss_summary = (
+            f"{max_loss_exit_pct:.0%} max-loss"
+            if max_loss_exit_pct > 0
+            else "max-loss disabled"
+        )
 
         log.info(
             f"[RSI] Scanning {len(universe)} symbols "
             f"(RSI<{oversold}, %B<20%, vol>{volume_spike_ratio:.1f}x, "
             f"{min_recovery_bars}-bar recovery, SMA200 -{sma200_lower:.0%}/+{sma200_upper:.0%}, "
-            f"{atr_mult:.1f}×ATR stop extension, exit@SMA20 or RSI>50)..."
+            f"{atr_mult:.1f}×ATR stop extension, exit@SMA20, RSI>50, or {max_loss_summary})..."
         )
 
         try:

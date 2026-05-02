@@ -271,6 +271,38 @@ class TestBacktestLiveFidelity(unittest.TestCase):
         self.assertEqual(observed_prices, [rm.stop_loss_price(100.0)])
         self.assertEqual(sim.pending_exit_prices, {})
 
+    def test_risk_exit_high_water_uses_intraday_bar_high(self):
+        sim = BacktestSimulator(initial_fund=10000.0)
+        sim.current_date = datetime(2026, 4, 24, tzinfo=timezone.utc)
+        sim.historical_data = {
+            "AAPL": pd.DataFrame(
+                {
+                    "open": [100.0],
+                    "high": [110.0],
+                    "low": [98.0],
+                    "close": [103.0],
+                    "volume": [1000],
+                },
+                index=pd.DatetimeIndex([sim.current_date]),
+            )
+        }
+        sim.positions = {
+            "AAPL": {
+                "qty": 1,
+                "entry_price": 100.0,
+                "entry_date": sim.current_date,
+                "asset_class": "stock",
+                "strategy": "momentum",
+                "high_water_price": 100.0,
+            },
+        }
+
+        with patch("scheduler.run_backtest.oe.exit_position") as exit_position:
+            _run_backtest_risk_exits(sim, market_open=True)
+
+        exit_position.assert_not_called()
+        self.assertEqual(sim.positions["AAPL"]["high_water_price"], 110.0)
+
     def test_stock_hold_exits_are_skipped_when_market_closed(self):
         sim = BacktestSimulator(initial_fund=10000.0)
         sim.current_date = datetime(2026, 4, 25, tzinfo=timezone.utc)

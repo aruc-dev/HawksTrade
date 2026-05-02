@@ -259,10 +259,13 @@ def _run_backtest_risk_exits(sim: "BacktestSimulator", *, market_open: bool) -> 
         price = sim.get_current_price(symbol)
         if price <= 0:
             continue
-        update_high_water_price(pos, price)
+        bar = sim.get_current_bar(symbol)
+        observed_high = price
+        if bar is not None:
+            observed_high = max(observed_high, float(bar["high"]))
+        update_high_water_price(pos, observed_high)
         stop_price, stop_label = _effective_stop_for_backtest(pos)
         take_profit = rm.take_profit_price(pos["entry_price"])
-        bar = sim.get_current_bar(symbol)
 
         if bar is not None:
             low = float(bar["low"])
