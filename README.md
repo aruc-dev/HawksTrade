@@ -150,7 +150,7 @@ To manually sell one or more currently open Alpaca positions at market, run:
 python3 scripts/manual_market_sell.py
 ```
 
-The script lists open positions as numbered choices, submits a market sell for the selected position, records the exit reason as `manually triggered market sell`, and reconciles `data/trades.csv` so closed-trade P/L reports include the manual exit. Use `--dry-run` to test the interactive flow without submitting orders.
+The script lists open positions as numbered choices, asks whether to submit a market sell or a limit sell, prompts for a limit price when needed, records the exit reason as `manually triggered market sell`, and reconciles `data/trades.csv` so closed-trade P/L reports include the manual exit. Use `--dry-run` to test the interactive flow without submitting orders.
 
 ---
 

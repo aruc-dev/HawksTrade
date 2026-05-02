@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Interactively sell selected open positions at market.
+Interactively sell selected open positions.
 
 This script is intentionally standalone: it lists current Alpaca positions,
-prompts for one position number at a time, and routes the selected exit through
-core.order_executor.exit_position so trades.csv, realized P/L, and order
-intents are updated through the same path as automated exits.
+prompts for one position number and sell order type at a time, and routes the
+selected exit through core.order_executor.exit_position so trades.csv, realized
+P/L, and order intents are updated through the same path as automated exits.
 """
 
 from __future__ import annotations
@@ -31,6 +31,9 @@ from scheduler.reconcile_trade_log import safe_reconcile  # noqa: E402
 LOG_DIR = BASE_DIR / "logs"
 MANUAL_SELL_REASON = "manually triggered market sell"
 EXIT_CHOICE = "x"
+CANCEL_CHOICE = "x"
+MARKET_CHOICE = "1"
+LIMIT_CHOICE = "2"
 
 log = logging.getLogger("manual_market_sell")
 
@@ -148,6 +151,48 @@ def _parse_selection(raw: str, positions: Sequence[PositionChoice]) -> int | Non
     return index - 1
 
 
+def _prompt_order_type(input_fn: Callable[[str], str], output_fn: Callable[[str], None]) -> str | None:
+    while True:
+        output_fn("Order type:")
+        output_fn("1) Market")
+        output_fn("2) Limit")
+        output_fn("X) Cancel")
+        raw = input_fn("Enter order type: ").strip().lower()
+        if raw == CANCEL_CHOICE:
+            return None
+        if raw == MARKET_CHOICE:
+            return "market"
+        if raw == LIMIT_CHOICE:
+            return "limit"
+        output_fn("Invalid order type. Enter 1 for market, 2 for limit, or X to cancel.")
+
+
+def _prompt_limit_price(input_fn: Callable[[str], str], output_fn: Callable[[str], None]) -> float | None:
+    while True:
+        raw = input_fn("Enter limit price: ").strip().lower()
+        if raw == CANCEL_CHOICE:
+            return None
+        try:
+            limit_price = float(raw)
+        except ValueError:
+            output_fn("Invalid limit price. Enter a positive number or X to cancel.")
+            continue
+        if limit_price <= 0:
+            output_fn("Invalid limit price. Enter a positive number or X to cancel.")
+            continue
+        return limit_price
+
+
+def _format_limit_price(value: float | None) -> str:
+    if value in (None, ""):
+        return ""
+    try:
+        limit_price = float(value)
+    except (TypeError, ValueError):
+        return ""
+    return f" @ {_format_money(limit_price)}"
+
+
 def _result_message(result: dict | None) -> str:
     if not result:
         return "No sell order was placed; no open long position was found."
@@ -157,6 +202,14 @@ def _result_message(result: dict | None) -> str:
     order_id = result.get("order_id") or "n/a"
     qty = result.get("qty", "n/a")
     pnl_pct = result.get("pnl_pct", "")
+    order_type = str(result.get("order_type") or "").lower()
+    if order_type == "market":
+        order_label = "Market sell"
+    elif order_type == "limit":
+        order_label = "Limit sell"
+    else:
+        order_label = "Sell order"
+    limit_suffix = _format_limit_price(result.get("limit_price"))
     pnl_suffix = ""
     try:
         if pnl_pct != "":
@@ -165,12 +218,12 @@ def _result_message(result: dict | None) -> str:
         pnl_suffix = ""
 
     if status == "dry_run":
-        return f"DRY RUN: would submit market sell for {symbol} | qty={qty}{pnl_suffix}"
+        return f"DRY RUN: would submit {order_label.lower()} for {symbol}{limit_suffix} | qty={qty}{pnl_suffix}"
     if status == "closed":
-        return f"Market sell filled for {symbol} | qty={qty} | order_id={order_id}{pnl_suffix}"
+        return f"{order_label} filled for {symbol} | qty={qty} | order_id={order_id}{pnl_suffix}"
     if status in {"submitted", "partially_filled"}:
         return (
-            f"Market sell submitted for {symbol} | qty={qty} | status={status} | "
+            f"{order_label} submitted for {symbol}{limit_suffix} | qty={qty} | status={status} | "
             f"order_id={order_id}. Trade log will reconcile after broker fill confirmation."
         )
     if status == "pending_exit":
@@ -218,11 +271,23 @@ def run_interactive(
             continue
 
         selected = positions[selected_index]
+        order_type = _prompt_order_type(input_fn, output_fn)
+        if order_type is None:
+            output_fn("Selection cancelled.")
+            continue
+        limit_price = None
+        if order_type == "limit":
+            limit_price = _prompt_limit_price(input_fn, output_fn)
+            if limit_price is None:
+                output_fn("Selection cancelled.")
+                continue
         log.info(
-            "Manual market sell selected | symbol=%s qty=%s asset_class=%s dry_run=%s",
+            "Manual sell selected | symbol=%s qty=%s asset_class=%s order_type=%s limit_price=%s dry_run=%s",
             selected.symbol,
             selected.qty,
             selected.asset_class,
+            order_type,
+            limit_price if limit_price is not None else "",
             int(dry_run),
         )
         result = oe.exit_position(
@@ -230,7 +295,8 @@ def run_interactive(
             MANUAL_SELL_REASON,
             asset_class=selected.asset_class,
             dry_run=dry_run,
-            force_market=True,
+            force_market=order_type == "market",
+            limit_price=limit_price,
         )
         message = _result_message(result)
         output_fn(message)
@@ -251,7 +317,7 @@ def configure_logging() -> None:
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "List open Alpaca positions and sell selected positions at market with "
+            "List open Alpaca positions and sell selected positions with market or limit orders using "
             f"exit reason '{MANUAL_SELL_REASON}'."
         )
     )

@@ -211,6 +211,51 @@ class OrderExecutorTests(unittest.TestCase):
         place_market_order.assert_called_once()
         place_limit_order.assert_not_called()
 
+    def test_exit_position_uses_requested_limit_price_and_filled_avg_for_pnl(self):
+        position = SimpleNamespace(qty="2", avg_entry_price="100")
+        order = SimpleNamespace(id="exit-limit", status="filled", filled_qty="2", filled_avg_price="108.5")
+
+        with (
+            patch.object(order_executor.ac, "get_position", return_value=position),
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=109),
+            patch.object(order_executor.ac, "get_open_orders", return_value=[]),
+            patch.object(order_executor.ac, "place_limit_order", return_value=order) as place_limit_order,
+            patch.object(order_executor.ac, "place_market_order") as place_market_order,
+        ):
+            result = order_executor.exit_position("AAPL", "manual limit", dry_run=False, limit_price=108.25)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "closed")
+        self.assertEqual(result["order_type"], "limit")
+        self.assertEqual(result["limit_price"], 108.25)
+        self.assertEqual(float(result["exit_price"]), 108.5)
+        self.assertEqual(float(result["pnl_pct"]), 0.085)
+        place_limit_order.assert_called_once()
+        self.assertEqual(place_limit_order.call_args.args[3], 108.25)
+        place_market_order.assert_not_called()
+
+        rows = [row for row in trade_log.read_trade_rows() if row["symbol"] == "AAPL"]
+        self.assertEqual(rows[0]["status"], "closed")
+        self.assertEqual(float(rows[0]["exit_price"]), 108.5)
+        self.assertEqual(rows[1]["side"], "sell")
+        self.assertEqual(float(rows[1]["exit_price"]), 108.5)
+
+    def test_exit_position_rejects_invalid_custom_limit_price(self):
+        position = SimpleNamespace(qty="2", avg_entry_price="100")
+
+        with (
+            patch.object(order_executor.ac, "get_position", return_value=position),
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=110),
+            patch.object(order_executor.ac, "place_limit_order") as place_limit_order,
+            patch.object(order_executor.ac, "place_market_order") as place_market_order,
+        ):
+            result = order_executor.exit_position("AAPL", "manual limit", dry_run=False, limit_price=0)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "invalid_limit_price")
+        place_limit_order.assert_not_called()
+        place_market_order.assert_not_called()
+
     def test_enter_position_logs_submitted_buy_without_open_exposure(self):
         order = SimpleNamespace(id="entry-submitted", status="pending_new", filled_qty="0")
 

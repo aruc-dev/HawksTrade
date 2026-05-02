@@ -44,12 +44,13 @@ class ManualMarketSellTests(unittest.TestCase):
                     "order_id": "exit-1",
                     "qty": 2,
                     "pnl_pct": 0.1,
+                    "order_type": "market",
                 },
             ) as exit_position,
             patch.object(manual_market_sell, "safe_reconcile") as safe_reconcile,
         ):
             status = manual_market_sell.run_interactive(
-                input_fn=_input_responses("1", "x"),
+                input_fn=_input_responses("1", "1", "x"),
                 output_fn=lambda line: print(line, file=output),
             )
 
@@ -60,6 +61,7 @@ class ManualMarketSellTests(unittest.TestCase):
             asset_class="stock",
             dry_run=False,
             force_market=True,
+            limit_price=None,
         )
         safe_reconcile.assert_called_once_with(
             context="manual_market_sell.post_exit",
@@ -69,6 +71,51 @@ class ManualMarketSellTests(unittest.TestCase):
         self.assertIn("1) AAPL", rendered)
         self.assertIn("X) Exit", rendered)
         self.assertIn("Market sell filled for AAPL", rendered)
+
+    def test_selected_position_can_be_sold_with_limit_price(self):
+        positions = [
+            SimpleNamespace(
+                symbol="AAPL",
+                qty="2",
+                asset_class="us_equity",
+                avg_entry_price="100",
+                current_price="110",
+            )
+        ]
+        output = io.StringIO()
+
+        with (
+            patch.object(manual_market_sell.ac, "get_all_positions", side_effect=[positions, []]),
+            patch.object(
+                manual_market_sell.oe,
+                "exit_position",
+                return_value={
+                    "symbol": "AAPL",
+                    "status": "submitted",
+                    "order_id": "exit-limit",
+                    "qty": 2,
+                    "order_type": "limit",
+                    "limit_price": 111.25,
+                },
+            ) as exit_position,
+            patch.object(manual_market_sell, "safe_reconcile"),
+        ):
+            status = manual_market_sell.run_interactive(
+                input_fn=_input_responses("1", "2", "111.25", "x"),
+                output_fn=lambda line: print(line, file=output),
+            )
+
+        self.assertEqual(status, 0)
+        exit_position.assert_called_once_with(
+            "AAPL",
+            manual_market_sell.MANUAL_SELL_REASON,
+            asset_class="stock",
+            dry_run=False,
+            force_market=False,
+            limit_price=111.25,
+        )
+        rendered = output.getvalue()
+        self.assertIn("Limit sell submitted for AAPL @ $111.25", rendered)
 
     def test_crypto_position_uses_crypto_asset_class(self):
         positions = [
@@ -91,7 +138,7 @@ class ManualMarketSellTests(unittest.TestCase):
             patch.object(manual_market_sell, "safe_reconcile"),
         ):
             status = manual_market_sell.run_interactive(
-                input_fn=_input_responses("1", "x"),
+                input_fn=_input_responses("1", "1", "x"),
                 output_fn=lambda _line: None,
             )
 
@@ -112,12 +159,53 @@ class ManualMarketSellTests(unittest.TestCase):
         ):
             status = manual_market_sell.run_interactive(
                 dry_run=True,
-                input_fn=_input_responses("1", "x"),
+                input_fn=_input_responses("1", "1", "x"),
                 output_fn=lambda _line: None,
             )
 
         self.assertEqual(status, 0)
         self.assertTrue(exit_position.call_args.kwargs["dry_run"])
+        self.assertTrue(exit_position.call_args.kwargs["force_market"])
+        safe_reconcile.assert_not_called()
+
+    def test_invalid_order_type_reprompts_without_selling(self):
+        positions = [SimpleNamespace(symbol="AAPL", qty="2", asset_class="us_equity")]
+        output = io.StringIO()
+
+        with (
+            patch.object(manual_market_sell.ac, "get_all_positions", return_value=positions),
+            patch.object(manual_market_sell.oe, "exit_position") as exit_position,
+        ):
+            status = manual_market_sell.run_interactive(
+                input_fn=_input_responses("1", "9", "x", "x"),
+                output_fn=lambda line: print(line, file=output),
+            )
+
+        self.assertEqual(status, 0)
+        exit_position.assert_not_called()
+        self.assertIn("Invalid order type", output.getvalue())
+
+    def test_invalid_limit_price_reprompts_without_selling_until_valid(self):
+        positions = [SimpleNamespace(symbol="AAPL", qty="2", asset_class="us_equity")]
+
+        with (
+            patch.object(manual_market_sell.ac, "get_all_positions", side_effect=[positions, []]),
+            patch.object(
+                manual_market_sell.oe,
+                "exit_position",
+                return_value={"symbol": "AAPL", "status": "dry_run", "qty": 2, "order_type": "limit"},
+            ) as exit_position,
+            patch.object(manual_market_sell, "safe_reconcile") as safe_reconcile,
+        ):
+            status = manual_market_sell.run_interactive(
+                dry_run=True,
+                input_fn=_input_responses("1", "2", "bad", "-1", "111.25", "x"),
+                output_fn=lambda _line: None,
+            )
+
+        self.assertEqual(status, 0)
+        exit_position.assert_called_once()
+        self.assertEqual(exit_position.call_args.kwargs["limit_price"], 111.25)
         safe_reconcile.assert_not_called()
 
     def test_invalid_selection_reprompts_without_selling(self):
