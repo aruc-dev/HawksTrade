@@ -111,16 +111,19 @@ room while the global 3.5% stop remains the absolute floor.
    - Entry blocked if `price < SMA200 × (1 - sma200_lower_buffer_pct)` (broken stocks).
    - Entry blocked if `price > SMA200 × (1 + sma200_upper_buffer_pct)` (overextended stocks).
    - Default buffers: ±15%.
+6. ATR/price ≤ 7% — blocks legacy or high-volatility names where mean reversion
+   tail risk is too wide for the sleeve.
 
 **Stop:** The 0.8 × ATR(14) stop extension flows through
 `order_executor.enter_position` into the trade log and is picked up by
-`run_risk_check` in both backtest and live/paper modes. It only extends the
-stop when it falls further below entry than the global 3.5% stop; the global
-stop governs whenever the ATR stop would be tighter or absent.
+`run_risk_check` in both backtest and live/paper modes. It is capped at 6%
+below entry, and the global 3.5% stop still governs whenever it is stricter.
 
 **Exit:** Whichever fires first:
 - Price ≥ SMA(`bb_period`) — mean-reversion target reached (default: SMA20).
 - RSI(14) > `overbought_threshold` — momentum neutral; edge evaporated (default: 50).
+- Latest daily close is at least 6% below entry (`max_loss_exit_pct`) — strategy
+  fail-safe for tail loss control.
 - 10-business-day hard cap (`hold_days`).
 
 **Key parameters:**
@@ -135,6 +138,9 @@ stop governs whenever the ATR stop would be tighter or absent.
 | `bb_std` | 2.0 |
 | `atr_period` | 14 |
 | `atr_multiplier` | 0.8 ATR stop extension |
+| `max_entry_atr_pct` | 7% ATR/price ceiling |
+| `max_stop_loss_pct` | 6% RSI ATR stop cap |
+| `max_loss_exit_pct` | 6% below entry on latest daily close |
 | `vix_multiplier` | 0.95 |
 | `sma200_lower_buffer_pct` | 15% |
 | `sma200_upper_buffer_pct` | 15% |
@@ -200,19 +206,21 @@ before scaling capital allocated to this sleeve.
 
 **Type:** Trend-following, medium-term swing. Runs 24/7 on daily bars.
 
-**Entry:** Five conditions must all be true:
+**Entry:** Seven conditions must all be true:
 1. 6-EMA crosses above 18-EMA on the latest completed daily transition.
 2. 21-EMA is sloping upward over the last 5 bars — no crossovers into a flat trend.
 3. Today's price range ≥ 50% of the 10-day average range — market is moving.
 4. RSI(14) between 35 and 75 — not entering an already-overbought or deeply-oversold
    state.
 5. Volume Confirmation: Entry-bar volume ≥ 100% of its 20-day average (`volume_spike_ratio: 1.0`).
+6. 3-day return ≥ -2% — avoids buying a fresh cross that is still sliding.
+7. Close ≥ 0.5% above the slow EMA — avoids underpowered crosses.
 
 **Exit:** Whichever fires first:
-- Latest daily close is at least 1% below entry (`max_loss_exit_pct`) — strategy-level capital preservation exit.
+- Latest daily close is at least 2% below entry (`max_loss_exit_pct`) — strategy-level capital preservation exit.
 - 9-EMA crosses back below 21-EMA (bearish crossover).
 - RSI(14) > 75 (`rsi_exit_max`) — overbought target reached.
-- Hard cap at 12 calendar days (`hold_days`).
+- Hard cap at 16 calendar days (`hold_days`).
 
 **Key parameters:**
 
@@ -222,9 +230,12 @@ before scaling capital allocated to this sleeve.
 | `slow_ema` | 18 |
 | `timeframe` | 1Day |
 | `entry_cross_lookback_days` | 1 |
+| `trend_return_lookback_days` | 3 |
+| `min_trend_return_pct` | -2% |
+| `min_price_above_slow_pct` | 0.5% |
 | `max_signals` | 1 top-ranked candidate per scan |
-| `hold_days` | 12 calendar days |
-| `max_loss_exit_pct` | 1% below entry on latest daily close |
+| `hold_days` | 16 calendar days |
+| `max_loss_exit_pct` | 2% below entry on latest daily close |
 | `rsi_entry_min` | 35 |
 | `rsi_entry_max` | 75 |
 | `rsi_exit_max` | 75 |
@@ -244,8 +255,10 @@ before scaling capital allocated to this sleeve.
 2. Volume ≥ 2.5× 20-day average — breakout backed by conviction.
 3. Price > 50-day EMA and EMA50 is non-declining over 5 bars — breakout in the direction of the longer trend.
 4. Today's range ≥ 45% of the 10-day average range — market is not compressed.
-5. Close is no more than 8% beyond the breakout level — avoids chasing stale vertical moves.
-6. RSI(14) ≤ 82 — avoids severely overextended breakout closes.
+5. Close is at least 0.8% and no more than 8% beyond the breakout level — requires
+   real follow-through without chasing stale vertical moves.
+6. Close is in the upper 30% of the day's range — avoids weak breakout closes.
+7. RSI(14) ≤ 82 — avoids severely overextended breakout closes.
 
 **Sizing:** Each signal carries a 2 × ATR(14) stop and ATR-risk quantity targeting
 1% account risk before the executor applies the global 8% max-position cap.
@@ -267,7 +280,9 @@ Stop-loss and take-profit from the global risk manager apply throughout.
 |---|---|
 | `breakout_lookback_days` | 20 |
 | `breakout_pct` | 0.6% above prior 20-day high |
+| `min_breakout_extension_pct` | 0.8% above breakout level |
 | `max_breakout_extension_pct` | 8% above breakout level |
+| `min_close_location` | 70% of daily range |
 | `volume_multiplier` | 2.5× |
 | `volume_avg_period` | 20 |
 | `trend_ema_period` | 50 |

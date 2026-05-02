@@ -164,6 +164,47 @@ class MACrossoverStrategyTests(unittest.TestCase):
 
         self.assertEqual(len(signals), 1)
 
+    def test_scan_blocks_negative_follow_through_cross(self):
+        prices = [100.0 + idx * 0.2 for idx in range(117)]
+        prices.extend([130.0, 128.0, 127.0, 126.0])
+        bars = [_bar(p, high=p+2, low=p-2) for p in prices]
+        bars_data = {"BTC/USD": bars}
+
+        with (
+            patch("strategies.ma_crossover.ac.get_crypto_bars", return_value=bars_data),
+            patch("strategies.ma_crossover.rm.crypto_regime_ok", return_value=True),
+            patch("strategies.ma_crossover._detect_recent_crossover", return_value="bullish"),
+            patch("strategies.ma_crossover._calc_rsi", return_value=50.0),
+            patch("strategies.ma_crossover.ac.get_portfolio_value", return_value=10000.0),
+            patch.dict(
+                "strategies.ma_crossover.SCFG",
+                {"volume_spike_ratio": 0, "min_trend_return_pct": 0.0, "min_price_above_slow_pct": 0.0},
+            ),
+        ):
+            signals = MACrossoverStrategy().scan(["BTC/USD"])
+
+        self.assertEqual(signals, [])
+
+    def test_scan_blocks_shallow_price_above_slow_cross(self):
+        prices = [100.0] * 116 + [100.2, 100.4, 100.6, 100.8, 101.0]
+        bars = [_bar(p, high=p+2, low=p-2) for p in prices]
+        bars_data = {"BTC/USD": bars}
+
+        with (
+            patch("strategies.ma_crossover.ac.get_crypto_bars", return_value=bars_data),
+            patch("strategies.ma_crossover.rm.crypto_regime_ok", return_value=True),
+            patch("strategies.ma_crossover._detect_recent_crossover", return_value="bullish"),
+            patch("strategies.ma_crossover._calc_rsi", return_value=50.0),
+            patch("strategies.ma_crossover.ac.get_portfolio_value", return_value=10000.0),
+            patch.dict(
+                "strategies.ma_crossover.SCFG",
+                {"volume_spike_ratio": 0, "min_trend_return_pct": 0.0, "min_price_above_slow_pct": 0.02},
+            ),
+        ):
+            signals = MACrossoverStrategy().scan(["BTC/USD"])
+
+        self.assertEqual(signals, [])
+
     def test_scan_generates_signal_when_cross_was_previous_bar_within_lookback(self):
         prices = [100.0] * 122
         prices[119] = 90.0

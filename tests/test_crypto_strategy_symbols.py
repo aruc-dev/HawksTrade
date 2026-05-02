@@ -77,6 +77,8 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch.dict("strategies.range_breakout.SCFG", {
                 "enabled": True,
                 "breakout_lookback_days": 1,
+                "min_breakout_extension_pct": 0,
+                "min_close_location": 0,
                 "volume_multiplier": 0,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -100,6 +102,8 @@ class CryptoStrategySymbolTests(unittest.TestCase):
                 "enabled": True,
                 "breakout_lookback_days": 20,
                 "breakout_pct": 0.005,
+                "min_breakout_extension_pct": 0,
+                "min_close_location": 0,
                 "volume_multiplier": 0,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -126,6 +130,8 @@ class CryptoStrategySymbolTests(unittest.TestCase):
                 "enabled": True,
                 "breakout_lookback_days": 20,
                 "breakout_pct": 0.005,
+                "min_breakout_extension_pct": 0,
+                "min_close_location": 0,
                 "volume_multiplier": 0,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -148,6 +154,8 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch.dict("strategies.range_breakout.SCFG", {
                 "enabled": True,
                 "breakout_lookback_days": 1,
+                "min_breakout_extension_pct": 0,
+                "min_close_location": 0,
                 "volume_multiplier": 0,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -206,6 +214,8 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch.dict("strategies.range_breakout.SCFG", {
                 "enabled": True,
                 "breakout_lookback_days": 1,
+                "min_breakout_extension_pct": 0,
+                "min_close_location": 0,
                 "volume_multiplier": 1.8,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -227,6 +237,8 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch.dict("strategies.range_breakout.SCFG", {
                 "enabled": True,
                 "breakout_lookback_days": 1,
+                "min_breakout_extension_pct": 0,
+                "min_close_location": 0,
                 "volume_multiplier": 0,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -248,6 +260,8 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch.dict("strategies.range_breakout.SCFG", {
                 "enabled": True,
                 "breakout_lookback_days": 1,
+                "min_breakout_extension_pct": 0,
+                "min_close_location": 0,
                 "volume_multiplier": 1.8,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -276,6 +290,8 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch.dict("strategies.range_breakout.SCFG", {
                 "enabled": True,
                 "breakout_lookback_days": 1,
+                "min_breakout_extension_pct": 0,
+                "min_close_location": 0,
                 "volume_multiplier": 1.8,
                 "vol_filter_period": 0,
                 "rsi_entry_max": 100,
@@ -285,6 +301,56 @@ class CryptoStrategySymbolTests(unittest.TestCase):
 
         self.assertEqual([sig["symbol"] for sig in signals], ["SOL/USD", "BTC/USD"])
         self.assertGreater(signals[0]["confidence"], signals[1]["confidence"])
+
+    def test_range_breakout_blocks_weak_extension_above_level(self):
+        bars = [_bar(80 + idx * 0.3) for idx in range(60)]
+        bars.append(_bar(100, high=101, low=99, volume=1000))
+        bars.append(_bar(101.8, high=103, low=99, volume=3000))
+
+        with (
+            patch("strategies.range_breakout.ac.get_crypto_bars", return_value={"BTC/USD": bars}),
+            patch("strategies.range_breakout.rm.crypto_regime_ok", return_value=True),
+            patch("strategies.range_breakout.ac.get_portfolio_value") as get_portfolio_value,
+            patch.dict("strategies.range_breakout.SCFG", {
+                "enabled": True,
+                "breakout_lookback_days": 1,
+                "breakout_pct": 0.005,
+                "min_breakout_extension_pct": 0.01,
+                "min_close_location": 0,
+                "volume_multiplier": 0,
+                "vol_filter_period": 0,
+                "rsi_entry_max": 100,
+            }),
+        ):
+            signals = RangeBreakoutStrategy().scan(["BTC/USD"])
+
+        self.assertEqual(signals, [])
+        get_portfolio_value.assert_not_called()
+
+    def test_range_breakout_blocks_low_close_location(self):
+        bars = [_bar(80 + idx * 0.3) for idx in range(60)]
+        bars.append(_bar(100, high=101, low=99, volume=1000))
+        bars.append(_bar(103, high=110, low=100, volume=3000))
+
+        with (
+            patch("strategies.range_breakout.ac.get_crypto_bars", return_value={"BTC/USD": bars}),
+            patch("strategies.range_breakout.rm.crypto_regime_ok", return_value=True),
+            patch("strategies.range_breakout.ac.get_portfolio_value") as get_portfolio_value,
+            patch.dict("strategies.range_breakout.SCFG", {
+                "enabled": True,
+                "breakout_lookback_days": 1,
+                "breakout_pct": 0.005,
+                "min_breakout_extension_pct": 0,
+                "min_close_location": 0.65,
+                "volume_multiplier": 0,
+                "vol_filter_period": 0,
+                "rsi_entry_max": 100,
+            }),
+        ):
+            signals = RangeBreakoutStrategy().scan(["BTC/USD"])
+
+        self.assertEqual(signals, [])
+        get_portfolio_value.assert_not_called()
 
     def test_range_breakout_exit_fires_on_failed_breakout(self):
         bars = [_bar(105, high=106, low=104) for _ in range(60)]

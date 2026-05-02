@@ -5,9 +5,9 @@ Entry: RSI(14) < 35 (oversold/recovering), %B < 20% (near lower Bollinger Band,
        20-period 2σ), volume ≥ 0.8× 20-day average, 1-bar price recovery,
        stock within 15% of SMA200.
 
-Stop:  0.8 × ATR(14) below entry is available as a volatility stop extension.
-       The global 3.5% stop still governs whenever it is stricter; whichever
-       is further below entry governs.
+Stop:  0.8 × ATR(14) below entry is available as a volatility stop extension,
+       capped by the strategy max stop distance. The global 3.5% stop still
+       governs whenever it is stricter.
 
 Exit:  FIRST of:
          (a) Price reaches the 20-day SMA  — mean reversion target achieved.
@@ -228,6 +228,8 @@ class RSIReversionStrategy(BaseStrategy):
         vix_mult      = SCFG.get("vix_multiplier", 1.2)
         atr_period    = SCFG.get("atr_period", 14)
         atr_mult      = SCFG.get("atr_multiplier", 2.0)
+        max_stop_loss_pct = float(SCFG.get("max_stop_loss_pct", 0.0) or 0.0)
+        max_entry_atr_pct = float(SCFG.get("max_entry_atr_pct", 0.0) or 0.0)
         risk_pct      = float(SCFG.get("risk_per_trade_pct", 0.01))
         sma200_upper  = float(SCFG.get("sma200_upper_buffer_pct", 0.15))
         sma200_lower  = float(SCFG.get("sma200_lower_buffer_pct", 0.15))
@@ -337,6 +339,14 @@ class RSIReversionStrategy(BaseStrategy):
 
                 # ATR-based stop and 1%-risk position sizing
                 atr        = _calc_atr(bars, atr_period)
+                atr_pct = atr / price if price > 0 else 0.0
+                if max_entry_atr_pct > 0 and atr_pct > max_entry_atr_pct:
+                    log.debug(
+                        f"[RSI] {symbol} skipped — ATR/price={atr_pct:.1%} "
+                        f"> max {max_entry_atr_pct:.1%}"
+                    )
+                    continue
+
                 lower_band = _bollinger_lower(closes, bb_period, bb_std)
                 sized = atr_stop_and_qty(
                     symbol=symbol,
@@ -348,6 +358,7 @@ class RSIReversionStrategy(BaseStrategy):
                     min_trade_value=min_trade_value,
                     logger=log,
                     prefix="[RSI]",
+                    max_stop_loss_pct=max_stop_loss_pct or None,
                 )
                 if sized is None:
                     continue
@@ -390,6 +401,7 @@ class RSIReversionStrategy(BaseStrategy):
         period     = SCFG["rsi_period"]
         bb_period  = SCFG.get("bb_period", 20)
         overbought = SCFG.get("overbought_threshold", 50)
+        max_loss_exit_pct = float(SCFG.get("max_loss_exit_pct", 0.0) or 0.0)
 
         limit = max(period + 10, bb_period + 5)
         try:
@@ -403,6 +415,12 @@ class RSIReversionStrategy(BaseStrategy):
                 for b in bars
             ])
             price      = float(closes.iloc[-1])
+            if max_loss_exit_pct > 0 and price <= entry_price * (1 - max_loss_exit_pct):
+                return True, (
+                    f"RSI max-loss exit: close {price:.2f} <= "
+                    f"entry {entry_price:.2f} - {max_loss_exit_pct:.1%}"
+                )
+
             rsi        = _calc_rsi(closes, period)
             sma_target = float(closes.rolling(bb_period).mean().iloc[-1])
             

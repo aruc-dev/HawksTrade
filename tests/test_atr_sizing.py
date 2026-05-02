@@ -56,6 +56,41 @@ class ATRSizingTests(unittest.TestCase):
         self.assertIsNone(sized)
         logger.info.assert_called_once()
 
+    def test_max_stop_loss_pct_caps_wide_atr_stop(self):
+        sized = atr_stop_and_qty(
+            symbol="AAPL",
+            price=100,
+            atr=10,
+            atr_multiplier=2,
+            portfolio_equity=10000,
+            risk_per_trade_pct=0.01,
+            min_trade_value=100,
+            logger=Mock(),
+            prefix="[Test]",
+            max_stop_loss_pct=0.06,
+        )
+
+        self.assertEqual(sized, (94, 16.666667))
+
+    def test_invalid_max_stop_loss_pct_skips_signal(self):
+        logger = Mock()
+
+        sized = atr_stop_and_qty(
+            symbol="AAPL",
+            price=100,
+            atr=10,
+            atr_multiplier=2,
+            portfolio_equity=10000,
+            risk_per_trade_pct=0.01,
+            min_trade_value=100,
+            logger=logger,
+            prefix="[Test]",
+            max_stop_loss_pct=1.2,
+        )
+
+        self.assertIsNone(sized)
+        logger.info.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
