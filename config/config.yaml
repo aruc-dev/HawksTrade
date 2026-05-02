@@ -164,7 +164,7 @@ strategies:
   gap_up:
     enabled: true
     asset_class: stocks
-    description: "Buy confirmed true-gap stocks gapping up 5-15% with opening-volume pace, trend confirmation, and failed-gap exits"
+    description: "Buy confirmed true-gap stocks gapping up 5-15% with opening-volume pace, completed-bar trend confirmation, and failed-gap exits"
     min_gap_pct: 0.05            # Minimum gap-up percentage
     max_gap_pct: 0.15            # Avoid buying exhaustion gaps beyond this percentage
     require_true_gap: true       # Today's open must also clear the prior day's high
@@ -172,6 +172,7 @@ strategies:
     volume_avg_period: 20        # Lookback for average volume confirmation
     min_breadth_pct: 0.65         # Require at least 65% of scan universe above SMA50
     trend_sma_period: 200        # Use completed closes only; current bar close is not known at entry
+    require_prior_close_above_trend: true # Prior completed close must already be above SMA200
     max_trend_extension_pct: 0.35 # Avoid exhaustion gaps more than 35% above the trend SMA
     entry_window_minutes: 45     # Only enter within first 45 min of market open
     intraday_exit: false         # Respect intraday.enabled setting above
@@ -355,6 +356,7 @@ validation:
         required: false
         min_return_pct: 0.0
         max_drawdown_pct: 0.015
+        min_profit_factor: 1.0
         min_trades: 1
 
 # --- SCHEDULING (reference only; OS scheduler templates live in scheduler/) ---

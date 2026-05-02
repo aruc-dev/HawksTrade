@@ -72,7 +72,7 @@ Interpretation:
 
 - The current all-enabled profile returns +13.29% over 12 months with a -4.14% max drawdown. It gives up some prior moderate-risk upside to reduce the observed RSI tail from -12.69% to -5.59% and remove the MA Crossover -18.65% tail seen under a looser 3% crypto max-loss setting.
 - Range Breakout and MA Crossover remain positive crypto contributors. Range Breakout still has only 7 closed trades, so its edge needs continued forward validation before scaling allocation.
-- Gap-Up was profitable over 12 months and stabilized after the gap and volume thresholds were narrowed from the prior all-enabled profile. Keep its dedicated gate in the monitoring loop before scaling allocation.
+- Gap-Up was profitable over 12 months and improved after requiring the prior completed close to already be above SMA200, which removed recent gap-through-trend weakness. Keep its dedicated gate in the monitoring loop before scaling allocation.
 - RSI Reversion contributed $124.55 with its worst trade reduced to -5.59% after the 7% ATR/price entry ceiling and 6% max-loss controls. Keep monitoring the dedicated RSI gate before scaling allocation.
 - Use the current row above for live/paper expectations and treat older rows as historical baselines only.
 - The configured position cap remains 8%. With `max_positions: 10`, this caps fully deployed gross long exposure at roughly 80% before cash, position, and asset-class constraints.
@@ -167,8 +167,8 @@ allocation:
 
 | Gate | Result | Return | Max Drawdown | Trades | Win Rate | Profit Factor | Daily Sharpe |
 |---|---|---:|---:|---:|---:|---:|---:|
-| `gap_up_12m_costed` | PASS | +1.12% | -0.99% | 12 | 66.7% | 2.00 | 0.42 |
-| `gap_up_recent_30d_watch` | WARN | -0.05% | -0.35% | 2 | 50.0% | 0.86 | -0.43 |
+| `gap_up_12m_costed` | PASS | +1.45% | -0.99% | 11 | 72.7% | 2.86 | 0.54 |
+| `gap_up_recent_30d_watch` | PASS | +0.52% | -0.01% | 1 | 100.0% | inf | 6.11 |
 
 ---
 

@@ -243,6 +243,7 @@ class GapUpStrategy(BaseStrategy):
         atr_mult    = float(SCFG.get("atr_multiplier", 2.0))
         sma_long    = int(SCFG.get("trend_sma_period", 200))
         max_trend_extension_pct = float(SCFG.get("max_trend_extension_pct", 0.0))
+        require_prior_trend = bool(SCFG.get("require_prior_close_above_trend", True))
         require_true_gap = bool(SCFG.get("require_true_gap", True))
         history_timeframe = SCFG.get("timeframe", "1Day")
         opening_timeframe = SCFG.get("opening_timeframe", "1Min")
@@ -326,11 +327,14 @@ class GapUpStrategy(BaseStrategy):
                 expected_opening_vol = avg_vol * min(elapsed_minutes, session_minutes) / session_minutes
                 vol_ratio = _safe_ratio(opening_vol, expected_opening_vol)
                 trend_spread = _safe_ratio(today_open - trend_sma, trend_sma)
+                prior_trend_spread = _safe_ratio(prev_close - trend_sma, trend_sma)
+                prior_trend_ok = not require_prior_trend or prev_close > trend_sma
                 open_extension_pct = _safe_ratio(current_px - today_open, today_open)
 
                 if min_gap <= gap_pct <= max_gap:
                     if (avg_vol > 0 and
                         vol_ratio >= vol_mult and
+                        prior_trend_ok and
                         today_open > trend_sma and
                         (max_trend_extension_pct <= 0 or trend_spread <= max_trend_extension_pct) and
                         prev_close > prev_open and
@@ -378,7 +382,7 @@ class GapUpStrategy(BaseStrategy):
                                     "atr_risk_qty": qty,
                                     "reason":      (
                                         f"Gap-up {gap_pct:.2%} | opening vol pace={vol_ratio:.1f}x | "
-                                        f"Trend UP | Prev Day Green"
+                                        f"Trend UP ({prior_trend_spread:.1%} prior/SMA) | Prev Day Green"
                                         + (" | True Gap" if true_gap else "")
                                     ),
                                 })

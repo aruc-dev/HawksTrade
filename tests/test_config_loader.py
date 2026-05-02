@@ -134,6 +134,7 @@ class TestGetConfig(unittest.TestCase):
         self.assertEqual(strategies["gap_up"]["hold_days"], 2)
         self.assertEqual(strategies["gap_up"]["volume_multiplier"], 1.3)
         self.assertEqual(strategies["gap_up"]["min_breadth_pct"], 0.65)
+        self.assertTrue(strategies["gap_up"]["require_prior_close_above_trend"])
         self.assertEqual(strategies["gap_up"]["max_trend_extension_pct"], 0.35)
         self.assertEqual(strategies["ma_crossover"]["fast_ema"], 6)
         self.assertEqual(strategies["ma_crossover"]["slow_ema"], 18)
@@ -175,3 +176,4 @@ class TestGetConfig(unittest.TestCase):
         self.assertTrue(gap_windows["gap_up_12m_costed"]["screener"])
         self.assertEqual(gap_windows["gap_up_12m_costed"]["min_profit_factor"], 1.95)
         self.assertTrue(gap_windows["gap_up_recent_30d_watch"]["screener"])
+        self.assertEqual(gap_windows["gap_up_recent_30d_watch"]["min_profit_factor"], 1.0)

@@ -20,7 +20,7 @@ The latest validated default configuration is:
 | Screener | `screener.enabled: true` | The tightened screener improved 12-month return versus the old screener and recent fixed-universe test. |
 | Momentum | enabled, `top_n: 2`, `min_momentum_pct: 0.08`, `volume_spike_ratio: 2.0`, `min_breadth_coverage_pct: 0.65` | Allows a second green-regime stock candidate while keeping yellow regimes capped at one signal and preserving sector/risk guards. |
 | RSI Reversion | enabled, `max_entry_atr_pct: 0.07`, `max_stop_loss_pct: 0.06` | Active mean-reversion stock sleeve with crash, realised-volatility, high-ATR entry, and max-loss guards. |
-| Gap-Up | enabled | Opening-momentum sleeve with true-gap, opening-volume pace, trend, and top-1 ranking guards. |
+| Gap-Up | enabled, `require_prior_close_above_trend: true` | Opening-momentum sleeve with true-gap, opening-volume pace, completed-bar trend, and top-1 ranking guards. |
 | MA Crossover | enabled, `hold_days: 16`, `max_loss_exit_pct: 0.02` | Positive crypto contribution with recent-window weakness reduced while avoiding the older large-loss tail seen with a 3% exit. |
 | Range Breakout | enabled | Crypto Donchian breakout sleeve with volume, trend, RSI, 0.8%-8% extension, close-location, and failed-breakout guards. |
 | Momentum exit policy | `profit_trailing` | Exits flat/losing trades after the minimum hold while allowing winners to run under trailing protection. |
@@ -267,6 +267,7 @@ gap_up:
   volume_avg_period: 20
   min_breadth_pct: 0.65
   trend_sma_period: 200
+  require_prior_close_above_trend: true
   max_trend_extension_pct: 0.35
   entry_window_minutes: 45
   opening_timeframe: "1Min"
@@ -281,9 +282,12 @@ Recommended: enabled in the all-strategy profile, with continued monitoring.
 
 The implementation uses completed daily bars for trend/ATR/average volume and
 current-session minute bars for the actual opening gap and volume pace, avoiding
-current-day daily-bar lookahead in live scans. The 12-month all-enabled
-backtest was profitable for this sleeve, but the shorter 6-month window was
-negative, so do not scale it without rerunning the gap validation profile.
+current-day daily-bar lookahead in live scans. The prior completed close must
+already be above SMA200, which avoids buying a gap that is only jumping into
+long-term resistance. The latest dedicated Gap-Up gate improved to +1.45%
+costed over 12 months and +0.52% in the recent 30-day watch window, but the
+sample is still small, so do not scale it without rerunning the gap validation
+profile.
 
 ### MA Crossover
 

@@ -167,11 +167,13 @@ profit factor, +2% aggregate paper return, and max drawdown no worse than 4%.
 2. Today's open is above the prior day's high (`require_true_gap: true`).
 3. Opening minute-bar volume pace is at least 1.3× the 20-day average daily pace.
 4. At least 65% of the scan universe is above SMA50 — broad participation guard.
-5. Price > SMA200 and no more than 35% above SMA200 — avoids exhausted gaps far above trend.
-6. Prior day closed green (close > open) — pre-gap momentum confirmation.
-7. The latest opening-window price has not faded more than 0.5% below the session open
+5. Prior completed close > SMA200 and today's open > SMA200 — avoids buying a gap
+   that is only jumping into long-term resistance.
+6. Today's open is no more than 35% above SMA200 — avoids exhausted gaps far above trend.
+7. Prior day closed green (close > open) — pre-gap momentum confirmation.
+8. The latest opening-window price has not faded more than 0.5% below the session open
    and is not already more than 3% above the session open.
-8. Entry within 45 minutes of the 9:30 ET open.
+9. Entry within 45 minutes of the 9:30 ET open.
 
 Completed daily bars are used for SMA200, ATR, prior-day OHLC, and average
 volume. Current-session minute bars are used for the live opening gap and volume
@@ -190,6 +192,7 @@ from the global risk manager apply throughout.
 | `max_gap_pct` | 15% |
 | `volume_multiplier` | 1.3× opening volume pace |
 | `min_breadth_pct` | 65% |
+| `require_prior_close_above_trend` | true |
 | `max_trend_extension_pct` | 35% above SMA200 |
 | `entry_window_minutes` | 45 min after open |
 | `max_signals` | 1 top-ranked candidate per scan |
