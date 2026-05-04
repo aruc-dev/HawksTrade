@@ -397,7 +397,9 @@ def reconcile_open_trades_with_positions(
                 continue
             status = _order_status(order)
             filled_qty = _order_filled_qty(order)
-            if status == "filled" and filled_qty > QTY_EPSILON:
+            if filled_qty > QTY_EPSILON and (
+                status == "filled" or status in TERMINAL_UNFILLED_EXIT_STATUSES
+            ):
                 filled_sell_orders[order_id] = order
             elif status in TERMINAL_UNFILLED_EXIT_STATUSES and filled_qty <= QTY_EPSILON:
                 terminal_unfilled_sell_orders[order_id] = order
@@ -432,7 +434,7 @@ def reconcile_open_trades_with_positions(
             if entry_price > 0:
                 pnl_pct = float((fill_price - entry_price) / entry_price)
 
-            filled_at = _order_filled_at_iso(order)
+            filled_at = _order_filled_at_iso(order) or _order_terminal_at_iso(order)
             if filled_at:
                 row["timestamp"] = filled_at
             row["status"] = "closed"
