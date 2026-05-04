@@ -33,7 +33,7 @@ log = logging.getLogger("trade_log")
 QTY_EPSILON = Decimal("0.00000001")
 ACTIVE_ENTRY_STATUSES = {"open", "partially_filled"}
 PENDING_EXIT_STATUSES = {"submitted", "partially_filled"}
-TERMINAL_UNFILLED_EXIT_STATUSES = {"expired", "canceled", "cancelled", "rejected"}
+TERMINAL_EXIT_STATUSES = {"expired", "canceled", "cancelled", "rejected"}
 
 
 def _utc_now():
@@ -398,10 +398,10 @@ def reconcile_open_trades_with_positions(
             status = _order_status(order)
             filled_qty = _order_filled_qty(order)
             if filled_qty > QTY_EPSILON and (
-                status == "filled" or status in TERMINAL_UNFILLED_EXIT_STATUSES
+                status == "filled" or status in TERMINAL_EXIT_STATUSES
             ):
                 filled_sell_orders[order_id] = order
-            elif status in TERMINAL_UNFILLED_EXIT_STATUSES and filled_qty <= QTY_EPSILON:
+            elif status in TERMINAL_EXIT_STATUSES and filled_qty <= QTY_EPSILON:
                 terminal_unfilled_sell_orders[order_id] = order
 
         for row in rows:
