@@ -350,6 +350,71 @@ class TradeLogTests(unittest.TestCase):
         self.assertEqual(rows[1]["qty"], "3.139315")
         self.assertEqual(rows[1]["pnl_pct"], "-0.005975")
 
+    def test_reconcile_marks_submitted_sell_expired_when_broker_order_expires_unfilled(self):
+        trade_log.log_trade({
+            "timestamp": "2026-04-28T19:05:48+00:00",
+            "mode": "paper",
+            "symbol": "ARM",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "side": "buy",
+            "qty": "25.281392",
+            "entry_price": "201.67",
+            "order_id": "entry-1",
+            "status": "open",
+        })
+        trade_log.log_trade({
+            "timestamp": "2026-04-30T16:45:30+00:00",
+            "mode": "paper",
+            "symbol": "ARM",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "side": "sell",
+            "qty": "25.281392",
+            "entry_price": "201.67",
+            "exit_price": "227.215",
+            "pnl_pct": "0.126667",
+            "exit_reason": "Take-profit hit: 227.2150 >= 225.8704",
+            "order_id": "exit-expired",
+            "status": "submitted",
+        })
+
+        summary = trade_log.reconcile_open_trades_with_positions(
+            [
+                SimpleNamespace(
+                    symbol="ARM",
+                    qty="25.281392",
+                    avg_entry_price="201.67",
+                    asset_class="AssetClass.US_EQUITY",
+                )
+            ],
+            closed_orders=[
+                SimpleNamespace(
+                    id="exit-expired",
+                    side="sell",
+                    status="expired",
+                    filled_qty="0",
+                    filled_avg_price=None,
+                    expired_at=datetime(2026, 4, 30, 20, 0, 39, tzinfo=timezone.utc),
+                )
+            ],
+        )
+
+        rows = self._read_rows()
+        self.assertEqual(summary["marked_terminal_unfilled_sells"], 1)
+        self.assertEqual(summary["closed_filled_sells"], 0)
+        self.assertEqual(rows[0]["status"], "open")
+        self.assertEqual(rows[0]["exit_price"], "")
+        self.assertEqual(rows[0]["pnl_pct"], "")
+        self.assertEqual(rows[1]["status"], "expired")
+        self.assertEqual(rows[1]["timestamp"], "2026-04-30T20:00:39+00:00")
+        self.assertEqual(rows[1]["exit_price"], "")
+        self.assertEqual(rows[1]["pnl_pct"], "")
+        self.assertEqual(
+            rows[1]["exit_reason"],
+            "broker reconciliation: exit order expired unfilled",
+        )
+
     def test_reconcile_duplicate_open_rows_preserves_zero_broker_entry(self):
         trade_log.log_trade({
             "timestamp": "2026-04-14T18:04:02+00:00",
