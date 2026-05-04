@@ -116,6 +116,7 @@ class RunRiskCheckTests(unittest.TestCase):
             run_risk_check.run(dry_run=True)
 
         exit_position.assert_called_once()
+        self.assertTrue(exit_position.call_args.kwargs["force_market"])
 
     def test_risk_check_uses_trade_log_entry_when_broker_entry_is_zero(self):
         position = SimpleNamespace(symbol="AAPL", avg_entry_price="0", asset_class="us_equity")
@@ -215,7 +216,32 @@ class RunRiskCheckTests(unittest.TestCase):
             run_risk_check.run(dry_run=True)
 
         exit_position.assert_called_once_with(
-            "DOGE/USD", reason="Stop-loss hit", asset_class="crypto", dry_run=True
+            "DOGE/USD",
+            reason="Stop-loss hit",
+            asset_class="crypto",
+            dry_run=True,
+            force_market=True,
+        )
+
+    def test_risk_check_take_profit_exit_uses_market_order(self):
+        position = SimpleNamespace(symbol="AAPL", avg_entry_price="100", asset_class="us_equity")
+
+        with (
+            patch.object(run_risk_check.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_risk_check, "get_open_trades", return_value=[]),
+            patch.object(run_risk_check.ac, "get_all_positions", return_value=[position]),
+            patch.object(run_risk_check.ac, "get_stock_latest_price", return_value=113),
+            patch.object(run_risk_check.rm, "should_exit_position", return_value=(True, "Take-profit hit")),
+            patch.object(run_risk_check.oe, "exit_position") as exit_position,
+        ):
+            run_risk_check.run(dry_run=True)
+
+        exit_position.assert_called_once_with(
+            "AAPL",
+            reason="Take-profit hit",
+            asset_class="stock",
+            dry_run=True,
+            force_market=True,
         )
 
     def test_run_marks_error_when_exit_is_blocked_by_pending_order_check_failure(self):

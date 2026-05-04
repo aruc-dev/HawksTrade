@@ -104,6 +104,11 @@ trading:
 
 These are risk parameters. Keep them unchanged unless you are deliberately revalidating risk.
 
+`order_type` remains the default for entries and ordinary strategy exits. Risk exits from
+`scheduler/run_risk_check.py` (stop-loss, take-profit, and daily-loss emergency exits)
+and momentum hold exits from `scheduler/run_scan.py` use market sell orders so exit
+certainty is not dependent on DAY limit orders filling.
+
 ---
 
 ## Stock Universe

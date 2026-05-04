@@ -419,6 +419,9 @@ def exit_position(
       1. Check position exists
       2. Place sell order
       3. Log the trade
+
+    force_market: use a market sell even when the default order_type is limit;
+        intended for liquidation exits where fill certainty matters most.
     """
     strategy = "unknown"
     trade_symbol = symbol
