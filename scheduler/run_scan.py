@@ -499,7 +499,13 @@ def _check_hold_day_exits(
                         )
                         continue
                     log.info(f"Momentum hold exit for {symbol}: {reason}")
-                    result = oe.exit_position(symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
+                    result = oe.exit_position(
+                        symbol,
+                        reason=reason,
+                        asset_class=asset_class,
+                        dry_run=dry_run,
+                        force_market=True,
+                    )
                     _mark_unhealthy_exit_result(marker, result, "hold_day_exit")
                     continue
 

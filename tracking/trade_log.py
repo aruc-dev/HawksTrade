@@ -33,6 +33,7 @@ log = logging.getLogger("trade_log")
 QTY_EPSILON = Decimal("0.00000001")
 ACTIVE_ENTRY_STATUSES = {"open", "partially_filled"}
 PENDING_EXIT_STATUSES = {"submitted", "partially_filled"}
+TERMINAL_EXIT_STATUSES = {"expired", "canceled", "cancelled", "rejected"}
 
 
 def _utc_now():
@@ -116,6 +117,17 @@ def _order_filled_at_iso(order) -> str | None:
     if isinstance(filled_at, datetime):
         return _as_utc(filled_at).isoformat()
     return str(filled_at)
+
+
+def _order_terminal_at_iso(order) -> str | None:
+    for name in ("expired_at", "canceled_at", "cancelled_at", "rejected_at"):
+        value = _order_value(order, name, None)
+        if value in (None, ""):
+            continue
+        if isinstance(value, datetime):
+            return _as_utc(value).isoformat()
+        return str(value)
+    return None
 
 
 def _close_row(row: dict, exit_price: float, pnl_pct: float, reason: str):
@@ -370,27 +382,47 @@ def reconcile_open_trades_with_positions(
             "reopened_rows": 0,
             "created_rows": 0,
             "marked_unfilled_sells": 0,
+            "marked_terminal_unfilled_sells": 0,
             "closed_filled_sells": 0,
             "closed_stale_rows": 0,
         }
 
         filled_sell_orders = {}
+        terminal_unfilled_sell_orders = {}
         for order in closed_orders or []:
-            if _order_side(order) != "sell" or _order_status(order) != "filled":
+            if _order_side(order) != "sell":
                 continue
             order_id = _order_id(order)
             if not order_id:
                 continue
+            status = _order_status(order)
             filled_qty = _order_filled_qty(order)
-            if filled_qty <= QTY_EPSILON:
-                continue
-            filled_sell_orders[order_id] = order
+            if filled_qty > QTY_EPSILON and (
+                status == "filled" or status in TERMINAL_EXIT_STATUSES
+            ):
+                filled_sell_orders[order_id] = order
+            elif status in TERMINAL_EXIT_STATUSES and filled_qty <= QTY_EPSILON:
+                terminal_unfilled_sell_orders[order_id] = order
 
         for row in rows:
             if row.get("side") != "sell" or row.get("status") not in PENDING_EXIT_STATUSES:
                 continue
-            order = filled_sell_orders.pop(str(row.get("order_id", "") or ""), None)
+            order_id = str(row.get("order_id", "") or "")
+            order = filled_sell_orders.pop(order_id, None)
             if order is None:
+                order = terminal_unfilled_sell_orders.pop(order_id, None)
+                if order is None:
+                    continue
+
+                status = _order_status(order)
+                terminal_at = _order_terminal_at_iso(order)
+                if terminal_at:
+                    row["timestamp"] = terminal_at
+                row["status"] = status
+                row["exit_price"] = ""
+                row["pnl_pct"] = ""
+                row["exit_reason"] = f"broker reconciliation: exit order {status} unfilled"
+                summary["marked_terminal_unfilled_sells"] += 1
                 continue
 
             fill_price = _order_filled_avg_price(order)
@@ -402,7 +434,7 @@ def reconcile_open_trades_with_positions(
             if entry_price > 0:
                 pnl_pct = float((fill_price - entry_price) / entry_price)
 
-            filled_at = _order_filled_at_iso(order)
+            filled_at = _order_filled_at_iso(order) or _order_terminal_at_iso(order)
             if filled_at:
                 row["timestamp"] = filled_at
             row["status"] = "closed"

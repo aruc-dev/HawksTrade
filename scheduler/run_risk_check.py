@@ -530,7 +530,13 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
         if should_exit:
             log.info(f"EXIT triggered for {symbol}: {reason}")
             exit_symbol = price_symbol if asset_class == "crypto" else symbol
-            result = oe.exit_position(exit_symbol, reason=reason, asset_class=asset_class, dry_run=dry_run)
+            result = oe.exit_position(
+                exit_symbol,
+                reason=reason,
+                asset_class=asset_class,
+                dry_run=dry_run,
+                force_market=True,
+            )
             _mark_unhealthy_exit_result(marker, result, "risk_exit")
         else:
             pnl = (current_price - entry_price) / entry_price
