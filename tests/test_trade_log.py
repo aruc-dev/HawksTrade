@@ -296,6 +296,7 @@ class TradeLogTests(unittest.TestCase):
         self.assertEqual(summary["marked_unfilled_sells"], 1)
         self.assertEqual(rows[0]["status"], "open")
         self.assertEqual(rows[1]["status"], "submitted")
+        self.assertEqual(rows[1]["exit_reason"], "exit")
 
     def test_reconcile_closes_submitted_sell_when_broker_order_fills(self):
         trade_log.log_trade({
@@ -349,6 +350,67 @@ class TradeLogTests(unittest.TestCase):
         self.assertEqual(rows[1]["timestamp"], "2026-04-20T13:37:43+00:00")
         self.assertEqual(rows[1]["qty"], "3.139315")
         self.assertEqual(rows[1]["pnl_pct"], "-0.005975")
+
+    def test_reconcile_preserves_manual_reason_when_position_snapshot_is_stale_after_sell_fill(self):
+        trade_log.log_trade({
+            "timestamp": "2026-04-29T17:00:35+00:00",
+            "mode": "paper",
+            "symbol": "DOGE/USD",
+            "strategy": "range_breakout",
+            "asset_class": "crypto",
+            "side": "buy",
+            "qty": "49601.834328721",
+            "entry_price": "0.102541439",
+            "order_id": "entry-doge",
+            "status": "open",
+        })
+        trade_log.log_trade({
+            "timestamp": "2026-05-04T18:42:52+00:00",
+            "mode": "paper",
+            "symbol": "DOGE/USD",
+            "strategy": "range_breakout",
+            "asset_class": "crypto",
+            "side": "sell",
+            "qty": "49601.834328721",
+            "entry_price": "0.102541439",
+            "exit_price": "0.110999953",
+            "pnl_pct": "0.082489",
+            "exit_reason": "manually triggered sell",
+            "order_id": "exit-doge",
+            "status": "submitted",
+        })
+
+        summary = trade_log.reconcile_open_trades_with_positions(
+            [
+                SimpleNamespace(
+                    symbol="DOGEUSD",
+                    qty="49601.834328721",
+                    avg_entry_price="0.102541439",
+                    asset_class="AssetClass.CRYPTO",
+                )
+            ],
+            closed_orders=[
+                SimpleNamespace(
+                    id="exit-doge",
+                    side="sell",
+                    status="filled",
+                    filled_qty="49601.834328721",
+                    filled_avg_price="0.110999953",
+                    filled_at=datetime(2026, 5, 4, 18, 42, 52, 982464, tzinfo=timezone.utc),
+                )
+            ],
+        )
+
+        rows = self._read_rows()
+        self.assertEqual(summary["closed_filled_sells"], 1)
+        self.assertEqual(summary["reopened_rows"], 0)
+        self.assertEqual(summary["marked_unfilled_sells"], 0)
+        self.assertEqual(rows[0]["status"], "closed")
+        self.assertEqual(rows[0]["exit_reason"], "manually triggered sell")
+        self.assertEqual(rows[0]["exit_price"], "0.111")
+        self.assertEqual(rows[1]["status"], "closed")
+        self.assertEqual(rows[1]["exit_reason"], "manually triggered sell")
+        self.assertEqual(rows[1]["exit_price"], "0.110999953")
 
     def test_reconcile_marks_submitted_sell_expired_when_broker_order_expires_unfilled(self):
         trade_log.log_trade({

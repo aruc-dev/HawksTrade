@@ -34,6 +34,8 @@ QTY_EPSILON = Decimal("0.00000001")
 ACTIVE_ENTRY_STATUSES = {"open", "partially_filled"}
 PENDING_EXIT_STATUSES = {"submitted", "partially_filled"}
 TERMINAL_EXIT_STATUSES = {"expired", "canceled", "cancelled", "rejected"}
+BROKER_RECONCILIATION_PREFIX = "broker reconciliation:"
+EXIT_NOT_FULLY_FILLED_REASON = f"{BROKER_RECONCILIATION_PREFIX} exit order not fully filled"
 
 
 def _utc_now():
@@ -61,8 +63,29 @@ def _fmt_decimal(value: Decimal) -> str:
     return format(value.normalize(), "f")
 
 
+def _normalized_symbol(symbol: str) -> str:
+    return str(symbol or "").replace("/", "").upper()
+
+
 def _symbols_match(left: str, right: str) -> bool:
-    return str(left or "").replace("/", "").upper() == str(right or "").replace("/", "").upper()
+    return _normalized_symbol(left) == _normalized_symbol(right)
+
+
+def _has_active_buy_row(rows: list[dict], symbol: str) -> bool:
+    return any(
+        _symbols_match(row.get("symbol", ""), symbol)
+        and row.get("side") == "buy"
+        and row.get("status") in ACTIVE_ENTRY_STATUSES
+        for row in rows
+    )
+
+
+def _mark_sell_not_fully_filled(row: dict) -> None:
+    existing_reason = str(row.get("exit_reason", "") or "").strip()
+    row["status"] = "submitted"
+    row["pnl_pct"] = ""
+    if not existing_reason or existing_reason.startswith(BROKER_RECONCILIATION_PREFIX):
+        row["exit_reason"] = EXIT_NOT_FULLY_FILLED_REASON
 
 
 def _position_symbol(position) -> str:
@@ -389,6 +412,7 @@ def reconcile_open_trades_with_positions(
 
         filled_sell_orders = {}
         terminal_unfilled_sell_orders = {}
+        symbols_fully_closed_by_filled_sell = set()
         for order in closed_orders or []:
             if _order_side(order) != "sell":
                 continue
@@ -444,7 +468,7 @@ def reconcile_open_trades_with_positions(
 
             reason = row.get("exit_reason", "") or "broker reconciliation: exit fill confirmed"
             row["exit_reason"] = reason
-            _apply_close_to_matching_buy_rows(
+            updated, _, _ = _apply_close_to_matching_buy_rows(
                 rows,
                 row.get("symbol", ""),
                 exit_price=float(fill_price),
@@ -452,6 +476,8 @@ def reconcile_open_trades_with_positions(
                 reason=reason,
                 closed_qty=filled_qty,
             )
+            if updated and not _has_active_buy_row(rows, row.get("symbol", "")):
+                symbols_fully_closed_by_filled_sell.add(_normalized_symbol(row.get("symbol", "")))
             summary["closed_filled_sells"] += 1
 
         broker_positions = [
@@ -459,7 +485,7 @@ def reconcile_open_trades_with_positions(
             if _position_symbol(p) and _position_qty(p).copy_abs() > QTY_EPSILON
         ]
         summary["positions"] = len(broker_positions)
-        broker_symbols = {_position_symbol(p).replace("/", "").upper() for p in broker_positions}
+        broker_symbols = {_normalized_symbol(_position_symbol(p)) for p in broker_positions}
 
         for pos in broker_positions:
             broker_symbol = _position_symbol(pos)
@@ -475,6 +501,11 @@ def reconcile_open_trades_with_positions(
                 (idx, row) for idx, row in matching_rows
                 if row.get("status") in ACTIVE_ENTRY_STATUSES and row.get("side") == "buy"
             ]
+            if (
+                not open_buy_rows
+                and _normalized_symbol(broker_symbol) in symbols_fully_closed_by_filled_sell
+            ):
+                continue
             buy_rows = [
                 (idx, row) for idx, row in matching_rows
                 if row.get("side") == "buy"
@@ -526,9 +557,7 @@ def reconcile_open_trades_with_positions(
                     if remaining_sold_qty + QTY_EPSILON >= sell_qty:
                         remaining_sold_qty -= sell_qty
                         continue
-                    sell_row["status"] = "submitted"
-                    sell_row["pnl_pct"] = ""
-                    sell_row["exit_reason"] = "broker reconciliation: exit order not fully filled"
+                    _mark_sell_not_fully_filled(sell_row)
                     summary["marked_unfilled_sells"] += 1
                 continue
 
