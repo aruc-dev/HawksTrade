@@ -615,21 +615,27 @@ def reconcile_open_trades_with_positions(
                 )
 
             if not open_buy_rows and latest_closed_sell is not None:
+                latest_sell_order_id = str(latest_closed_sell.get("order_id", "") or "")
+                latest_sell_confirmed = latest_sell_order_id in confirmed_filled_sell_order_ids
+                latest_sell_manual = _is_manual_exit(latest_closed_sell)
+                position_matches_latest_sell = _position_matches_closed_sell(
+                    broker_qty=broker_qty,
+                    broker_entry=broker_entry,
+                    sell_row=latest_closed_sell,
+                )
                 if (
                     not has_reentry_after_closed_sell
                     and latest_closed_sell_is_recent
-                    and (
-                        str(latest_closed_sell.get("order_id", "") or "")
-                        in confirmed_filled_sell_order_ids
-                        or _is_manual_exit(latest_closed_sell)
-                    )
-                    and _position_matches_closed_sell(
-                        broker_qty=broker_qty,
-                        broker_entry=broker_entry,
-                        sell_row=latest_closed_sell,
-                    )
+                    and latest_sell_confirmed
+                    and position_matches_latest_sell
                 ):
                     continue
+                if (
+                    not has_reentry_after_closed_sell
+                    and latest_sell_manual
+                    and position_matches_latest_sell
+                ):
+                    buy_rows = []
 
                 if buy_rows:
                     latest_buy_idx, latest_buy_row = buy_rows[-1]

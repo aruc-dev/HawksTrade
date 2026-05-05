@@ -600,10 +600,13 @@ class TradeLogTests(unittest.TestCase):
 
         rows = self._read_rows()
         self.assertEqual(summary["reopened_rows"], 0)
-        self.assertEqual(summary["created_rows"], 0)
+        self.assertEqual(summary["created_rows"], 1)
         self.assertEqual(summary["marked_unfilled_sells"], 0)
         self.assertEqual(rows[0]["status"], "closed")
         self.assertEqual(rows[1]["status"], "closed")
+        self.assertEqual(rows[2]["status"], "open")
+        self.assertEqual(rows[2]["strategy"], "broker_reconciliation")
+        self.assertEqual(rows[2]["qty"], "49601.834328721")
 
     def test_reconcile_allows_same_symbol_reentry_after_filled_sell(self):
         trade_log.log_trade({
