@@ -31,6 +31,7 @@ CFG = get_config()
 TRADE_LOG = BASE_DIR / CFG["reporting"]["trade_log_file"]
 log = logging.getLogger("trade_log")
 QTY_EPSILON = Decimal("0.00000001")
+PRICE_EPSILON = Decimal("0.000001")
 ACTIVE_ENTRY_STATUSES = {"open", "partially_filled"}
 PENDING_EXIT_STATUSES = {"submitted", "partially_filled"}
 TERMINAL_EXIT_STATUSES = {"expired", "canceled", "cancelled", "rejected"}
@@ -86,6 +87,10 @@ def _mark_sell_not_fully_filled(row: dict) -> None:
     row["pnl_pct"] = ""
     if not existing_reason or existing_reason.startswith(BROKER_RECONCILIATION_PREFIX):
         row["exit_reason"] = EXIT_NOT_FULLY_FILLED_REASON
+
+
+def _is_manual_exit(row: dict) -> bool:
+    return "manually triggered sell" in str(row.get("exit_reason", "") or "").lower()
 
 
 def _position_symbol(position) -> str:
@@ -243,10 +248,49 @@ def _has_buy_fill_after(
     symbol: str,
     sell_time: datetime | None,
 ) -> bool:
+    if sell_time is None:
+        return False
     for buy_time in filled_buy_times_by_symbol.get(symbol, []):
-        if sell_time is None or buy_time is None or buy_time > sell_time:
+        if buy_time is not None and buy_time > sell_time:
             return True
     return False
+
+
+def _decimals_close(left: Decimal | None, right: Decimal | None, epsilon: Decimal) -> bool:
+    if left is None or right is None:
+        return False
+    return (left - right).copy_abs() <= epsilon
+
+
+def _position_matches_closed_sell(
+    *,
+    broker_qty: Decimal,
+    broker_entry: Decimal | None,
+    sell_row: dict,
+) -> bool:
+    sell_qty = (_to_decimal(sell_row.get("qty"), Decimal("0")) or Decimal("0")).copy_abs()
+    sell_entry = _to_decimal(sell_row.get("entry_price"))
+    return _decimals_close(broker_qty, sell_qty, QTY_EPSILON) and _decimals_close(
+        broker_entry,
+        sell_entry,
+        PRICE_EPSILON,
+    )
+
+
+def _residual_qty_after_closed_sells(
+    *,
+    buy_idx: int,
+    buy_row: dict,
+    matching_rows: list[tuple[int, dict]],
+) -> Decimal:
+    original_qty = (_to_decimal(buy_row.get("qty"), Decimal("0")) or Decimal("0")).copy_abs()
+    sold_qty = Decimal("0")
+    for idx, row in matching_rows:
+        if idx <= buy_idx or row.get("side") != "sell" or row.get("status") != "closed":
+            continue
+        sold_qty += (_to_decimal(row.get("qty"), Decimal("0")) or Decimal("0")).copy_abs()
+    residual = original_qty - sold_qty
+    return residual if residual > QTY_EPSILON else Decimal("0")
 
 COLUMNS = [
     "timestamp", "mode", "symbol", "strategy", "asset_class",
@@ -453,7 +497,7 @@ def reconcile_open_trades_with_positions(
 
         filled_sell_orders = {}
         terminal_unfilled_sell_orders = {}
-        fully_closed_sell_times_by_symbol = {}
+        confirmed_filled_sell_order_ids = set()
         for order in closed_order_list:
             if _order_side(order) != "sell":
                 continue
@@ -490,6 +534,7 @@ def reconcile_open_trades_with_positions(
                 summary["marked_terminal_unfilled_sells"] += 1
                 continue
 
+            confirmed_filled_sell_order_ids.add(order_id)
             fill_price = _order_filled_avg_price(order)
             entry_price = _to_decimal(row.get("entry_price"), Decimal("0")) or Decimal("0")
             if fill_price is None:
@@ -517,19 +562,6 @@ def reconcile_open_trades_with_positions(
                 reason=reason,
                 closed_qty=filled_qty,
             )
-            if not _has_active_buy_row(rows, row.get("symbol", "")):
-                symbol = _normalized_symbol(row.get("symbol", ""))
-                filled_time = _order_filled_at(order)
-                previous_time = fully_closed_sell_times_by_symbol.get(symbol)
-                if (
-                    symbol
-                    and (
-                        symbol not in fully_closed_sell_times_by_symbol
-                        or previous_time is None
-                        or (filled_time is not None and filled_time > previous_time)
-                    )
-                ):
-                    fully_closed_sell_times_by_symbol[symbol] = filled_time
             summary["closed_filled_sells"] += 1
 
         broker_positions = [
@@ -554,22 +586,64 @@ def reconcile_open_trades_with_positions(
                 if row.get("status") in ACTIVE_ENTRY_STATUSES and row.get("side") == "buy"
             ]
             normalized_broker_symbol = _normalized_symbol(broker_symbol)
-            has_reentry_after_filled_sell = False
-            if not open_buy_rows and normalized_broker_symbol in fully_closed_sell_times_by_symbol:
-                sell_time = fully_closed_sell_times_by_symbol[normalized_broker_symbol]
-                has_reentry_after_filled_sell = _has_buy_fill_after(
-                    filled_buy_times_by_symbol,
-                    normalized_broker_symbol,
-                    sell_time,
-                )
-                if not has_reentry_after_filled_sell:
-                    continue
             buy_rows = [
                 (idx, row) for idx, row in matching_rows
                 if row.get("side") == "buy"
             ]
-            if has_reentry_after_filled_sell:
-                buy_rows = []
+            closed_sell_rows = [
+                (idx, row) for idx, row in matching_rows
+                if row.get("side") == "sell" and row.get("status") == "closed"
+            ]
+            latest_closed_sell = closed_sell_rows[-1][1] if closed_sell_rows else None
+            has_reentry_after_closed_sell = False
+            if latest_closed_sell is not None:
+                has_reentry_after_closed_sell = _has_buy_fill_after(
+                    filled_buy_times_by_symbol,
+                    normalized_broker_symbol,
+                    _coerce_datetime(latest_closed_sell.get("timestamp")),
+                )
+
+            if not open_buy_rows and latest_closed_sell is not None:
+                if (
+                    not has_reentry_after_closed_sell
+                    and (
+                        str(latest_closed_sell.get("order_id", "") or "")
+                        in confirmed_filled_sell_order_ids
+                        or _is_manual_exit(latest_closed_sell)
+                    )
+                    and _position_matches_closed_sell(
+                        broker_qty=broker_qty,
+                        broker_entry=broker_entry,
+                        sell_row=latest_closed_sell,
+                    )
+                ):
+                    continue
+
+                if buy_rows:
+                    latest_buy_idx, latest_buy_row = buy_rows[-1]
+                    residual_qty = _residual_qty_after_closed_sells(
+                        buy_idx=latest_buy_idx,
+                        buy_row=latest_buy_row,
+                        matching_rows=matching_rows,
+                    )
+                    latest_buy_entry = _to_decimal(latest_buy_row.get("entry_price"))
+                    broker_matches_latest_lot = _decimals_close(
+                        broker_entry,
+                        latest_buy_entry,
+                        PRICE_EPSILON,
+                    ) or _decimals_close(
+                        broker_entry,
+                        _to_decimal(latest_closed_sell.get("entry_price")),
+                        PRICE_EPSILON,
+                    )
+                    if (
+                        has_reentry_after_closed_sell
+                        or (
+                            not _decimals_close(residual_qty, broker_qty, QTY_EPSILON)
+                            and not broker_matches_latest_lot
+                        )
+                    ):
+                        buy_rows = []
 
             if open_buy_rows:
                 keep_idx, keep_row = open_buy_rows[-1]
