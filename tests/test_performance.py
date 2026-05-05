@@ -100,9 +100,51 @@ class PerformanceTests(unittest.TestCase):
 
         self.assertEqual(summary["total_trades"], 1)
         self.assertEqual(summary["realized_pnl_dollars"], 20)
+        self.assertEqual(summary["realized_pnl_pct"], 0.1)
         self.assertEqual(summary["open_positions"], 1)
         self.assertEqual(summary["unrealized_pnl_dollars"], -5)
         self.assertEqual(summary["total_pnl_dollars"], 15)
+        self.assertEqual(summary["total_pnl_pct"], 0.075)
+
+    def test_compute_summary_reports_weighted_realized_return_not_sum_of_trade_returns(self):
+        self._write_trades([
+            {
+                "timestamp": "2026-04-10T12:00:00.000000",
+                "mode": "paper",
+                "symbol": "AAPL",
+                "strategy": "momentum",
+                "asset_class": "stock",
+                "side": "sell",
+                "qty": 1,
+                "entry_price": 100,
+                "exit_price": 110,
+                "pnl_pct": 0.10,
+                "status": "closed",
+            },
+            {
+                "timestamp": "2026-04-11T12:00:00.000000",
+                "mode": "paper",
+                "symbol": "MSFT",
+                "strategy": "momentum",
+                "asset_class": "stock",
+                "side": "sell",
+                "qty": 9,
+                "entry_price": 100,
+                "exit_price": 100,
+                "pnl_pct": 0.0,
+                "status": "closed",
+            },
+        ])
+
+        summary = performance.compute_summary(performance.load_closed_trades())
+
+        self.assertEqual(summary["realized_pnl_dollars"], 10)
+        self.assertEqual(summary["realized_cost_basis"], 1000)
+        self.assertEqual(summary["realized_pnl_pct"], 0.01)
+        self.assertEqual(summary["total_pnl_pct"], 0.01)
+        self.assertEqual(summary["monthly_pnl"], {"2026-04": 0.01})
+        self.assertEqual(summary["by_strategy"]["momentum"]["total_pnl"], 0.01)
+        self.assertEqual(summary["by_strategy"]["momentum"]["realized_cost_basis"], 1000)
 
 
 if __name__ == "__main__":

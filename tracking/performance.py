@@ -31,6 +31,11 @@ def _utc_now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _weighted_return(pnl_dollars, cost_basis) -> float:
+    cost_basis = float(cost_basis)
+    return float(pnl_dollars) / cost_basis if cost_basis > 0 else 0.0
+
+
 def load_closed_trades() -> pd.DataFrame:
     with locked_trade_log(TRADE_LOG, exclusive=False) as trade_log_path:
         if not trade_log_path.exists():
@@ -107,40 +112,65 @@ def compute_summary(df: pd.DataFrame = None, open_positions: pd.DataFrame = None
         avg_loss = 0
         realized_pnl_pct = 0
         realized_pnl_dollars = 0
+        realized_cost_basis = 0.0
         monthly = {}
         by_strategy = {}
     else:
         df = df.copy()
+        df["pnl_pct"] = pd.to_numeric(df["pnl_pct"], errors="coerce").fillna(0)
+        df["qty"] = pd.to_numeric(df["qty"], errors="coerce").fillna(0)
+        df["entry_price"] = pd.to_numeric(df["entry_price"], errors="coerce")
+        df["exit_price"] = pd.to_numeric(df["exit_price"], errors="coerce")
         if "realized_pnl_dollars" not in df:
-            df["qty"] = pd.to_numeric(df["qty"], errors="coerce").fillna(0)
-            df["entry_price"] = pd.to_numeric(df["entry_price"], errors="coerce")
-            df["exit_price"] = pd.to_numeric(df["exit_price"], errors="coerce")
             df["realized_pnl_dollars"] = (df["exit_price"] - df["entry_price"]) * df["qty"]
+        df["realized_pnl_dollars"] = pd.to_numeric(
+            df["realized_pnl_dollars"], errors="coerce"
+        ).fillna(0)
+        df["realized_cost_basis"] = (df["entry_price"] * df["qty"]).where(
+            (df["entry_price"] > 0) & (df["qty"] > 0),
+            0,
+        )
         total_trades  = len(df)
         wins          = (df["pnl_pct"] > 0).sum()
         losses        = (df["pnl_pct"] <= 0).sum()
         win_rate      = wins / total_trades if total_trades else 0
         avg_win       = df[df["pnl_pct"] > 0]["pnl_pct"].mean() if wins else 0
         avg_loss      = df[df["pnl_pct"] <= 0]["pnl_pct"].mean() if losses else 0
-        realized_pnl_pct = df["pnl_pct"].sum()
         realized_pnl_dollars = df["realized_pnl_dollars"].sum()
+        realized_cost_basis = float(df["realized_cost_basis"].sum())
+        realized_pnl_pct = _weighted_return(realized_pnl_dollars, realized_cost_basis)
 
         # Monthly P&L grouped
         df["month"] = df["timestamp"].dt.to_period("M")
-        monthly     = df.groupby("month")["pnl_pct"].sum().to_dict()
-        monthly     = {str(k): round(v, 4) for k, v in monthly.items()}
+        monthly_df = df.groupby("month").agg(
+            realized_pnl_dollars=("realized_pnl_dollars", "sum"),
+            realized_cost_basis=("realized_cost_basis", "sum"),
+        )
+        monthly = {
+            str(month): round(
+                _weighted_return(values["realized_pnl_dollars"], values["realized_cost_basis"]),
+                4,
+            )
+            for month, values in monthly_df.iterrows()
+        }
 
         # Strategy breakdown
-        by_strategy = df.groupby("strategy").agg(
-            trades=("pnl_pct", "count"),
-            total_pnl=("pnl_pct", "sum"),
-            realized_pnl_dollars=("realized_pnl_dollars", "sum"),
-            win_rate=("pnl_pct", lambda x: (x > 0).mean()),
-        ).round(4).to_dict(orient="index")
+        by_strategy = {}
+        for strategy, group in df.groupby("strategy"):
+            strategy_pnl = group["realized_pnl_dollars"].sum()
+            strategy_cost_basis = group["realized_cost_basis"].sum()
+            by_strategy[strategy] = {
+                "trades": int(len(group)),
+                "total_pnl": round(_weighted_return(strategy_pnl, strategy_cost_basis), 4),
+                "realized_pnl_dollars": round(float(strategy_pnl), 4),
+                "realized_cost_basis": round(float(strategy_cost_basis), 4),
+                "win_rate": round(float((group["pnl_pct"] > 0).mean()), 4),
+            }
 
     if open_positions.empty:
         open_count = 0
         unrealized_pnl_dollars = 0.0
+        open_cost_basis = 0.0
     else:
         open_count = len(open_positions)
         if "unrealized_pnl_dollars" in open_positions:
@@ -148,8 +178,16 @@ def compute_summary(df: pd.DataFrame = None, open_positions: pd.DataFrame = None
             unrealized_pnl_dollars = unrealized.sum()
         else:
             unrealized_pnl_dollars = 0.0
+        if {"entry_price", "qty"}.issubset(open_positions.columns):
+            open_entry = pd.to_numeric(open_positions["entry_price"], errors="coerce").fillna(0)
+            open_qty = pd.to_numeric(open_positions["qty"], errors="coerce").fillna(0).abs()
+            open_cost_basis = float((open_entry * open_qty).where(open_entry > 0, 0).sum())
+        else:
+            open_cost_basis = 0.0
 
     total_pnl_dollars = float(realized_pnl_dollars + unrealized_pnl_dollars)
+    total_cost_basis = realized_cost_basis + open_cost_basis
+    total_pnl_pct = _weighted_return(total_pnl_dollars, total_cost_basis)
 
     return {
         "generated_at":   _utc_now().isoformat(),
@@ -159,11 +197,14 @@ def compute_summary(df: pd.DataFrame = None, open_positions: pd.DataFrame = None
         "win_rate":       round(win_rate, 4),
         "avg_win_pct":    round(avg_win, 4),
         "avg_loss_pct":   round(avg_loss, 4),
-        "total_pnl_pct":  round(realized_pnl_pct, 4),
+        "total_pnl_pct":  round(total_pnl_pct, 4),
         "realized_pnl_pct": round(realized_pnl_pct, 4),
         "realized_pnl_dollars": round(float(realized_pnl_dollars), 2),
+        "realized_cost_basis": round(float(realized_cost_basis), 2),
         "open_positions": int(open_count),
         "unrealized_pnl_dollars": round(float(unrealized_pnl_dollars), 2),
+        "open_cost_basis": round(float(open_cost_basis), 2),
+        "total_cost_basis": round(float(total_cost_basis), 2),
         "total_pnl_dollars": round(total_pnl_dollars, 2),
         "monthly_pnl":    monthly,
         "by_strategy":    by_strategy,
