@@ -282,14 +282,19 @@ class TradeLogTests(unittest.TestCase):
             "status": "closed",
         })
 
-        summary = trade_log.reconcile_open_trades_with_positions([
-            SimpleNamespace(
-                symbol="META",
-                qty="12.030374",
-                avg_entry_price="665.16",
-                asset_class="AssetClass.US_EQUITY",
-            )
-        ])
+        with mock.patch.object(
+            trade_log,
+            "_utc_now",
+            return_value=datetime(2026, 4, 14, 18, 5, tzinfo=timezone.utc),
+        ):
+            summary = trade_log.reconcile_open_trades_with_positions([
+                SimpleNamespace(
+                    symbol="META",
+                    qty="12.030374",
+                    avg_entry_price="665.16",
+                    asset_class="AssetClass.US_EQUITY",
+                )
+            ])
 
         rows = self._read_rows()
         self.assertEqual(summary["reopened_rows"], 1)
@@ -444,32 +449,103 @@ class TradeLogTests(unittest.TestCase):
             "status": "submitted",
         })
 
-        summary = trade_log.reconcile_open_trades_with_positions(
-            [
-                SimpleNamespace(
-                    symbol="DOGEUSD",
-                    qty="49601.834328721",
-                    avg_entry_price="0.102541439",
-                    asset_class="AssetClass.CRYPTO",
-                )
-            ],
-            closed_orders=[
-                SimpleNamespace(
-                    id="exit-doge",
-                    symbol="DOGEUSD",
-                    side="sell",
-                    status="filled",
-                    filled_qty="49601.834328721",
-                    filled_avg_price="0.110999953",
-                    filled_at=datetime(2026, 5, 4, 18, 42, 52, tzinfo=timezone.utc),
-                )
-            ],
-        )
+        with mock.patch.object(
+            trade_log,
+            "_utc_now",
+            return_value=datetime(2026, 5, 4, 18, 43, tzinfo=timezone.utc),
+        ):
+            summary = trade_log.reconcile_open_trades_with_positions(
+                [
+                    SimpleNamespace(
+                        symbol="DOGEUSD",
+                        qty="49601.834328721",
+                        avg_entry_price="0.102541439",
+                        asset_class="AssetClass.CRYPTO",
+                    )
+                ],
+                closed_orders=[
+                    SimpleNamespace(
+                        id="exit-doge",
+                        symbol="DOGEUSD",
+                        side="sell",
+                        status="filled",
+                        filled_qty="49601.834328721",
+                        filled_avg_price="0.110999953",
+                        filled_at=datetime(2026, 5, 4, 18, 42, 52, tzinfo=timezone.utc),
+                    )
+                ],
+            )
 
         rows = self._read_rows()
         self.assertEqual(summary["closed_filled_sells"], 1)
         self.assertEqual(summary["reopened_rows"], 0)
         self.assertEqual(summary["created_rows"], 0)
+        self.assertEqual(rows[0]["status"], "closed")
+        self.assertEqual(rows[1]["status"], "closed")
+
+    def test_reconcile_does_not_reopen_recent_already_closed_sell_when_order_fill_confirmed(self):
+        trade_log.log_trade({
+            "timestamp": "2026-05-04T15:00:00+00:00",
+            "mode": "paper",
+            "symbol": "AAPL",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "side": "buy",
+            "qty": "10",
+            "entry_price": "100",
+            "exit_price": "110",
+            "pnl_pct": "0.1",
+            "exit_reason": "take profit",
+            "order_id": "entry-aapl",
+            "status": "closed",
+        })
+        trade_log.log_trade({
+            "timestamp": "2026-05-04T15:00:05+00:00",
+            "mode": "paper",
+            "symbol": "AAPL",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "side": "sell",
+            "qty": "10",
+            "entry_price": "100",
+            "exit_price": "110",
+            "pnl_pct": "0.1",
+            "exit_reason": "take profit",
+            "order_id": "exit-aapl",
+            "status": "closed",
+        })
+
+        with mock.patch.object(
+            trade_log,
+            "_utc_now",
+            return_value=datetime(2026, 5, 4, 15, 1, tzinfo=timezone.utc),
+        ):
+            summary = trade_log.reconcile_open_trades_with_positions(
+                [
+                    SimpleNamespace(
+                        symbol="AAPL",
+                        qty="10",
+                        avg_entry_price="100",
+                        asset_class="AssetClass.US_EQUITY",
+                    )
+                ],
+                closed_orders=[
+                    SimpleNamespace(
+                        id="exit-aapl",
+                        symbol="AAPL",
+                        side="sell",
+                        status="filled",
+                        filled_qty="10",
+                        filled_avg_price="110",
+                        filled_at=datetime(2026, 5, 4, 15, 0, 5, tzinfo=timezone.utc),
+                    )
+                ],
+            )
+
+        rows = self._read_rows()
+        self.assertEqual(summary["reopened_rows"], 0)
+        self.assertEqual(summary["created_rows"], 0)
+        self.assertEqual(summary["marked_unfilled_sells"], 0)
         self.assertEqual(rows[0]["status"], "closed")
         self.assertEqual(rows[1]["status"], "closed")
 
@@ -505,17 +581,22 @@ class TradeLogTests(unittest.TestCase):
             "status": "closed",
         })
 
-        summary = trade_log.reconcile_open_trades_with_positions(
-            [
-                SimpleNamespace(
-                    symbol="DOGEUSD",
-                    qty="49601.834328721",
-                    avg_entry_price="0.102541439",
-                    asset_class="AssetClass.CRYPTO",
-                )
-            ],
-            closed_orders=[],
-        )
+        with mock.patch.object(
+            trade_log,
+            "_utc_now",
+            return_value=datetime(2026, 5, 4, 18, 43, tzinfo=timezone.utc),
+        ):
+            summary = trade_log.reconcile_open_trades_with_positions(
+                [
+                    SimpleNamespace(
+                        symbol="DOGEUSD",
+                        qty="49601.834328721",
+                        avg_entry_price="0.102541439",
+                        asset_class="AssetClass.CRYPTO",
+                    )
+                ],
+                closed_orders=[],
+            )
 
         rows = self._read_rows()
         self.assertEqual(summary["reopened_rows"], 0)
@@ -560,8 +641,8 @@ class TradeLogTests(unittest.TestCase):
             [
                 SimpleNamespace(
                     symbol="AAPL",
-                    qty="5",
-                    avg_entry_price="120",
+                    qty="10",
+                    avg_entry_price="100",
                     asset_class="AssetClass.US_EQUITY",
                 )
             ],
@@ -594,8 +675,8 @@ class TradeLogTests(unittest.TestCase):
         self.assertEqual(rows[0]["status"], "closed")
         self.assertEqual(rows[1]["status"], "closed")
         self.assertEqual(rows[2]["status"], "open")
-        self.assertEqual(rows[2]["qty"], "5")
-        self.assertEqual(rows[2]["entry_price"], "120")
+        self.assertEqual(rows[2]["qty"], "10")
+        self.assertEqual(rows[2]["entry_price"], "100")
         self.assertEqual(rows[2]["order_id"], "BROKER-RECONCILE")
 
     def test_reconcile_creates_missing_reentry_when_buy_order_is_outside_closed_order_window(self):
@@ -680,34 +761,39 @@ class TradeLogTests(unittest.TestCase):
             "status": "submitted",
         })
 
-        summary = trade_log.reconcile_open_trades_with_positions(
-            [
-                SimpleNamespace(
-                    symbol="AAPL",
-                    qty="10",
-                    avg_entry_price="100",
-                    asset_class="AssetClass.US_EQUITY",
-                )
-            ],
-            closed_orders=[
-                SimpleNamespace(
-                    id="exit-aapl",
-                    symbol="AAPL",
-                    side="sell",
-                    status="filled",
-                    filled_qty="10",
-                    filled_avg_price="110",
-                ),
-                SimpleNamespace(
-                    id="reentry-aapl",
-                    symbol="AAPL",
-                    side="buy",
-                    status="filled",
-                    filled_qty="10",
-                    filled_avg_price="100",
-                ),
-            ],
-        )
+        with mock.patch.object(
+            trade_log,
+            "_utc_now",
+            return_value=datetime(2026, 5, 4, 15, 1, tzinfo=timezone.utc),
+        ):
+            summary = trade_log.reconcile_open_trades_with_positions(
+                [
+                    SimpleNamespace(
+                        symbol="AAPL",
+                        qty="10",
+                        avg_entry_price="100",
+                        asset_class="AssetClass.US_EQUITY",
+                    )
+                ],
+                closed_orders=[
+                    SimpleNamespace(
+                        id="exit-aapl",
+                        symbol="AAPL",
+                        side="sell",
+                        status="filled",
+                        filled_qty="10",
+                        filled_avg_price="110",
+                    ),
+                    SimpleNamespace(
+                        id="reentry-aapl",
+                        symbol="AAPL",
+                        side="buy",
+                        status="filled",
+                        filled_qty="10",
+                        filled_avg_price="100",
+                    ),
+                ],
+            )
 
         rows = self._read_rows()
         self.assertEqual(summary["closed_filled_sells"], 1)

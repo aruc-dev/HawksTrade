@@ -12,7 +12,7 @@ import contextlib
 import logging
 import math
 from decimal import Decimal, InvalidOperation
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Iterable, Iterator
 
@@ -32,6 +32,7 @@ TRADE_LOG = BASE_DIR / CFG["reporting"]["trade_log_file"]
 log = logging.getLogger("trade_log")
 QTY_EPSILON = Decimal("0.00000001")
 PRICE_EPSILON = Decimal("0.000001")
+STALE_POSITION_SELL_GRACE = timedelta(minutes=15)
 ACTIVE_ENTRY_STATUSES = {"open", "partially_filled"}
 PENDING_EXIT_STATUSES = {"submitted", "partially_filled"}
 TERMINAL_EXIT_STATUSES = {"expired", "canceled", "cancelled", "rejected"}
@@ -292,6 +293,14 @@ def _residual_qty_after_closed_sells(
     residual = original_qty - sold_qty
     return residual if residual > QTY_EPSILON else Decimal("0")
 
+
+def _closed_sell_is_recent(row: dict) -> bool:
+    timestamp = _coerce_datetime(row.get("timestamp"))
+    if timestamp is None:
+        return False
+    age = _as_utc(_utc_now()) - timestamp
+    return timedelta(0) <= age <= STALE_POSITION_SELL_GRACE
+
 COLUMNS = [
     "timestamp", "mode", "symbol", "strategy", "asset_class",
     "side", "qty", "entry_price", "exit_price", "stop_loss",
@@ -510,6 +519,7 @@ def reconcile_open_trades_with_positions(
                 status == "filled" or status in TERMINAL_EXIT_STATUSES
             ):
                 filled_sell_orders[order_id] = order
+                confirmed_filled_sell_order_ids.add(order_id)
             elif status in TERMINAL_EXIT_STATUSES and filled_qty <= QTY_EPSILON:
                 terminal_unfilled_sell_orders[order_id] = order
 
@@ -534,7 +544,6 @@ def reconcile_open_trades_with_positions(
                 summary["marked_terminal_unfilled_sells"] += 1
                 continue
 
-            confirmed_filled_sell_order_ids.add(order_id)
             fill_price = _order_filled_avg_price(order)
             entry_price = _to_decimal(row.get("entry_price"), Decimal("0")) or Decimal("0")
             if fill_price is None:
@@ -596,7 +605,9 @@ def reconcile_open_trades_with_positions(
             ]
             latest_closed_sell = closed_sell_rows[-1][1] if closed_sell_rows else None
             has_reentry_after_closed_sell = False
+            latest_closed_sell_is_recent = False
             if latest_closed_sell is not None:
+                latest_closed_sell_is_recent = _closed_sell_is_recent(latest_closed_sell)
                 has_reentry_after_closed_sell = _has_buy_fill_after(
                     filled_buy_times_by_symbol,
                     normalized_broker_symbol,
@@ -606,6 +617,7 @@ def reconcile_open_trades_with_positions(
             if not open_buy_rows and latest_closed_sell is not None:
                 if (
                     not has_reentry_after_closed_sell
+                    and latest_closed_sell_is_recent
                     and (
                         str(latest_closed_sell.get("order_id", "") or "")
                         in confirmed_filled_sell_order_ids
@@ -626,21 +638,11 @@ def reconcile_open_trades_with_positions(
                         buy_row=latest_buy_row,
                         matching_rows=matching_rows,
                     )
-                    latest_buy_entry = _to_decimal(latest_buy_row.get("entry_price"))
-                    broker_matches_latest_lot = _decimals_close(
-                        broker_entry,
-                        latest_buy_entry,
-                        PRICE_EPSILON,
-                    ) or _decimals_close(
-                        broker_entry,
-                        _to_decimal(latest_closed_sell.get("entry_price")),
-                        PRICE_EPSILON,
-                    )
                     if (
                         has_reentry_after_closed_sell
                         or (
-                            not _decimals_close(residual_qty, broker_qty, QTY_EPSILON)
-                            and not broker_matches_latest_lot
+                            not latest_closed_sell_is_recent
+                            and not _decimals_close(residual_qty, broker_qty, QTY_EPSILON)
                         )
                     ):
                         buy_rows = []
