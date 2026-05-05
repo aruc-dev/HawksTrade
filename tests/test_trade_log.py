@@ -412,6 +412,141 @@ class TradeLogTests(unittest.TestCase):
         self.assertEqual(rows[1]["exit_reason"], "manually triggered sell")
         self.assertEqual(rows[1]["exit_price"], "0.110999953")
 
+    def test_reconcile_does_not_reopen_stale_position_when_sell_fill_has_no_active_buy(self):
+        trade_log.log_trade({
+            "timestamp": "2026-04-29T17:00:35+00:00",
+            "mode": "paper",
+            "symbol": "DOGE/USD",
+            "strategy": "range_breakout",
+            "asset_class": "crypto",
+            "side": "buy",
+            "qty": "49601.834328721",
+            "entry_price": "0.102541439",
+            "exit_price": "0.110999953",
+            "pnl_pct": "0.082489",
+            "exit_reason": "manually triggered sell",
+            "order_id": "entry-doge",
+            "status": "closed",
+        })
+        trade_log.log_trade({
+            "timestamp": "2026-05-04T18:42:52+00:00",
+            "mode": "paper",
+            "symbol": "DOGE/USD",
+            "strategy": "range_breakout",
+            "asset_class": "crypto",
+            "side": "sell",
+            "qty": "49601.834328721",
+            "entry_price": "0.102541439",
+            "exit_price": "0.110999953",
+            "pnl_pct": "0.082489",
+            "exit_reason": "manually triggered sell",
+            "order_id": "exit-doge",
+            "status": "submitted",
+        })
+
+        summary = trade_log.reconcile_open_trades_with_positions(
+            [
+                SimpleNamespace(
+                    symbol="DOGEUSD",
+                    qty="49601.834328721",
+                    avg_entry_price="0.102541439",
+                    asset_class="AssetClass.CRYPTO",
+                )
+            ],
+            closed_orders=[
+                SimpleNamespace(
+                    id="exit-doge",
+                    symbol="DOGEUSD",
+                    side="sell",
+                    status="filled",
+                    filled_qty="49601.834328721",
+                    filled_avg_price="0.110999953",
+                    filled_at=datetime(2026, 5, 4, 18, 42, 52, tzinfo=timezone.utc),
+                )
+            ],
+        )
+
+        rows = self._read_rows()
+        self.assertEqual(summary["closed_filled_sells"], 1)
+        self.assertEqual(summary["reopened_rows"], 0)
+        self.assertEqual(summary["created_rows"], 0)
+        self.assertEqual(rows[0]["status"], "closed")
+        self.assertEqual(rows[1]["status"], "closed")
+
+    def test_reconcile_allows_same_symbol_reentry_after_filled_sell(self):
+        trade_log.log_trade({
+            "timestamp": "2026-05-04T14:00:00+00:00",
+            "mode": "paper",
+            "symbol": "AAPL",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "side": "buy",
+            "qty": "10",
+            "entry_price": "100",
+            "exit_price": "110",
+            "pnl_pct": "0.1",
+            "exit_reason": "take profit",
+            "order_id": "entry-aapl",
+            "status": "closed",
+        })
+        trade_log.log_trade({
+            "timestamp": "2026-05-04T15:00:00+00:00",
+            "mode": "paper",
+            "symbol": "AAPL",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "side": "sell",
+            "qty": "10",
+            "entry_price": "100",
+            "exit_price": "110",
+            "pnl_pct": "0.1",
+            "exit_reason": "take profit",
+            "order_id": "exit-aapl",
+            "status": "submitted",
+        })
+
+        summary = trade_log.reconcile_open_trades_with_positions(
+            [
+                SimpleNamespace(
+                    symbol="AAPL",
+                    qty="5",
+                    avg_entry_price="120",
+                    asset_class="AssetClass.US_EQUITY",
+                )
+            ],
+            closed_orders=[
+                SimpleNamespace(
+                    id="exit-aapl",
+                    symbol="AAPL",
+                    side="sell",
+                    status="filled",
+                    filled_qty="10",
+                    filled_avg_price="110",
+                    filled_at=datetime(2026, 5, 4, 15, 0, tzinfo=timezone.utc),
+                ),
+                SimpleNamespace(
+                    id="reentry-aapl",
+                    symbol="AAPL",
+                    side="buy",
+                    status="filled",
+                    filled_qty="5",
+                    filled_avg_price="120",
+                    filled_at=datetime(2026, 5, 4, 15, 5, tzinfo=timezone.utc),
+                ),
+            ],
+        )
+
+        rows = self._read_rows()
+        self.assertEqual(summary["closed_filled_sells"], 1)
+        self.assertEqual(summary["reopened_rows"], 0)
+        self.assertEqual(summary["created_rows"], 1)
+        self.assertEqual(rows[0]["status"], "closed")
+        self.assertEqual(rows[1]["status"], "closed")
+        self.assertEqual(rows[2]["status"], "open")
+        self.assertEqual(rows[2]["qty"], "5")
+        self.assertEqual(rows[2]["entry_price"], "120")
+        self.assertEqual(rows[2]["order_id"], "BROKER-RECONCILE")
+
     def test_reconcile_marks_submitted_sell_expired_when_broker_order_expires_unfilled(self):
         trade_log.log_trade({
             "timestamp": "2026-04-28T19:05:48+00:00",

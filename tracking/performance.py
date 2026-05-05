@@ -31,6 +31,11 @@ def _utc_now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _weighted_return(pnl_dollars, cost_basis) -> float:
+    cost_basis = float(cost_basis)
+    return float(pnl_dollars) / cost_basis if cost_basis > 0 else 0.0
+
+
 def load_closed_trades() -> pd.DataFrame:
     with locked_trade_log(TRADE_LOG, exclusive=False) as trade_log_path:
         if not trade_log_path.exists():
@@ -133,24 +138,34 @@ def compute_summary(df: pd.DataFrame = None, open_positions: pd.DataFrame = None
         avg_loss      = df[df["pnl_pct"] <= 0]["pnl_pct"].mean() if losses else 0
         realized_pnl_dollars = df["realized_pnl_dollars"].sum()
         realized_cost_basis = float(df["realized_cost_basis"].sum())
-        realized_pnl_pct = (
-            float(realized_pnl_dollars) / realized_cost_basis
-            if realized_cost_basis > 0
-            else 0
-        )
+        realized_pnl_pct = _weighted_return(realized_pnl_dollars, realized_cost_basis)
 
         # Monthly P&L grouped
         df["month"] = df["timestamp"].dt.to_period("M")
-        monthly     = df.groupby("month")["pnl_pct"].sum().to_dict()
-        monthly     = {str(k): round(v, 4) for k, v in monthly.items()}
+        monthly_df = df.groupby("month").agg(
+            realized_pnl_dollars=("realized_pnl_dollars", "sum"),
+            realized_cost_basis=("realized_cost_basis", "sum"),
+        )
+        monthly = {
+            str(month): round(
+                _weighted_return(values["realized_pnl_dollars"], values["realized_cost_basis"]),
+                4,
+            )
+            for month, values in monthly_df.iterrows()
+        }
 
         # Strategy breakdown
-        by_strategy = df.groupby("strategy").agg(
-            trades=("pnl_pct", "count"),
-            total_pnl=("pnl_pct", "sum"),
-            realized_pnl_dollars=("realized_pnl_dollars", "sum"),
-            win_rate=("pnl_pct", lambda x: (x > 0).mean()),
-        ).round(4).to_dict(orient="index")
+        by_strategy = {}
+        for strategy, group in df.groupby("strategy"):
+            strategy_pnl = group["realized_pnl_dollars"].sum()
+            strategy_cost_basis = group["realized_cost_basis"].sum()
+            by_strategy[strategy] = {
+                "trades": int(len(group)),
+                "total_pnl": round(_weighted_return(strategy_pnl, strategy_cost_basis), 4),
+                "realized_pnl_dollars": round(float(strategy_pnl), 4),
+                "realized_cost_basis": round(float(strategy_cost_basis), 4),
+                "win_rate": round(float((group["pnl_pct"] > 0).mean()), 4),
+            }
 
     if open_positions.empty:
         open_count = 0
@@ -172,7 +187,7 @@ def compute_summary(df: pd.DataFrame = None, open_positions: pd.DataFrame = None
 
     total_pnl_dollars = float(realized_pnl_dollars + unrealized_pnl_dollars)
     total_cost_basis = realized_cost_basis + open_cost_basis
-    total_pnl_pct = total_pnl_dollars / total_cost_basis if total_cost_basis > 0 else 0.0
+    total_pnl_pct = _weighted_return(total_pnl_dollars, total_cost_basis)
 
     return {
         "generated_at":   _utc_now().isoformat(),

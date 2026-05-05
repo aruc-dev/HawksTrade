@@ -142,6 +142,9 @@ class PerformanceTests(unittest.TestCase):
         self.assertEqual(summary["realized_cost_basis"], 1000)
         self.assertEqual(summary["realized_pnl_pct"], 0.01)
         self.assertEqual(summary["total_pnl_pct"], 0.01)
+        self.assertEqual(summary["monthly_pnl"], {"2026-04": 0.01})
+        self.assertEqual(summary["by_strategy"]["momentum"]["total_pnl"], 0.01)
+        self.assertEqual(summary["by_strategy"]["momentum"]["realized_cost_basis"], 1000)
 
 
 if __name__ == "__main__":

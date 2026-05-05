@@ -125,6 +125,10 @@ def _order_id(order) -> str:
     return str(_order_value(order, "id", _order_value(order, "order_id", "")) or "")
 
 
+def _order_symbol(order) -> str:
+    return str(_order_value(order, "symbol", "") or "")
+
+
 def _order_filled_qty(order) -> Decimal:
     return _to_decimal(_order_value(order, "filled_qty", None), Decimal("0")) or Decimal("0")
 
@@ -133,12 +137,28 @@ def _order_filled_avg_price(order) -> Decimal | None:
     return _to_decimal(_order_value(order, "filled_avg_price", None))
 
 
+def _coerce_datetime(value) -> datetime | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return _as_utc(value)
+    try:
+        return _as_utc(datetime.fromisoformat(str(value).replace("Z", "+00:00")))
+    except ValueError:
+        return None
+
+
+def _order_filled_at(order) -> datetime | None:
+    return _coerce_datetime(_order_value(order, "filled_at", None))
+
+
 def _order_filled_at_iso(order) -> str | None:
     filled_at = _order_value(order, "filled_at", None)
+    parsed = _coerce_datetime(filled_at)
+    if parsed is not None:
+        return parsed.isoformat()
     if filled_at in (None, ""):
         return None
-    if isinstance(filled_at, datetime):
-        return _as_utc(filled_at).isoformat()
     return str(filled_at)
 
 
@@ -147,8 +167,9 @@ def _order_terminal_at_iso(order) -> str | None:
         value = _order_value(order, name, None)
         if value in (None, ""):
             continue
-        if isinstance(value, datetime):
-            return _as_utc(value).isoformat()
+        parsed = _coerce_datetime(value)
+        if parsed is not None:
+            return parsed.isoformat()
         return str(value)
     return None
 
@@ -215,6 +236,17 @@ def _apply_close_to_matching_buy_rows(
             break
 
     return updated, remaining, partial_close_logged
+
+
+def _has_buy_fill_after(
+    filled_buy_times_by_symbol: dict[str, list[datetime | None]],
+    symbol: str,
+    sell_time: datetime | None,
+) -> bool:
+    for buy_time in filled_buy_times_by_symbol.get(symbol, []):
+        if sell_time is None or buy_time is None or buy_time > sell_time:
+            return True
+    return False
 
 COLUMNS = [
     "timestamp", "mode", "symbol", "strategy", "asset_class",
@@ -410,10 +442,19 @@ def reconcile_open_trades_with_positions(
             "closed_stale_rows": 0,
         }
 
+        closed_order_list = list(closed_orders or [])
+        filled_buy_times_by_symbol = {}
+        for order in closed_order_list:
+            if _order_side(order) != "buy" or _order_filled_qty(order) <= QTY_EPSILON:
+                continue
+            symbol = _normalized_symbol(_order_symbol(order))
+            if symbol:
+                filled_buy_times_by_symbol.setdefault(symbol, []).append(_order_filled_at(order))
+
         filled_sell_orders = {}
         terminal_unfilled_sell_orders = {}
-        symbols_fully_closed_by_filled_sell = set()
-        for order in closed_orders or []:
+        fully_closed_sell_times_by_symbol = {}
+        for order in closed_order_list:
             if _order_side(order) != "sell":
                 continue
             order_id = _order_id(order)
@@ -476,8 +517,19 @@ def reconcile_open_trades_with_positions(
                 reason=reason,
                 closed_qty=filled_qty,
             )
-            if updated and not _has_active_buy_row(rows, row.get("symbol", "")):
-                symbols_fully_closed_by_filled_sell.add(_normalized_symbol(row.get("symbol", "")))
+            if not _has_active_buy_row(rows, row.get("symbol", "")):
+                symbol = _normalized_symbol(row.get("symbol", ""))
+                filled_time = _order_filled_at(order)
+                previous_time = fully_closed_sell_times_by_symbol.get(symbol)
+                if (
+                    symbol
+                    and (
+                        symbol not in fully_closed_sell_times_by_symbol
+                        or previous_time is None
+                        or (filled_time is not None and filled_time > previous_time)
+                    )
+                ):
+                    fully_closed_sell_times_by_symbol[symbol] = filled_time
             summary["closed_filled_sells"] += 1
 
         broker_positions = [
@@ -501,15 +553,23 @@ def reconcile_open_trades_with_positions(
                 (idx, row) for idx, row in matching_rows
                 if row.get("status") in ACTIVE_ENTRY_STATUSES and row.get("side") == "buy"
             ]
-            if (
-                not open_buy_rows
-                and _normalized_symbol(broker_symbol) in symbols_fully_closed_by_filled_sell
-            ):
-                continue
+            normalized_broker_symbol = _normalized_symbol(broker_symbol)
+            has_reentry_after_filled_sell = False
+            if not open_buy_rows and normalized_broker_symbol in fully_closed_sell_times_by_symbol:
+                sell_time = fully_closed_sell_times_by_symbol[normalized_broker_symbol]
+                has_reentry_after_filled_sell = _has_buy_fill_after(
+                    filled_buy_times_by_symbol,
+                    normalized_broker_symbol,
+                    sell_time,
+                )
+                if not has_reentry_after_filled_sell:
+                    continue
             buy_rows = [
                 (idx, row) for idx, row in matching_rows
                 if row.get("side") == "buy"
             ]
+            if has_reentry_after_filled_sell:
+                buy_rows = []
 
             if open_buy_rows:
                 keep_idx, keep_row = open_buy_rows[-1]
