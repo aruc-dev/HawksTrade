@@ -167,6 +167,10 @@ HawksTrade can optionally expose a **read-only** operational dashboard for:
 - recent closed trades and strategy summaries
 - Linux health status, cron/systemd execution health, and recent log issues
 
+Strategy summaries derive Avg/Trade, Avg Win, Avg Loss, Profit Factor, and Max
+Drawdown from closed sell rows. Restart the dashboard service after deploying
+dashboard updates so the Python API and static assets run from the same release.
+
 This dashboard is intentionally separate from trading execution:
 
 - it does **not** place trades, cancel orders, or change config
