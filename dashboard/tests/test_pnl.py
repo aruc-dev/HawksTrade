@@ -194,12 +194,22 @@ class StrategySummaryTests(unittest.TestCase):
         self.assertEqual(out[0]["wins"], 1)
         self.assertEqual(out[0]["losses"], 1)
         self.assertEqual(out[0]["win_rate"], 0.5)
+        self.assertEqual(out[0]["total_usd"], 0.0)
+        self.assertEqual(out[0]["avg_usd"], 0.0)
+        self.assertEqual(out[0]["avg_win_usd"], 100.0)
+        self.assertEqual(out[0]["avg_loss_usd"], -100.0)
+        self.assertEqual(out[0]["profit_factor"], 1.0)
+        self.assertFalse(out[0]["profit_factor_infinite"])
+        self.assertEqual(out[0]["max_drawdown_usd"], -100.0)
 
     def test_unknown_strategy_bucketed(self):
         now = datetime(2026, 4, 20, 12, 0, tzinfo=timezone.utc)
         row = _closed_sell("AAPL", "", 100, 110, 10, 0.10, now.isoformat())
         out = pnl.strategy_summary([row], lookback_days=30, now_utc=now)
         self.assertEqual(out[0]["strategy"], "unknown")
+        self.assertIsNone(out[0]["profit_factor"])
+        self.assertTrue(out[0]["profit_factor_infinite"])
+        self.assertEqual(out[0]["max_drawdown_usd"], 0.0)
 
 
 class RealizedAllTimeTests(unittest.TestCase):

@@ -240,7 +240,7 @@ def strategy_summary(
     lookback_days: int = 30,
     now_utc: Optional[datetime] = None,
 ) -> List[Dict[str, Any]]:
-    """Per-strategy win rate + trade count over the last N days.
+    """Per-strategy realized performance over the last N days.
 
     A 'trade' for this summary is one closed sell row.
     """
@@ -260,21 +260,50 @@ def strategy_summary(
         strategy = (row.get("strategy") or "unknown").strip()
         bucket = by_strategy.setdefault(
             strategy,
-            {"strategy": strategy, "count": 0, "wins": 0, "losses": 0, "total_usd": 0.0},
+            {
+                "strategy": strategy,
+                "count": 0,
+                "wins": 0,
+                "losses": 0,
+                "total_usd": 0.0,
+                "_gross_profit": 0.0,
+                "_gross_loss": 0.0,
+                "_trades": [],
+            },
         )
         bucket["count"] += 1
         pnl = realized_pnl_for_trade(row)
         bucket["total_usd"] += pnl
+        bucket["_trades"].append((_to_utc(dt), pnl))
         if pnl > 0:
             bucket["wins"] += 1
+            bucket["_gross_profit"] += pnl
         elif pnl < 0:
             bucket["losses"] += 1
+            bucket["_gross_loss"] += abs(pnl)
 
     out: List[Dict[str, Any]] = []
     for s in by_strategy.values():
         count = s["count"]
+        gross_profit = s.pop("_gross_profit")
+        gross_loss = s.pop("_gross_loss")
+        trades = sorted(s.pop("_trades"), key=lambda item: item[0])
+        cumulative = 0.0
+        peak = 0.0
+        max_drawdown = 0.0
+        for _, trade_pnl in trades:
+            cumulative += trade_pnl
+            peak = max(peak, cumulative)
+            max_drawdown = min(max_drawdown, cumulative - peak)
+
         s["win_rate"] = round(s["wins"] / count, 4) if count else 0.0
         s["total_usd"] = round(s["total_usd"], 2)
+        s["avg_usd"] = round(s["total_usd"] / count, 2) if count else 0.0
+        s["avg_win_usd"] = round(gross_profit / s["wins"], 2) if s["wins"] else 0.0
+        s["avg_loss_usd"] = round(-(gross_loss / s["losses"]), 2) if s["losses"] else 0.0
+        s["profit_factor"] = round(gross_profit / gross_loss, 2) if gross_loss > 0 else None
+        s["profit_factor_infinite"] = gross_profit > 0 and gross_loss == 0
+        s["max_drawdown_usd"] = round(max_drawdown, 2)
         out.append(s)
     out.sort(key=lambda x: x["strategy"])
     return out
