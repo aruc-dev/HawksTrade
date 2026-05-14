@@ -48,7 +48,7 @@ HawksTrade includes a high-fidelity historical simulator. The current tail-risk-
 | **EMA Crossover** | Crypto | 6/18 EMA, latest completed cross only, top-1 ranked signal, RSI 35-75, slope + volatility filters, 3-day drawdown guard, price/EMA confirmation, 2% daily-close max-loss exit, 16-day hold cap | Bullish EMA crossover with BTC regime gate and tighter same-scan concentration control. |
 | **Range Breakout** | Crypto | Enabled; 20-day high close breakout, 2.5x volume, rising EMA-50, RSI, 0.8%-8% breakout-extension, and upper-range close guards | Ranked Donchian-style breakout sleeve with failed-breakout and trend-loss exits. |
 
-**Crypto Universe**: `BTC/USD`, `SOL/USD`, `LINK/USD`, `DOGE/USD`, `LTC/USD`, `DOT/USD`.
+**Crypto Universe**: `BTC/USD`, `ETH/USD`, `SOL/USD`, `LINK/USD`, `XRP/USD`, `ADA/USD`, `AVAX/USD`, `DOGE/USD`, `LTC/USD`, `DOT/USD`, `UNI/USD`, `AAVE/USD`.
 
 ### Market Regime Filters
 

@@ -106,11 +106,17 @@ screener:
 crypto:
   scan_universe:
     - BTC/USD
+    - ETH/USD
     - SOL/USD
     - LINK/USD
+    - XRP/USD
+    - ADA/USD
+    - AVAX/USD
     - DOGE/USD
     - LTC/USD
     - DOT/USD
+    - UNI/USD
+    - AAVE/USD
 
 # --- STRATEGIES ---
 # Each strategy can be independently enabled/disabled and weighted.
