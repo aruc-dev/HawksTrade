@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 
@@ -138,6 +138,49 @@ class AppEndToEndTests(unittest.TestCase):
         for header in ("Avg/Trade", "Avg Win", "Avg Loss", "PF", "Max DD"):
             self.assertIn(header, r.text)
 
+    def test_strategy_endpoint_exposes_derived_metric_fields(self):
+        from dashboard import app as app_module
+
+        now = datetime.now(timezone.utc)
+        fake_rows = [
+            {
+                "timestamp": (now - timedelta(days=2)).isoformat(),
+                "symbol": "AAPL",
+                "strategy": "momentum",
+                "side": "sell",
+                "status": "closed",
+                "entry_price": "100",
+                "exit_price": "110",
+                "qty": "10",
+                "pnl_pct": "0.10",
+            },
+            {
+                "timestamp": (now - timedelta(days=1)).isoformat(),
+                "symbol": "MSFT",
+                "strategy": "momentum",
+                "side": "sell",
+                "status": "closed",
+                "entry_price": "100",
+                "exit_price": "95",
+                "qty": "10",
+                "pnl_pct": "-0.05",
+            },
+        ]
+        with patch.object(app_module, "read_trades", return_value=fake_rows):
+            r = self.client.get("/api/strategies/summary")
+
+        self.assertEqual(r.status_code, 200)
+        strategies = r.json()["strategies"]
+        self.assertEqual(len(strategies), 1)
+        st = strategies[0]
+        self.assertEqual(st["total_usd"], 50.0)
+        self.assertEqual(st["avg_usd"], 25.0)
+        self.assertEqual(st["avg_win_usd"], 100.0)
+        self.assertEqual(st["avg_loss_usd"], -50.0)
+        self.assertEqual(st["profit_factor"], 2.0)
+        self.assertFalse(st["profit_factor_infinite"])
+        self.assertEqual(st["max_drawdown_usd"], -50.0)
+
     def test_static_assets_served_in_local_mode(self):
         r = self.client.get("/static/app.js")
         self.assertEqual(r.status_code, 200)
@@ -153,6 +196,13 @@ class AppEndToEndTests(unittest.TestCase):
         self.assertIn('.ht-status-text[data-status="yellow"]', css)
         self.assertIn('.ht-status-text[data-status="red"]', css)
         self.assertIn("healthEl.dataset.status = healthStatus", js)
+
+    def test_dashboard_does_not_render_missing_strategy_metrics_as_zero(self):
+        js = self.client.get("/static/app.js").text
+        self.assertIn("moneyOrDash(st.avg_usd, true)", js)
+        self.assertIn("moneyOrDash(st.avg_win_usd, true)", js)
+        self.assertIn("moneyOrDash(st.avg_loss_usd, true)", js)
+        self.assertIn("moneyOrDash(st.max_drawdown_usd, true)", js)
 
     def test_favicon_does_not_generate_404_noise(self):
         r = self.client.get("/favicon.ico")
