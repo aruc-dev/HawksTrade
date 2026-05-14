@@ -39,7 +39,9 @@
     "CAT": "Industrials", "DE": "Industrials", "HON": "Industrials",
     "GE": "Industrials", "UPS": "Industrials", "FDX": "Industrials",
     "LMT": "Industrials", "RTX": "Industrials", "NOC": "Industrials",
-    "GD": "Industrials", "BA": "Industrials",
+    "GD": "Industrials", "BA": "Industrials", "ETN": "Industrials",
+    "VRT": "Industrials",
+    "FCX": "Materials",
     "PG": "Consumer Staples", "KO": "Consumer Staples",
     "PEP": "Consumer Staples", "WMT": "Consumer Staples",
     "COST": "Consumer Staples",
@@ -47,5 +49,8 @@
     "TMUS": "Communication Services", "SPOT": "Communication Services",
     "AMT": "Real Estate", "PLD": "Real Estate", "CCI": "Real Estate",
     "NEE": "Utilities", "DUK": "Utilities", "SO": "Utilities",
-    "SPY": "ETF_SPY", "QQQ": "ETF_QQQ", "ARKK": "ETF_ARKK"
+    "SPY": "ETF_SPY", "QQQ": "ETF_QQQ", "ARKK": "ETF_ARKK",
+    "XLK": "ETF_XLK", "SMH": "ETF_SMH", "IGV": "ETF_IGV",
+    "XLF": "ETF_XLF", "KRE": "ETF_KRE", "EEM": "ETF_EEM",
+    "EFA": "ETF_EFA", "IBIT": "ETF_IBIT", "BITO": "ETF_BITO"
 }
