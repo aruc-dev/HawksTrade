@@ -112,7 +112,7 @@ class SystemdTemplateTests(unittest.TestCase):
             "hawkstrade-stock-scan.timer": "OnCalendar=Mon..Fri *-*-* 13:35:00",
             "hawkstrade-full-scan.timer": "OnCalendar=Mon..Fri *-*-* 14..19:00:00",
             "hawkstrade-crypto-scan.timer": "OnCalendar=hourly",
-            "hawkstrade-risk-check.timer": "OnCalendar=Mon..Fri *-*-* 13:45:00",
+            "hawkstrade-risk-check.timer": "OnCalendar=Mon..Fri *-*-* 13:31:00",
             "hawkstrade-daily-report.timer": "OnCalendar=Mon..Fri *-*-* 20:30:00",
             "hawkstrade-weekly-report.timer": "OnCalendar=Mon *-*-* 12:00:00",
             "hawkstrade-health-check.timer": "OnCalendar=*-*-* *:00/15:00",
@@ -131,6 +131,7 @@ class SystemdTemplateTests(unittest.TestCase):
         text = (SYSTEMD_DIR / "hawkstrade-risk-check.timer").read_text(encoding="utf-8")
 
         for calendar_line in (
+            "OnCalendar=Mon..Fri *-*-* 13:31:00",
             "OnCalendar=Mon..Fri *-*-* 13:45:00",
             "OnCalendar=Mon..Fri *-*-* 14..19:15:00",
             "OnCalendar=Mon..Fri *-*-* 14..19:30:00",

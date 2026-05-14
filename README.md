@@ -63,7 +63,7 @@ Momentum, RSI Reversion, Gap-Up, EMA Crossover, and Range Breakout emit ATR-risk
 
 ### Momentum Exit Policy
 
-Momentum uses `exit_policy: profit_trailing` by default. After the 4-trading-day minimum hold, flat or losing trades are exited, profitable trades can continue, and a trailing stop exits trades that fall 4% from a post-entry peak after reaching a 6% peak gain. Backtests can compare policies with:
+Momentum uses `exit_policy: profit_trailing` by default. The trailing stop can exit before the 4-trading-day minimum hold once a position reaches a 6% peak gain and then falls 4% from that peak. After the minimum hold, flat or losing trades are exited and profitable trades can continue under the same trailing stop. Backtests can compare policies with:
 
 ```bash
 python3 scheduler/run_backtest.py --days 365 --exit-policy fixed_hold

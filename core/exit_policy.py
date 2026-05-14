@@ -52,32 +52,30 @@ def should_exit_for_hold(
     Policies:
       - fixed_hold: existing behavior; exit immediately once hold_days expires.
       - risk_only_baseline: benchmark behavior; hold_days never forces an exit.
-      - profit_trailing: after hold_days, exit losers/flat trades, let winners
-        run under a trailing stop and optional max_hold_days cap.
+      - profit_trailing: trailing protection can exit before hold_days once it
+        is armed; after hold_days, losers/flat trades exit and winners can run
+        under the same trailing stop plus an optional max_hold_days cap.
     """
     hold_days = strategy_cfg.get("hold_days")
-    if not hold_days or age_days < hold_days:
+    if not hold_days:
         return False, ""
+    hold_days = float(hold_days)
 
     if strategy != "momentum":
         # Non-momentum strategies use a simple fixed-hold exit.
         # The exit_policy field is intentionally ignored for these strategies;
         # only momentum has policy-aware (profit-trailing) exit logic.
+        if age_days < hold_days:
+            return False, ""
         return True, f"Hold {int(age_days)}d"
 
     policy = normalize_momentum_exit_policy(strategy_cfg.get("exit_policy"))
     if policy == "risk_only_baseline":
         return False, ""
     if policy == "fixed_hold":
+        if age_days < hold_days:
+            return False, ""
         return True, f"Hold {int(age_days)}d"
-
-    pnl_pct = (float(current_price) / float(entry_price)) - 1.0
-    profit_floor_pct = float(strategy_cfg.get("profit_floor_pct", 0.0))
-    if pnl_pct <= profit_floor_pct:
-        return (
-            True,
-            f"Momentum hold expired without profit: {pnl_pct:+.2%} <= {profit_floor_pct:+.2%}",
-        )
 
     peak = float(peak_price if peak_price is not None else current_price)
     peak_gain_pct = (peak / float(entry_price)) - 1.0
@@ -89,6 +87,17 @@ def should_exit_for_hold(
         return (
             True,
             f"Momentum trailing stop: {drawdown_from_peak:+.2%} from peak after {peak_gain_pct:+.2%} peak gain",
+        )
+
+    if age_days < hold_days:
+        return False, ""
+
+    pnl_pct = (float(current_price) / float(entry_price)) - 1.0
+    profit_floor_pct = float(strategy_cfg.get("profit_floor_pct", 0.0))
+    if pnl_pct <= profit_floor_pct:
+        return (
+            True,
+            f"Momentum hold expired without profit: {pnl_pct:+.2%} <= {profit_floor_pct:+.2%}",
         )
 
     max_hold_days = strategy_cfg.get("max_hold_days")

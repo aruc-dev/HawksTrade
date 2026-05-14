@@ -977,6 +977,112 @@ class TradeLogTests(unittest.TestCase):
         self.assertEqual(rows[1]["entry_price"], "0")
         self.assertEqual(rows[1]["pnl_pct"], "")
 
+    def test_reconcile_closes_stale_submitted_buy_when_order_not_open(self):
+        trade_log.log_trade({
+            "timestamp": "2026-05-01T13:31:00+00:00",
+            "mode": "paper",
+            "symbol": "COIN",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "side": "buy",
+            "qty": "1",
+            "entry_price": "200",
+            "order_id": "entry-coin",
+            "status": "submitted",
+        })
+
+        with mock.patch.object(
+            trade_log,
+            "_utc_now",
+            return_value=datetime(2026, 5, 1, 14, 0, tzinfo=timezone.utc),
+        ):
+            summary = trade_log.reconcile_open_trades_with_positions(
+                [],
+                closed_orders=[],
+                open_orders=[],
+            )
+
+        rows = self._read_rows()
+        self.assertEqual(summary["closed_stale_rows"], 1)
+        self.assertEqual(rows[0]["status"], "closed")
+        self.assertEqual(rows[0]["exit_price"], "200.0")
+        self.assertEqual(rows[0]["pnl_pct"], "0.0")
+        self.assertEqual(rows[0]["exit_reason"], "broker reconciliation: no broker position")
+
+    def test_reconcile_keeps_submitted_buy_when_broker_order_still_open(self):
+        trade_log.log_trade({
+            "timestamp": "2026-05-01T13:31:00+00:00",
+            "mode": "paper",
+            "symbol": "COIN",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "side": "buy",
+            "qty": "1",
+            "entry_price": "200",
+            "order_id": "entry-coin",
+            "status": "submitted",
+        })
+
+        with mock.patch.object(
+            trade_log,
+            "_utc_now",
+            return_value=datetime(2026, 5, 1, 14, 0, tzinfo=timezone.utc),
+        ):
+            summary = trade_log.reconcile_open_trades_with_positions(
+                [],
+                closed_orders=[],
+                open_orders=[SimpleNamespace(id="entry-coin", side="buy", status="new", symbol="COIN")],
+            )
+
+        rows = self._read_rows()
+        self.assertEqual(summary["closed_stale_rows"], 0)
+        self.assertEqual(rows[0]["status"], "submitted")
+
+    def test_reconcile_promotes_filled_submitted_buy_then_closes_without_broker_position(self):
+        trade_log.log_trade({
+            "timestamp": "2026-05-01T13:31:00+00:00",
+            "mode": "paper",
+            "symbol": "SOL/USD",
+            "strategy": "range_breakout",
+            "asset_class": "crypto",
+            "side": "buy",
+            "qty": "90",
+            "entry_price": "88",
+            "order_id": "entry-sol",
+            "status": "submitted",
+        })
+
+        with mock.patch.object(
+            trade_log,
+            "_utc_now",
+            return_value=datetime(2026, 5, 1, 15, 0, tzinfo=timezone.utc),
+        ):
+            summary = trade_log.reconcile_open_trades_with_positions(
+                [],
+                closed_orders=[
+                    SimpleNamespace(
+                        id="entry-sol",
+                        symbol="SOLUSD",
+                        side="buy",
+                        status="filled",
+                        filled_qty="91.4",
+                        filled_avg_price="89.2",
+                        filled_at=datetime(2026, 5, 1, 13, 35, tzinfo=timezone.utc),
+                    )
+                ],
+                open_orders=[],
+            )
+
+        rows = self._read_rows()
+        self.assertEqual(summary["opened_filled_buys"], 1)
+        self.assertEqual(summary["closed_stale_rows"], 1)
+        self.assertEqual(rows[0]["status"], "closed")
+        self.assertEqual(rows[0]["qty"], "91.4")
+        self.assertEqual(rows[0]["entry_price"], "89.2")
+        self.assertEqual(rows[0]["exit_price"], "89.2")
+        self.assertEqual(rows[0]["pnl_pct"], "0.0")
+        self.assertEqual(rows[0]["exit_reason"], "broker reconciliation: no broker position")
+
     def test_get_trade_age_days_returns_business_days_for_stocks(self):
         # Entry Monday 2024-01-08, "today" = Wednesday 2024-01-10 → 2 business days
         fixed_now = datetime(2024, 1, 10, 12, 0, 0, tzinfo=timezone.utc)

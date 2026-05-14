@@ -34,6 +34,7 @@ QTY_EPSILON = Decimal("0.00000001")
 PRICE_EPSILON = Decimal("0.000001")
 STALE_POSITION_SELL_GRACE = timedelta(minutes=15)
 ACTIVE_ENTRY_STATUSES = {"open", "partially_filled"}
+PENDING_ENTRY_STATUSES = {"submitted", "partially_filled"}
 PENDING_EXIT_STATUSES = {"submitted", "partially_filled"}
 TERMINAL_EXIT_STATUSES = {"expired", "canceled", "cancelled", "rejected"}
 BROKER_RECONCILIATION_PREFIX = "broker reconciliation:"
@@ -301,6 +302,14 @@ def _closed_sell_is_recent(row: dict) -> bool:
     age = _as_utc(_utc_now()) - timestamp
     return timedelta(0) <= age <= STALE_POSITION_SELL_GRACE
 
+
+def _row_is_recent(row: dict) -> bool:
+    timestamp = _coerce_datetime(row.get("timestamp"))
+    if timestamp is None:
+        return False
+    age = _as_utc(_utc_now()) - timestamp
+    return timedelta(0) <= age <= STALE_POSITION_SELL_GRACE
+
 COLUMNS = [
     "timestamp", "mode", "symbol", "strategy", "asset_class",
     "side", "qty", "entry_price", "exit_price", "stop_loss",
@@ -473,6 +482,7 @@ def mark_trade_closed(
 def reconcile_open_trades_with_positions(
     positions: Iterable,
     closed_orders: Iterable | None = None,
+    open_orders: Iterable | None = None,
 ) -> dict:
     """
     Align data/trades.csv open buy rows with broker-reported open positions.
@@ -491,18 +501,44 @@ def reconcile_open_trades_with_positions(
             "created_rows": 0,
             "marked_unfilled_sells": 0,
             "marked_terminal_unfilled_sells": 0,
+            "opened_filled_buys": 0,
+            "marked_terminal_unfilled_buys": 0,
             "closed_filled_sells": 0,
             "closed_stale_rows": 0,
         }
 
         closed_order_list = list(closed_orders or [])
+        open_orders_provided = open_orders is not None
+        open_order_list = list(open_orders or [])
+        open_order_ids = {_order_id(order) for order in open_order_list if _order_id(order)}
         filled_buy_times_by_symbol = {}
+        filled_buy_orders = {}
+        terminal_unfilled_buy_orders = {}
+        recent_filled_buy_order_ids = set()
         for order in closed_order_list:
             if _order_side(order) != "buy" or _order_filled_qty(order) <= QTY_EPSILON:
                 continue
             symbol = _normalized_symbol(_order_symbol(order))
             if symbol:
                 filled_buy_times_by_symbol.setdefault(symbol, []).append(_order_filled_at(order))
+            order_id = _order_id(order)
+            if order_id:
+                filled_buy_orders[order_id] = order
+                filled_at = _order_filled_at(order)
+                if filled_at is not None:
+                    age = _as_utc(_utc_now()) - filled_at
+                    if timedelta(0) <= age <= STALE_POSITION_SELL_GRACE:
+                        recent_filled_buy_order_ids.add(order_id)
+
+        for order in closed_order_list:
+            if _order_side(order) != "buy":
+                continue
+            order_id = _order_id(order)
+            if not order_id:
+                continue
+            status = _order_status(order)
+            if status in TERMINAL_EXIT_STATUSES and _order_filled_qty(order) <= QTY_EPSILON:
+                terminal_unfilled_buy_orders[order_id] = order
 
         filled_sell_orders = {}
         terminal_unfilled_sell_orders = {}
@@ -522,6 +558,42 @@ def reconcile_open_trades_with_positions(
                 confirmed_filled_sell_order_ids.add(order_id)
             elif status in TERMINAL_EXIT_STATUSES and filled_qty <= QTY_EPSILON:
                 terminal_unfilled_sell_orders[order_id] = order
+
+        for row in rows:
+            if row.get("side") != "buy" or row.get("status") not in PENDING_ENTRY_STATUSES:
+                continue
+            order_id = str(row.get("order_id", "") or "")
+            if not order_id:
+                continue
+
+            order = filled_buy_orders.get(order_id)
+            if order is not None:
+                filled_qty = _order_filled_qty(order)
+                if filled_qty > QTY_EPSILON:
+                    filled_at = _order_filled_at_iso(order)
+                    fill_price = _order_filled_avg_price(order)
+                    if fill_price is None:
+                        fill_price = _to_decimal(row.get("entry_price"), Decimal("0")) or Decimal("0")
+                    if filled_at:
+                        row["timestamp"] = filled_at
+                    row["qty"] = _fmt_decimal(filled_qty)
+                    row["entry_price"] = _fmt_decimal(fill_price)
+                    _clear_exit_fields(row)
+                    summary["opened_filled_buys"] += 1
+                    continue
+
+            order = terminal_unfilled_buy_orders.get(order_id)
+            if order is None:
+                continue
+            status = _order_status(order)
+            terminal_at = _order_terminal_at_iso(order)
+            if terminal_at:
+                row["timestamp"] = terminal_at
+            row["status"] = status
+            row["exit_price"] = ""
+            row["pnl_pct"] = ""
+            row["exit_reason"] = f"broker reconciliation: entry order {status} unfilled"
+            summary["marked_terminal_unfilled_buys"] += 1
 
         for row in rows:
             if row.get("side") != "sell" or row.get("status") not in PENDING_EXIT_STATUSES:
@@ -727,7 +799,20 @@ def reconcile_open_trades_with_positions(
             summary["created_rows"] += 1
 
         for row in rows:
-            if row.get("status") not in ACTIVE_ENTRY_STATUSES or row.get("side") != "buy":
+            if row.get("side") != "buy":
+                continue
+            status = row.get("status")
+            order_id = str(row.get("order_id", "") or "")
+            active_entry = status in ACTIVE_ENTRY_STATUSES
+            stale_submitted_entry = (
+                status == "submitted"
+                and open_orders_provided
+                and (not order_id or order_id not in open_order_ids)
+                and not _row_is_recent(row)
+            )
+            if not active_entry and not stale_submitted_entry:
+                continue
+            if order_id in recent_filled_buy_order_ids and _row_is_recent(row):
                 continue
             normalized = str(row.get("symbol", "")).replace("/", "").upper()
             if normalized and normalized not in broker_symbols:

@@ -307,6 +307,53 @@ class OrderExecutorTests(unittest.TestCase):
         self.assertEqual(rows[0]["qty"], "1.5")
         self.assertEqual(rows[0]["entry_price"], "101.25")
 
+    def test_enter_position_logs_wider_stock_atr_stop(self):
+        order = SimpleNamespace(
+            id="entry-filled",
+            status="filled",
+            filled_qty="1",
+            filled_avg_price="100",
+        )
+
+        with (
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 1}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=1),
+            patch.object(order_executor.ac, "place_limit_order", return_value=order),
+        ):
+            result = order_executor.enter_position(
+                "MSFT",
+                "gap_up",
+                dry_run=False,
+                atr_stop_price=90.0,
+            )
+
+        self.assertEqual(result["stop_loss"], 90.0)
+
+    def test_enter_position_logs_wider_crypto_custom_stop(self):
+        order = SimpleNamespace(
+            id="entry-filled",
+            status="filled",
+            filled_qty="1",
+            filled_avg_price="100",
+        )
+
+        with (
+            patch.object(order_executor.ac, "get_crypto_latest_price", return_value=100),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 1}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=1),
+            patch.object(order_executor.ac, "place_limit_order", return_value=order),
+        ):
+            result = order_executor.enter_position(
+                "BTC/USD",
+                "range_breakout",
+                asset_class="crypto",
+                dry_run=False,
+                atr_stop_price=90.0,
+            )
+
+        self.assertEqual(result["stop_loss"], 90.0)
+
     def test_enter_position_logs_partial_buy_with_filled_quantity_only(self):
         order = SimpleNamespace(
             id="entry-partial",

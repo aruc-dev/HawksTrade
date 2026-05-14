@@ -315,9 +315,16 @@ def _run_backtest_risk_exits(sim: "BacktestSimulator", *, market_open: bool) -> 
 def _effective_stop_for_backtest(pos: dict) -> tuple[float, str]:
     global_stop = rm.stop_loss_price(pos["entry_price"])
     custom_stop = pos.get("custom_stop_price")
+    if custom_stop is not None:
+        try:
+            custom_stop = float(custom_stop)
+        except (TypeError, ValueError):
+            custom_stop = None
     if custom_stop is not None and not math.isfinite(custom_stop):
         custom_stop = None
-    if custom_stop is not None and custom_stop < global_stop:
+    if custom_stop is None:
+        return global_stop, "Stop-loss"
+    if custom_stop < global_stop:
         return custom_stop, "Custom stop-loss"
     return global_stop, "Stop-loss"
 

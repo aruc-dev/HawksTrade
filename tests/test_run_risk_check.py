@@ -80,6 +80,7 @@ class RunRiskCheckTests(unittest.TestCase):
             patch.object(run_risk_check.rm, "daily_loss_exceeded", return_value=False),
             patch.object(run_risk_check, "get_open_trades", return_value=[]),
             patch.object(run_risk_check.ac, "get_all_positions", return_value=[]),
+            patch.object(run_risk_check.ac, "get_open_orders", return_value=[]),
             patch.object(run_risk_check.ac, "get_closed_orders", return_value=[]),
             patch.object(run_risk_check, "safe_reconcile", return_value={"positions": 0}) as safe_reconcile,
         ):
@@ -87,6 +88,7 @@ class RunRiskCheckTests(unittest.TestCase):
 
         safe_reconcile.assert_called_once_with(
             positions=[],
+            open_orders=[],
             closed_orders=[],
             context="run_risk_check.post_run",
             logger=run_risk_check.log,
@@ -308,6 +310,7 @@ class RunRiskCheckTests(unittest.TestCase):
                 "exit_position",
                 return_value={"symbol": "AAPL", "status": "closed"},
             ) as exit_position,
+            patch.object(run_risk_check.ac, "get_open_orders", return_value=[]),
             patch.object(run_risk_check.ac, "get_closed_orders", return_value=[]),
             patch.object(run_risk_check, "safe_reconcile", return_value={"positions": 0}),
         ):
@@ -336,6 +339,7 @@ class RunRiskCheckTests(unittest.TestCase):
                 "exit_position",
                 return_value={"symbol": "AAPL", "status": "submitted"},
             ),
+            patch.object(run_risk_check.ac, "get_open_orders", return_value=[]),
             patch.object(run_risk_check.ac, "get_closed_orders", return_value=[]),
             patch.object(run_risk_check, "safe_reconcile", return_value={"positions": 1}),
         ):

@@ -456,6 +456,29 @@ class TestMomentumExitPolicy(unittest.TestCase):
         self.assertTrue(should_exit)
         self.assertIn("trailing stop", reason)
 
+    def test_profit_trailing_can_exit_before_min_hold_once_armed(self):
+        should_exit, reason = should_exit_for_hold(
+            strategy="momentum",
+            age_days=2,
+            entry_price=100,
+            current_price=101,
+            peak_price=108,
+            strategy_cfg=self._cfg(),
+        )
+        self.assertTrue(should_exit)
+        self.assertIn("trailing stop", reason)
+
+    def test_profit_trailing_does_not_exit_early_loser_before_min_hold(self):
+        should_exit, _ = should_exit_for_hold(
+            strategy="momentum",
+            age_days=2,
+            entry_price=100,
+            current_price=99,
+            peak_price=104,
+            strategy_cfg=self._cfg(),
+        )
+        self.assertFalse(should_exit)
+
     def test_risk_only_baseline_ignores_hold_days(self):
         should_exit, _ = should_exit_for_hold(
             strategy="momentum",

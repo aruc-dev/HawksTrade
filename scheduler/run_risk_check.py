@@ -134,8 +134,22 @@ def _reconcile_trade_log_after_run(
     if dry_run:
         log.info("Trade-log reconciliation skipped during dry run.")
         return
+    open_orders = None
     closed_orders = None
     if positions is not None:
+        try:
+            open_orders = ac.get_open_orders()
+        except Exception as exc:
+            info = ac.classify_alpaca_error(exc)
+            log.warning(
+                "Could not fetch open broker orders for reconciliation: %s "
+                "| category=%s retryable=%s status_code=%s",
+                exc,
+                info.category,
+                info.retryable,
+                info.status_code or "",
+                exc_info=True,
+            )
         try:
             closed_orders = ac.get_closed_orders()
         except Exception as exc:
@@ -151,6 +165,7 @@ def _reconcile_trade_log_after_run(
             )
     summary = safe_reconcile(
         positions=positions,
+        open_orders=open_orders,
         closed_orders=closed_orders,
         context=context,
         logger=log,
@@ -510,10 +525,8 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
         observed_prices[symbol] = current_price
 
         # Use the ATR/custom stop recorded at entry only when it actually differs
-        # from what the global stop would have been — i.e. the strategy widened
-        # the stop below the global floor.  If the trade log just holds the global
-        # stop (no ATR override was applied), pass None so should_exit_position
-        # uses the live global percentage and avoids mislabelling exits.
+        # from what the global stop would have been. A lower custom stop widens
+        # the trade's breathing room and remains intentional strategy risk.
         custom_stop: float | None = None
         if trade:
             try:
@@ -526,7 +539,12 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
                             custom_stop = parsed
             except (ValueError, TypeError):
                 pass
-        should_exit, reason = rm.should_exit_position(symbol, entry_price, current_price, custom_stop_price=custom_stop)
+        should_exit, reason = rm.should_exit_position(
+            symbol,
+            entry_price,
+            current_price,
+            custom_stop_price=custom_stop,
+        )
         if should_exit:
             log.info(f"EXIT triggered for {symbol}: {reason}")
             exit_symbol = price_symbol if asset_class == "crypto" else symbol

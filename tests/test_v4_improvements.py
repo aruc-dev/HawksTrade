@@ -289,7 +289,7 @@ class V4ImprovementsTests(unittest.TestCase):
 
     # ── should_exit_position with custom_stop_price ───────────────────────────
 
-    def test_custom_stop_widens_stop_for_volatile_stock(self):
+    def test_custom_stop_widens_stop_when_allowed(self):
         # Entry=100, global stop=96.5 (3.5%), ATR stop=90 (10%) — ATR stop governs
         entry, current = 100.0, 92.0  # 8% below — below ATR stop, above global
         should_exit, reason = rm.should_exit_position(
@@ -297,6 +297,30 @@ class V4ImprovementsTests(unittest.TestCase):
         )
         # 92 > 90 (ATR stop) — should NOT exit
         self.assertFalse(should_exit)
+
+    def test_custom_stop_widening_can_be_disabled_for_stocks(self):
+        entry, current = 100.0, 92.0
+        should_exit, reason = rm.should_exit_position(
+            "TEST",
+            entry,
+            current,
+            custom_stop_price=90.0,
+            allow_custom_stop_widening=False,
+        )
+        self.assertTrue(should_exit)
+        self.assertIn("Stop-loss", reason)
+
+    def test_tighter_custom_stop_still_applies_when_widening_disabled(self):
+        entry, current = 100.0, 98.0
+        should_exit, reason = rm.should_exit_position(
+            "TEST",
+            entry,
+            current,
+            custom_stop_price=99.0,
+            allow_custom_stop_widening=False,
+        )
+        self.assertTrue(should_exit)
+        self.assertIn("Custom stop-loss", reason)
 
     def test_custom_stop_triggers_when_breached(self):
         entry, current = 100.0, 89.0  # below ATR stop of 90
