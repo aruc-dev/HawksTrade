@@ -19,8 +19,9 @@ intentions. The next timer run is the retry boundary.
 - `hawkstrade-stock-scan.service` and `.timer` run the 9:35 AM ET stock-only scan.
 - `hawkstrade-full-scan.service` and `.timer` run hourly full scans.
 - `hawkstrade-crypto-scan.service` and `.timer` run hourly crypto-only scans.
-- `hawkstrade-risk-check.service` and `.timer` run market-hours risk checks at
-  :15, :30, and :45, with the :00 slot reserved for the hourly full scan.
+- `hawkstrade-risk-check.service` and `.timer` run a 9:31 AM ET check before
+  the stock scan, then market-hours risk checks at :15, :30, and :45, with the
+  :00 slot reserved for the hourly full scan.
 - `hawkstrade-daily-report.service` and `.timer` run weekday daily reports.
 - `hawkstrade-weekly-report.service` and `.timer` run Monday weekly reports.
 - `hawkstrade-health-check.service` and `.timer` run the Linux health check every

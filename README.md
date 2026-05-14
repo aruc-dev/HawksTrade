@@ -48,7 +48,7 @@ HawksTrade includes a high-fidelity historical simulator. The current tail-risk-
 | **EMA Crossover** | Crypto | 6/18 EMA, latest completed cross only, top-1 ranked signal, RSI 35-75, slope + volatility filters, 3-day drawdown guard, price/EMA confirmation, 2% daily-close max-loss exit, 16-day hold cap | Bullish EMA crossover with BTC regime gate and tighter same-scan concentration control. |
 | **Range Breakout** | Crypto | Enabled; 20-day high close breakout, 2.5x volume, rising EMA-50, RSI, 0.8%-8% breakout-extension, and upper-range close guards | Ranked Donchian-style breakout sleeve with failed-breakout and trend-loss exits. |
 
-**Crypto Universe**: `BTC/USD`, `SOL/USD`, `LINK/USD`, `DOGE/USD`, `LTC/USD`, `DOT/USD`.
+**Crypto Universe**: `BTC/USD`, `ETH/USD`, `SOL/USD`, `LINK/USD`, `XRP/USD`, `ADA/USD`, `AVAX/USD`, `DOGE/USD`, `LTC/USD`, `DOT/USD`, `UNI/USD`, `AAVE/USD`.
 
 ### Market Regime Filters
 
@@ -63,7 +63,7 @@ Momentum, RSI Reversion, Gap-Up, EMA Crossover, and Range Breakout emit ATR-risk
 
 ### Momentum Exit Policy
 
-Momentum uses `exit_policy: profit_trailing` by default. After the 4-trading-day minimum hold, flat or losing trades are exited, profitable trades can continue, and a trailing stop exits trades that fall 4% from a post-entry peak after reaching a 6% peak gain. Backtests can compare policies with:
+Momentum uses `exit_policy: profit_trailing` by default. The trailing stop can exit before the 4-trading-day minimum hold once a position reaches a 6% peak gain and then falls 4% from that peak. After the minimum hold, flat or losing trades are exited and profitable trades can continue under the same trailing stop. Backtests can compare policies with:
 
 ```bash
 python3 scheduler/run_backtest.py --days 365 --exit-policy fixed_hold

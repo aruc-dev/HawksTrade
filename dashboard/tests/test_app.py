@@ -135,6 +135,8 @@ class AppEndToEndTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn("text/html", r.headers["content-type"])
         self.assertIn("HawksTrade", r.text)
+        for header in ("Avg/Trade", "Avg Win", "Avg Loss", "PF", "Max DD"):
+            self.assertIn(header, r.text)
 
     def test_static_assets_served_in_local_mode(self):
         r = self.client.get("/static/app.js")

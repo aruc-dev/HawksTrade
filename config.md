@@ -198,11 +198,17 @@ Recommended: keep enabled for the growth profile. Use `--no-screener` in backtes
 crypto:
   scan_universe:
     - BTC/USD
+    - ETH/USD
     - SOL/USD
     - LINK/USD
+    - XRP/USD
+    - ADA/USD
+    - AVAX/USD
     - DOGE/USD
     - LTC/USD
     - DOT/USD
+    - UNI/USD
+    - AAVE/USD
 ```
 
 These pairs are used by the crypto strategies. Crypto scans can run 24/7.

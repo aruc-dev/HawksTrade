@@ -286,6 +286,9 @@ body {
 .ht-table .font-mono, .ht-table .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
+.ht-wide-table {
+  min-width: 860px;
+}
 
 /* ── Details / collapsible ─────────────────────────────────────── */
 .ht-details {

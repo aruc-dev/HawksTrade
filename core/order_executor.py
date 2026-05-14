@@ -9,6 +9,7 @@ Writes every trade to the trade log.
 from __future__ import annotations
 
 import logging
+import math
 import os
 from datetime import datetime, timezone
 from typing import Optional, List, Dict
@@ -226,6 +227,20 @@ def _entry_failure_result(symbol: str, strategy: str, asset_class: str, exc: Exc
     }
 
 
+def _effective_entry_stop_loss(entry_price: float, atr_stop_price: float | None) -> float:
+    global_sl = rm.stop_loss_price(entry_price)
+    if atr_stop_price is None:
+        return global_sl
+    try:
+        custom_stop = float(atr_stop_price)
+    except (TypeError, ValueError):
+        return global_sl
+    if not math.isfinite(custom_stop) or custom_stop <= 0 or custom_stop >= entry_price:
+        return global_sl
+
+    return custom_stop if custom_stop < global_sl else global_sl
+
+
 def _exit_failure_result(
     symbol: str,
     strategy: str,
@@ -365,9 +380,7 @@ def enter_position(
         action_status = _entry_log_status(order, qty, filled_qty)
         logged_qty = filled_qty if filled_qty > 0 else qty
         entry_price = _order_filled_avg_price(order, price) if filled_qty > 0 else price
-        global_sl = rm.stop_loss_price(entry_price)
-        # Use ATR stop when it widens the stop below the global floor; otherwise global governs.
-        sl = atr_stop_price if (atr_stop_price is not None and atr_stop_price < global_sl) else global_sl
+        sl = _effective_entry_stop_loss(entry_price, atr_stop_price)
         tp = rm.take_profit_price(entry_price)
         trade = {
             "timestamp":        _utc_now().isoformat(),

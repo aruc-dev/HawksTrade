@@ -16,6 +16,11 @@
     const v = Number(n || 0) * 100;
     return v.toFixed(2) + "%";
   };
+  const ratio = (n, infinite) => {
+    if (infinite) return "∞";
+    if (n === null || n === undefined || n === "") return "—";
+    return Number(n || 0).toFixed(2) + "x";
+  };
   const fmtQty = (n) => Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 4 });
   const fmtHoldDays = (n) => {
     if (n === null || n === undefined || n === "") return "—";
@@ -168,13 +173,21 @@
     // Strategies
     const stratBody = $("strategies-tbody");
     stratBody.innerHTML = (s.strategies || []).map((st) => {
+      const pfClass = st.profit_factor_infinite || Number(st.profit_factor || 0) >= 1
+        ? "text-emerald-400"
+        : "text-rose-400";
       return "<tr>" +
         "<td class=\"text-left\">" + escape(st.strategy) + "</td>" +
         "<td class=\"text-right mono\">" + (st.count || 0) + "</td>" +
         "<td class=\"text-right mono\">" + pct(st.win_rate) + "</td>" +
+        "<td class=\"text-right mono " + colorFor(st.avg_usd) + "\">" + money(st.avg_usd, true) + "</td>" +
+        "<td class=\"text-right mono " + colorFor(st.avg_win_usd) + "\">" + money(st.avg_win_usd, true) + "</td>" +
+        "<td class=\"text-right mono " + colorFor(st.avg_loss_usd) + "\">" + money(st.avg_loss_usd, true) + "</td>" +
+        "<td class=\"text-right mono " + pfClass + "\">" + ratio(st.profit_factor, st.profit_factor_infinite) + "</td>" +
+        "<td class=\"text-right mono " + colorFor(st.max_drawdown_usd) + "\">" + money(st.max_drawdown_usd, true) + "</td>" +
         "<td class=\"text-right mono " + colorFor(st.total_usd) + "\">" + money(st.total_usd, true) + "</td>" +
       "</tr>";
-    }).join("") || "<tr><td colspan=\"4\" class=\"ht-empty-cell\">No trades in window</td></tr>";
+    }).join("") || "<tr><td colspan=\"9\" class=\"ht-empty-cell\">No trades in window</td></tr>";
 
     // Trades
     const trBody = $("trades-tbody");

@@ -43,16 +43,38 @@ def _best_effort_fetch_orders(fetcher, *, label: str) -> list:
         return []
 
 
+def _best_effort_fetch_orders_with_status(fetcher, *, label: str) -> tuple[list, bool]:
+    try:
+        return list(fetcher()), True
+    except Exception as exc:
+        info = ac.classify_alpaca_error(exc)
+        log.warning(
+            "Failed to fetch %s; continuing reconciliation without them: %s "
+            "| category=%s retryable=%s status_code=%s",
+            label,
+            exc,
+            info.category,
+            info.retryable,
+            info.status_code or "",
+            exc_info=True,
+        )
+        return [], False
+
+
 def run(
     positions: Iterable | None = None,
     open_orders: Iterable | None = None,
     closed_orders: Iterable | None = None,
 ) -> dict:
     fetched_positions = positions is None
+    open_orders_known = open_orders is not None
     if positions is None:
         positions = ac.get_all_positions()
     if open_orders is None and fetched_positions:
-        open_orders = _best_effort_fetch_orders(ac.get_open_orders, label="open broker orders")
+        open_orders, open_orders_known = _best_effort_fetch_orders_with_status(
+            ac.get_open_orders,
+            label="open broker orders",
+        )
     elif open_orders is None:
         open_orders = []
     if closed_orders is None and fetched_positions:
@@ -62,7 +84,11 @@ def run(
     positions = list(positions)
     open_orders = list(open_orders)
     closed_orders = list(closed_orders)
-    summary = reconcile_open_trades_with_positions(positions, closed_orders=closed_orders)
+    summary = reconcile_open_trades_with_positions(
+        positions,
+        closed_orders=closed_orders,
+        open_orders=open_orders if open_orders_known else None,
+    )
     intent_summary = reconcile_order_intents(open_orders=open_orders, closed_orders=closed_orders)
     summary = {**summary, "updated_order_intents": intent_summary["updated_rows"]}
     log.info(

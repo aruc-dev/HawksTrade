@@ -60,14 +60,14 @@ exceed SPY's 5-day return by a configured amount. It is set to `0.0` in the vali
 default because the stricter alpha gate reduced the latest 12-month result.
 
 **Exit:** Three-layer policy:
+- A trailing stop can activate before the minimum hold once peak gain reaches
+  6%; price must then not fall more than 4% from that peak.
 - After the minimum 4-day hold, flat or losing trades exit immediately.
-- Profitable trades run under a trailing stop that activates once the peak gain
-  reaches 6%; price must then not fall more than 4% from that peak.
 - A hard 20-day cap closes any position that never pulled back to trigger the trail.
 
 **Stop:** The ATR-based stop is written to the trade log as `stop_loss` and used by
 the live risk check as the custom stop input, giving volatile stocks more breathing
-room while the global 3.5% stop remains the absolute floor.
+room while the global 3.5% stop remains the baseline fixed-percentage stop.
 
 **Key parameters (`config/config.yaml`):**
 

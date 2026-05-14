@@ -100,6 +100,7 @@ Unit=hawkstrade-full-scan.service
                 timer_dir / "hawkstrade-risk-check.timer",
                 """
 [Timer]
+OnCalendar=Mon..Fri *-*-* 13:31:00
 OnCalendar=Mon..Fri *-*-* 13:45:00
 OnCalendar=Mon..Fri *-*-* 14..19:15:00
 OnCalendar=Mon..Fri *-*-* 14..19:30:00
@@ -129,6 +130,7 @@ Unit=hawkstrade-health-check.service
             self.assertEqual(
                 [job.pattern.cron_text for job in by_key["risk_check"]],
                 [
+                    "31 13 * * 1-5",
                     "45 13 * * 1-5",
                     "15 14-19 * * 1-5",
                     "30 14-19 * * 1-5",

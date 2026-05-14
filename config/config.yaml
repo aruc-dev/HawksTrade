@@ -46,37 +46,42 @@ trading:
 # --- STOCK UNIVERSE ---
 stocks:
   scan_universe:                 # Stocks screened for opportunities each cycle
+    - SPY
+    - QQQ
+    - XLK
+    - SMH
+    - IGV
+    - XLF
+    - KRE
+    - EEM
+    - EFA
+    - IBIT
+    - BITO
     - AAPL
     - MSFT
     - GOOGL
     - AMZN
     - NVDA
-    - META
+    - AVGO
+    - TSM
+    - ORCL
     - TSLA
     - AMD
-    - NFLX
-    - JPM
-    - BAC
-    - GS
-    - XOM
-    - CVX
-    - SPY
-    - QQQ
-    - ARKK
-    - SOFI
-    - PLTR
-    - COIN
-    - ORCL
-    - CRM
-    - SOUN
-    - AI
-    - IONQ
-    - SMCI
-    - ARM
-    - AVGO
+    - MRVL
+    - MU
     - INTC
-    - TSM
-    - IBM
+    - ARM
+    - LRCX
+    - AMAT
+    - UBER
+    - JPM
+    - GS
+    - COIN
+    - FCX
+    - ETN
+    - VRT
+    - PANW
+    - CRWD
 
 # --- DYNAMIC UNIVERSE SCREENER ---
 screener:
@@ -101,11 +106,17 @@ screener:
 crypto:
   scan_universe:
     - BTC/USD
+    - ETH/USD
     - SOL/USD
     - LINK/USD
+    - XRP/USD
+    - ADA/USD
+    - AVAX/USD
     - DOGE/USD
     - LTC/USD
     - DOT/USD
+    - UNI/USD
+    - AAVE/USD
 
 # --- STRATEGIES ---
 # Each strategy can be independently enabled/disabled and weighted.

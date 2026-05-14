@@ -39,7 +39,7 @@ class ReconcileTradeLogTests(unittest.TestCase):
         get_all_positions.assert_not_called()
         get_open_orders.assert_not_called()
         get_closed_orders.assert_not_called()
-        reconcile.assert_called_once_with(positions, closed_orders=[])
+        reconcile.assert_called_once_with(positions, closed_orders=[], open_orders=None)
         reconcile_intents.assert_called_once_with(open_orders=[], closed_orders=[])
         self.assertEqual(result, {**summary, "updated_order_intents": 0})
 
@@ -108,7 +108,7 @@ class ReconcileTradeLogTests(unittest.TestCase):
         ):
             result = reconcile_trade_log.run()
 
-        reconcile.assert_called_once_with(positions, closed_orders=[])
+        reconcile.assert_called_once_with(positions, closed_orders=[], open_orders=open_orders)
         reconcile_intents.assert_called_once_with(open_orders=open_orders, closed_orders=[])
         self.assertEqual(result["updated_order_intents"], 1)
         self.assertTrue(any("continuing reconciliation without them" in message for message in logs.output))

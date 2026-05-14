@@ -313,20 +313,27 @@ def should_exit_position(
     entry_price: float,
     current_price: float,
     custom_stop_price: float | None = None,
+    allow_custom_stop_widening: bool = True,
 ) -> tuple:
     """
     Returns (should_exit: bool, reason: str).
 
     custom_stop_price: when provided (for example, an ATR stop computed at entry),
-    the effective stop is min(global_stop, custom_stop_price). Both are absolute
-    price levels below entry; min() selects whichever is further below entry,
-    widening the trade's breathing room. The global stop governs whenever the
-    custom stop is tighter (higher price) or absent.
+    the effective stop is selected from the global fixed-percentage stop and the
+    custom absolute price level. By default, custom stops may widen risk by using
+    the lower stop price. Set allow_custom_stop_widening=False when the global
+    stop must remain the maximum permitted loss; tighter custom stops are still
+    honored in that mode.
     """
     global_sl = stop_loss_price(entry_price)
-    if custom_stop_price is not None and not math.isfinite(custom_stop_price):
+    if custom_stop_price is not None and (not math.isfinite(custom_stop_price) or custom_stop_price <= 0):
         custom_stop_price = None
-    sl = min(global_sl, custom_stop_price) if custom_stop_price is not None else global_sl
+    if custom_stop_price is None:
+        sl = global_sl
+    elif allow_custom_stop_widening:
+        sl = min(global_sl, custom_stop_price)
+    else:
+        sl = max(global_sl, custom_stop_price)
     tp = take_profit_price(entry_price)
 
     if current_price <= sl:
