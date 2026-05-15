@@ -435,6 +435,9 @@ def _make_bar_fetcher(sim: "BacktestSimulator"):
                 mask = df.index <= sim.current_date
                 hist_df = df[mask].tail(limit)
                 if timeframe in {"1Min", "5Min", "15Min"}:
+                    sim.synthetic_minute_proxy_used = True
+                    sim.synthetic_minute_proxy_symbols.add(s)
+                    sim.synthetic_minute_proxy_timeframes.add(timeframe)
                     # Daily historical backtests do not have real minute bars.
                     # Provide a synthetic 9:35 ET opening bar so gap_up can be
                     # evaluated at the session open without using the full daily
@@ -446,11 +449,12 @@ def _make_bar_fetcher(sim: "BacktestSimulator"):
                     )
                     hist_df = df[session_mask].tail(1).copy()
                     if not hist_df.empty:
+                        hist_df = hist_df.astype({"volume": "float64"})
                         open_price = hist_df.iloc[-1]["open"]
                         hist_df.loc[:, "high"] = open_price
                         hist_df.loc[:, "low"] = open_price
                         hist_df.loc[:, "close"] = open_price
-                        hist_df.loc[:, "volume"] = hist_df["volume"] * (5.0 / 390.0)
+                        hist_df.loc[:, "volume"] = hist_df["volume"].astype(float) * (5.0 / 390.0)
                         hist_df.index = pd.DatetimeIndex([
                             _gap_up_backtest_scan_time(sim.current_date)
                         ])
@@ -517,6 +521,34 @@ def _compute_daily_sharpe(df_curve: pd.DataFrame) -> float:
     return float((returns.mean() / std) * math.sqrt(365))
 
 
+def _backtest_execution_notes(cfg: dict, sim: "BacktestSimulator" | None = None) -> list[str]:
+    notes = []
+    gap_up_enabled = cfg.get("strategies", {}).get("gap_up", {}).get("enabled", False)
+    if gap_up_enabled:
+        proxy_used = bool(getattr(sim, "synthetic_minute_proxy_used", False)) if sim else True
+        symbols = sorted(getattr(sim, "synthetic_minute_proxy_symbols", set())) if sim else []
+        symbol_suffix = f" Symbols: {', '.join(symbols[:8])}." if symbols else ""
+        if proxy_used:
+            notes.append(
+                "Gap-Up opening-window backtest uses a synthetic 9:35 ET daily-open proxy, "
+                "not real minute bars; Gap-Up fills are not intraday-validated."
+                f"{symbol_suffix}"
+            )
+        else:
+            notes.append(
+                "Gap-Up was enabled, but no opening-window minute replay was exercised in this run."
+            )
+    return notes
+
+
+def _format_execution_notes(notes: list[str]) -> str:
+    if not notes:
+        return ""
+    lines = ["### Backtest Data Semantics"]
+    lines.extend(f"- {note}" for note in notes)
+    return "\n".join(lines) + "\n\n"
+
+
 class BacktestSimulator:
     def __init__(self, initial_fund=10000.0, cost_model: dict | None = None):
         self.portfolio_value = initial_fund
@@ -529,6 +561,9 @@ class BacktestSimulator:
         self.cost_model = _normalise_cost_model(cost_model)
         self.pending_entry_prices = {}
         self.pending_exit_prices = {}
+        self.synthetic_minute_proxy_used = False
+        self.synthetic_minute_proxy_symbols = set()
+        self.synthetic_minute_proxy_timeframes = set()
 
     def get_portfolio_value(self):
         pos_value = 0
@@ -1069,6 +1104,7 @@ def run_backtest(
         profit_factor = _compute_profit_factor(df)
         daily_sharpe = _compute_daily_sharpe(df_curve)
         return_pct = (final_val / initial_fund) - 1
+        execution_notes = _backtest_execution_notes(cfg, sim)
 
         report = f"### Backtest Results ({days} Days)\n"
         report += f"- **Final Value**: ${final_val:,.2f} ({ (final_val/initial_fund-1):+.2%})\n"
@@ -1080,6 +1116,7 @@ def run_backtest(
         report += f"- **Momentum Exit Policy**: {cfg['strategies']['momentum']['exit_policy']}\n"
         report += f"- **Screener**: {'enabled' if screener_enabled else 'disabled'}\n\n"
         report += f"- **Enabled Strategies**: {', '.join(_enabled_strategy_names(cfg))}\n\n"
+        report += _format_execution_notes(execution_notes)
         if any(sim.cost_model.values()):
             report += (
                 f"- **Cost Model**: slippage={sim.cost_model['slippage_bps']:.2f} bps, "
@@ -1122,14 +1159,19 @@ def run_backtest(
                 "screener_enabled": screener_enabled,
                 "enabled_strategies": _enabled_strategy_names(cfg),
                 "cost_model": dict(sim.cost_model),
+                "execution_notes": execution_notes,
             },
             "quarterly": quarterly_data,
         }
         return result if return_result else report
 
     final_val = sim.get_portfolio_value()
+    execution_notes = _backtest_execution_notes(cfg, sim)
+    report = "No trades executed."
+    if execution_notes:
+        report += "\n\n" + _format_execution_notes(execution_notes).rstrip()
     result = {
-        "report": "No trades executed.",
+        "report": report,
         "stats": {
             "days": days,
             "initial_fund": initial_fund,
@@ -1143,6 +1185,7 @@ def run_backtest(
             "screener_enabled": screener_enabled,
             "enabled_strategies": _enabled_strategy_names(cfg),
             "cost_model": dict(sim.cost_model),
+            "execution_notes": execution_notes,
         },
         "quarterly": [],
     }

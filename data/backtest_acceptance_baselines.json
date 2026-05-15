@@ -1,0 +1,17 @@
+{
+  "expected_checks": [
+    "data_quality_self_test",
+    "lookahead_self_test",
+    "warmup_self_test",
+    "trade_replay_self_test",
+    "gap_up_intraday"
+  ],
+  "gap_up_intraday": {
+    "message": "Gap-Up opening-window logic used a synthetic 9:35 ET daily-open proxy; Gap-Up fills are not intraday-validated.",
+    "mode": "daily_open_proxy",
+    "severity": "warning",
+    "validated": false
+  },
+  "status": "pass",
+  "version": 1
+}
