@@ -2010,6 +2010,20 @@ def render_html_report(report: HealthReport) -> str:
                 """
             )
 
+    protection_lock_rows = []
+    for lock in report.active_protection_locks:
+        protection_lock_rows.append(
+            f"""
+            <tr class="yellow">
+              <td><code>{esc(lock.get('lock_type'))}</code></td>
+              <td>{esc(lock.get('scope'))}</td>
+              <td><code>{esc(lock.get('key'))}</code></td>
+              <td><code>{esc(lock.get('expires_at'))}</code></td>
+              <td>{esc(lock.get('reason'))}</td>
+            </tr>
+            """
+        )
+
     price_failure_rows = []
     for failure in report.price_failures:
         source = failure.price_symbol or failure.symbol
@@ -2319,6 +2333,24 @@ def render_html_report(report: HealthReport) -> str:
         </thead>
         <tbody>
           {''.join(position_rows) if position_rows else '<tr><td colspan="6" class="muted">No open positions detected.</td></tr>'}
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Protection Locks</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Scope</th>
+            <th>Key</th>
+            <th>Expires</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          {''.join(protection_lock_rows) if protection_lock_rows else '<tr><td colspan="5" class="muted">No active protection locks.</td></tr>'}
         </tbody>
       </table>
     </section>

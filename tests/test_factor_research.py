@@ -57,6 +57,21 @@ class FactorResearchTests(unittest.TestCase):
             self.assertIn(column, dataset.columns)
         self.assertEqual(sorted(dataset["symbol"].unique().tolist()), ["AAPL", "MSFT"])
 
+    def test_volume_ratio_uses_prior_completed_twenty_bars(self):
+        bars = _bars(periods=25)
+        for index, bar in enumerate(bars):
+            bar.volume = 100 if index < 20 else 1000
+
+        dataset, issues = rf.build_factor_dataset({"AAPL": bars}, horizons=(1,))
+        last_ratio = float(dataset[dataset["symbol"] == "AAPL"]["volume_ratio"].iloc[20])
+
+        self.assertEqual(issues, [])
+        self.assertAlmostEqual(last_ratio, 10.0)
+
+    def test_forward_return_horizons_must_be_positive(self):
+        with self.assertRaisesRegex(ValueError, "positive integers"):
+            rf.build_factor_dataset({"AAPL": _bars()}, horizons=(0, 5))
+
     def test_compute_factor_report_has_metrics_and_splits(self):
         dataset, issues = rf.build_factor_dataset(
             {

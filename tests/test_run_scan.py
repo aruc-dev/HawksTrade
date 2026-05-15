@@ -732,22 +732,72 @@ class RunScanTests(unittest.TestCase):
                 return_value={"SPY": [object()] * 252, "QQQ": [object()] * 51},
             ),
             patch.object(run_scan, "get_open_symbols", side_effect=[["AAPL"], ["AAPL"]]),
+            patch.object(run_scan, "_pending_entry_symbols", return_value={}),
             patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
             patch.object(run_scan, "get_stock_universe", return_value=["MSFT"]),
             patch.object(run_scan, "STOCK_STRATEGIES", [FakeMomentum()]),
             patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "safe_reconcile", return_value={}),
             patch.object(run_scan, "print_snapshot"),
             patch.object(run_scan.oe, "enter_position") as enter_position,
             patch.object(run_scan.oe, "exit_position", return_value={"symbol": "AAPL", "status": "dry_run"}) as exit_position,
         ):
-            run_scan.run(run_stocks=True, run_crypto=False, dry_run=True, marker=marker)
+            run_scan.run(run_stocks=True, run_crypto=False, dry_run=False, marker=marker)
 
         self.assertEqual(marker.status, "error")
         self.assertTrue(any(error["stage"] == "protection_refresh" for error in marker.errors))
         enter_position.assert_not_called()
         exit_position.assert_called_once_with(
-            "AAPL", reason="exit stale trade", asset_class="stock", dry_run=True
+            "AAPL", reason="exit stale trade", asset_class="stock", dry_run=False
         )
+
+    def test_dry_run_reads_protection_locks_without_refreshing_trade_log(self):
+        class FakeProtectionManager:
+            enabled = True
+
+            def __init__(self):
+                self.active_calls = 0
+                self.refresh_calls = 0
+
+            def active_locks(self):
+                self.active_calls += 1
+                return []
+
+            def refresh_from_trade_log(self):
+                self.refresh_calls += 1
+                raise AssertionError("dry-run must not refresh protection locks")
+
+            def evaluate_entry(self, symbol, strategy):
+                return SimpleNamespace(allowed=True)
+
+        class FakeMomentum:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def scan(self, universe, **kwargs):
+                return [{"symbol": "AAPL", "action": "buy"}]
+
+        fake_protection = FakeProtectionManager()
+        with (
+            patch.object(run_scan.ProtectionManager, "from_config", return_value=fake_protection),
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(
+                run_scan.ac,
+                "get_stock_bars",
+                return_value={"SPY": [object()] * 252, "QQQ": [object()] * 51},
+            ),
+            patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "get_stock_universe", return_value=["AAPL"]),
+            patch.object(run_scan, "STOCK_STRATEGIES", [FakeMomentum()]),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+            patch.object(run_scan.oe, "enter_position", return_value={"symbol": "AAPL", "status": "dry_run"}),
+        ):
+            run_scan.run(run_stocks=True, run_crypto=False, dry_run=True)
+
+        self.assertEqual(fake_protection.active_calls, 1)
+        self.assertEqual(fake_protection.refresh_calls, 0)
 
     def test_planned_crypto_entries_count_against_crypto_cap(self):
         class FakeCrypto:

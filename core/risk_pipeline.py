@@ -37,6 +37,13 @@ def evaluate_entry_target(target: PortfolioTarget, context: EntryRiskContext) ->
             reason=f"Unsupported entry action: {target.side}",
         )
 
+    if not str(target.symbol or "").strip():
+        return RiskDecision.block(
+            target,
+            code="missing_symbol",
+            reason="Missing target symbol",
+        )
+
     normalized = context.normalize_symbol(target.symbol)
     if normalized in context.planned_symbols:
         return RiskDecision.block(

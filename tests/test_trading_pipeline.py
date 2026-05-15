@@ -50,6 +50,19 @@ class TradingPipelineTests(unittest.TestCase):
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.code, "duplicate_planned_symbol")
 
+    def test_entry_risk_blocks_empty_symbol(self):
+        target = build_portfolio_target(signal_from_strategy_dict(
+            {"action": "buy"},
+            strategy_name="momentum",
+            asset_class="stock",
+        ))
+
+        decision = evaluate_entry_target(target, EntryRiskContext())
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.code, "missing_symbol")
+        self.assertIsNone(build_order_plan(decision))
+
     def test_entry_risk_blocks_when_planned_cap_is_reached(self):
         calls = []
         target = build_portfolio_target(signal_from_strategy_dict(

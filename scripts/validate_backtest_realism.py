@@ -19,6 +19,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Iterable
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -33,6 +34,7 @@ REQUIRED_OHLCV_COLUMNS = ("open", "high", "low", "close", "volume")
 ACCEPTANCE_CHECKS = (
     "data_quality_self_test",
     "lookahead_self_test",
+    "strategy_lookahead_smoke",
     "warmup_self_test",
     "trade_replay_self_test",
     "backtest_window_replay",
@@ -380,6 +382,9 @@ def compare_trade_replay(
     *,
     price_tolerance_pct: float = 0.001,
     pnl_tolerance_pct: float = 0.001,
+    quantity_tolerance_pct: float = 0.001,
+    pnl_dollars_tolerance_pct: float = 0.001,
+    notional_tolerance_pct: float = 0.001,
 ) -> list[RealismFinding]:
     """Compare broker/paper rows with simulated rows for replay acceptance."""
     check = "trade_replay"
@@ -401,9 +406,15 @@ def compare_trade_replay(
     for key in sorted(set(expected) & set(simulated)):
         left = expected[key]
         right = simulated[key]
-        for field, tolerance_pct in (("exit_price", price_tolerance_pct), ("pnl_pct", pnl_tolerance_pct)):
-            left_value = _coerce_float(left.get(field))
-            right_value = _coerce_float(right.get(field))
+        for field, aliases, tolerance_pct in (
+            ("exit_price", ("exit_price",), price_tolerance_pct),
+            ("pnl_pct", ("pnl_pct",), pnl_tolerance_pct),
+            ("qty", ("qty", "quantity", "filled_qty"), quantity_tolerance_pct),
+            ("pnl_dollars", ("pnl_dollars", "pnl", "realized_pnl"), pnl_dollars_tolerance_pct),
+            ("notional", ("notional", "exit_notional"), notional_tolerance_pct),
+        ):
+            left_value = _first_numeric_field(left, aliases)
+            right_value = _first_numeric_field(right, aliases)
             if left_value is None and right_value is None:
                 continue
             if left_value is None or right_value is None:
@@ -427,6 +438,14 @@ def compare_trade_replay(
     return findings
 
 
+def _first_numeric_field(row: dict, aliases: Iterable[str]) -> float | None:
+    for alias in aliases:
+        value = _coerce_float(row.get(alias))
+        if value is not None:
+            return value
+    return None
+
+
 def _fixture_ohlcv_frame() -> pd.DataFrame:
     index = pd.date_range("2026-01-02", periods=8, freq="B", tz="UTC")
     return pd.DataFrame(
@@ -439,6 +458,110 @@ def _fixture_ohlcv_frame() -> pd.DataFrame:
         },
         index=index,
     )
+
+
+def _strategy_fixture_frame() -> pd.DataFrame:
+    base_index = pd.date_range("2026-01-02", periods=35, freq="B", tz="UTC")
+    closes = [100.0] * 27 + [100.0, 100.0, 100.0, 104.0, 108.0, 112.0, 116.0, 120.0]
+    volumes = [1000.0] * 34 + [3000.0]
+    base = pd.DataFrame(
+        {
+            "open": [close - 0.5 for close in closes],
+            "high": [close + 1.0 for close in closes],
+            "low": [close - 1.0 for close in closes],
+            "close": closes,
+            "volume": volumes,
+        },
+        index=base_index,
+    )
+    future_index = pd.date_range(base_index[-1] + pd.tseries.offsets.BDay(), periods=5, freq="B", tz="UTC")
+    future = pd.DataFrame(
+        {
+            "open": [200.0] * len(future_index),
+            "high": [205.0] * len(future_index),
+            "low": [195.0] * len(future_index),
+            "close": [202.0] * len(future_index),
+            "volume": [500.0] * len(future_index),
+        },
+        index=future_index,
+    )
+    return pd.concat([base, future])
+
+
+def _bars_from_frame(frame: pd.DataFrame) -> list[SimpleNamespace]:
+    bars = []
+    for timestamp, row in frame.iterrows():
+        bars.append(
+            SimpleNamespace(
+                timestamp=timestamp.to_pydatetime(),
+                open=float(row["open"]),
+                high=float(row["high"]),
+                low=float(row["low"]),
+                close=float(row["close"]),
+                volume=float(row["volume"]),
+            )
+        )
+    return bars
+
+
+def _momentum_signal_set_from_history(history: pd.DataFrame, *, as_of: pd.Timestamp) -> list[dict]:
+    from strategies import momentum as momentum_module
+
+    cutoff = pd.Timestamp(as_of)
+
+    def provider(symbols, timeframe="1Day", limit=None, **_kwargs):
+        if timeframe != "1Day":
+            return {}
+        limited = history.loc[history.index <= cutoff]
+        if limit is not None:
+            limited = limited.tail(int(limit))
+        return {str(symbol): _bars_from_frame(limited) for symbol in symbols}
+
+    config_patch = {
+        "enabled": True,
+        "top_n": 1,
+        "min_momentum_pct": 0.08,
+        "min_alpha_pct": 0.0,
+        "volume_confirmation_mode": "daily",
+        "volume_spike_ratio": 1.2,
+        "breadth_green_threshold": 0.50,
+        "breadth_red_threshold": 0.25,
+        "min_breadth_coverage_pct": 0.0,
+        "yellow_max_positions": 1,
+        "atr_period": 14,
+        "atr_multiplier": 1.2,
+        "risk_per_trade_pct": 0.01,
+        "max_positions_per_sector": 10,
+    }
+    strategy = momentum_module.MomentumStrategy()
+    with (
+        patch.object(momentum_module.ac, "get_stock_bars", side_effect=provider),
+        patch.object(momentum_module.rm, "market_regime_ok", return_value=True),
+        patch.object(momentum_module.rm, "market_breadth_pct", return_value=0.75),
+        patch.object(momentum_module.ac, "get_portfolio_value", return_value=10000.0),
+        patch.object(momentum_module, "get_sector", return_value="Technology"),
+        patch.dict(momentum_module.SCFG, config_patch, clear=False),
+    ):
+        signals = strategy.scan(
+            ["AAPL"],
+            regime_bars=provider(["SPY"], timeframe="1Day", limit=60),
+            current_time=cutoff.to_pydatetime(),
+            existing_symbols=[],
+        )
+    rows = []
+    for signal in signals:
+        rows.append(
+            {
+                "date": cutoff.date().isoformat(),
+                "strategy": str(signal.get("strategy") or "momentum"),
+                "symbol": str(signal.get("symbol") or ""),
+                "side": str(signal.get("action") or "buy"),
+                "entry_price": signal.get("entry_price"),
+                "atr_stop_price": signal.get("atr_stop_price"),
+                "atr_risk_qty": signal.get("atr_risk_qty"),
+            }
+        )
+    return rows
 
 
 def _self_test_data_quality() -> list[RealismFinding]:
@@ -493,6 +616,34 @@ def _self_test_lookahead() -> list[RealismFinding]:
     return []
 
 
+def _self_test_strategy_lookahead() -> list[RealismFinding]:
+    check = "strategy_lookahead_smoke"
+    history = _strategy_fixture_frame()
+    as_of = history.index[34]
+    walk_forward_history = history.loc[history.index <= as_of]
+
+    try:
+        full_history_signals = _momentum_signal_set_from_history(history, as_of=as_of)
+        walk_forward_signals = _momentum_signal_set_from_history(walk_forward_history, as_of=as_of)
+    except Exception as exc:
+        return [_finding(check, ERROR, "Actual strategy lookahead smoke test failed to run", error=str(exc))]
+
+    if not full_history_signals:
+        return [_finding(check, ERROR, "Actual strategy lookahead smoke test produced no baseline signals")]
+
+    drift = compare_signal_sets(full_history_signals, walk_forward_signals)
+    if drift:
+        return [
+            _finding(
+                check,
+                ERROR,
+                "Actual strategy full-history and walk-forward signals drifted",
+                drift=[asdict(finding) for finding in drift],
+            )
+        ]
+    return [_finding(check, INFO, "Actual strategy full-history and walk-forward signals matched")]
+
+
 def _self_test_warmup() -> list[RealismFinding]:
     stable = {"ema_20": {60: 101.0, 120: 101.00001, 240: 101.0}}
     if check_warmup_stability(stable, tolerance_pct=0.001):
@@ -505,7 +656,16 @@ def _self_test_warmup() -> list[RealismFinding]:
 
 
 def _self_test_replay() -> list[RealismFinding]:
-    broker = [{"symbol": "AAPL", "exit_date": "2026-01-05", "exit_price": 101.0, "pnl_pct": 0.01}]
+    broker = [
+        {
+            "symbol": "AAPL",
+            "exit_date": "2026-01-05",
+            "exit_price": 101.0,
+            "pnl_pct": 0.01,
+            "qty": 10.0,
+            "pnl": 10.0,
+        }
+    ]
     simulated = [dict(broker[0])]
     if compare_trade_replay(broker, simulated):
         return [_finding("trade_replay_self_test", ERROR, "Identical replay fixture unexpectedly failed")]
@@ -513,6 +673,9 @@ def _self_test_replay() -> list[RealismFinding]:
     mismatched = [dict(broker[0], exit_price=103.0)]
     if not compare_trade_replay(broker, mismatched, price_tolerance_pct=0.001):
         return [_finding("trade_replay_self_test", ERROR, "Replay mismatch fixture was not detected")]
+    mismatched_qty = [dict(broker[0], qty=11.0)]
+    if not compare_trade_replay(broker, mismatched_qty, quantity_tolerance_pct=0.001):
+        return [_finding("trade_replay_self_test", ERROR, "Replay quantity mismatch fixture was not detected")]
     return []
 
 
@@ -678,6 +841,7 @@ def run_acceptance(
     findings: list[RealismFinding] = []
     findings.extend(_self_test_data_quality())
     findings.extend(_self_test_lookahead())
+    findings.extend(_self_test_strategy_lookahead())
     findings.extend(_self_test_warmup())
     findings.extend(_self_test_replay())
     findings.extend(_self_test_backtest_window(days))
@@ -754,6 +918,8 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "version": 1,
                 "status": result["status"],
+                "errors": result["errors"],
+                "warnings": result["warnings"],
                 "gap_up_intraday": result["gap_up_intraday"],
                 "expected_checks": [
                     *ACCEPTANCE_CHECKS,

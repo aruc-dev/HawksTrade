@@ -54,6 +54,25 @@ order_governor:
   max_notional_usd: null
   max_notional_pct: null
 
+# --- PROTECTIONS ---
+# Optional entry lock manager. Defaults disabled to preserve existing behavior.
+# When enabled, failed refreshes block new entries fail-closed while exits continue.
+protections:
+  enabled: false
+  symbol_cooldown_days: 1.0
+  symbol_stoploss_cooldown_days: 3.0
+  symbol_stoploss_loss_pct: 0.035
+  strategy_stoploss_lookback_days: 10.0
+  strategy_stoploss_threshold: 3
+  strategy_stoploss_cooldown_days: 3.0
+  low_profit_lookback_days: 20.0
+  low_profit_min_trades: 5
+  low_profit_threshold_pct: 0.0
+  low_profit_cooldown_days: 5.0
+  max_drawdown_lookback_days: 20.0
+  max_drawdown_pct: 0.05
+  max_drawdown_cooldown_days: 5.0
+
 # --- STOCK UNIVERSE ---
 stocks:
   scan_universe:                 # Stocks screened for opportunities each cycle

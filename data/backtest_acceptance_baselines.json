@@ -2,6 +2,7 @@
   "expected_checks": [
     "data_quality_self_test",
     "lookahead_self_test",
+    "strategy_lookahead_smoke",
     "warmup_self_test",
     "trade_replay_self_test",
     "backtest_window_replay",
@@ -13,6 +14,8 @@
     "severity": "warning",
     "validated": false
   },
+  "errors": 0,
   "status": "pass",
-  "version": 1
+  "version": 1,
+  "warnings": 1
 }

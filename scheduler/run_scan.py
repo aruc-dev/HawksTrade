@@ -852,7 +852,10 @@ def run(
     protection_entries_blocked = False
     if protection_manager.enabled:
         try:
-            active_locks = protection_manager.refresh_from_trade_log()
+            if dry_run:
+                active_locks = protection_manager.active_locks()
+            else:
+                active_locks = protection_manager.refresh_from_trade_log()
         except Exception as e:
             protection_entries_blocked = True
             if marker is not None:

@@ -225,6 +225,25 @@ class TradeReplayTests(unittest.TestCase):
 
         self.assertTrue(any(finding.message == "Replay value exceeded tolerance" for finding in findings))
 
+    def test_trade_replay_detects_quantity_and_dollar_pnl_drift(self):
+        expected = [
+            {
+                "symbol": "AAPL",
+                "exit_date": "2026-01-05",
+                "exit_price": 101.0,
+                "pnl_pct": 0.01,
+                "qty": 10.0,
+                "pnl": 10.0,
+            }
+        ]
+        simulated = [dict(expected[0], qty=9.0, pnl=9.0)]
+
+        findings = realism.compare_trade_replay(expected, simulated)
+        fields = {finding.context["field"] for finding in findings if finding.context}
+
+        self.assertIn("qty", fields)
+        self.assertIn("pnl_dollars", fields)
+
 
 class AcceptanceScriptTests(unittest.TestCase):
     def test_default_acceptance_passes_with_gap_warning(self):
@@ -236,6 +255,9 @@ class AcceptanceScriptTests(unittest.TestCase):
         self.assertGreaterEqual(result["warnings"], 1)
         self.assertTrue(
             any(finding["check"] == "backtest_window_replay" for finding in result["findings"])
+        )
+        self.assertTrue(
+            any(finding["check"] == "strategy_lookahead_smoke" for finding in result["findings"])
         )
 
     def test_acceptance_fails_when_real_gap_up_intraday_is_required(self):
@@ -283,6 +305,8 @@ class AcceptanceScriptTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(written["status"], "pass")
+        self.assertEqual(written["errors"], 0)
+        self.assertGreaterEqual(written["warnings"], 1)
         self.assertIn("gap_up_intraday", written)
 
 

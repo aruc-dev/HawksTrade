@@ -133,7 +133,7 @@ bursts, daily order-count breaches, and optional notional limits.
 |---|---|---:|
 | `enabled` | Enables the pre-submit safety gate. Disable only for controlled debugging. | `true` |
 | `max_active_orders` | Blocks new entries when active broker orders meet or exceed this count. | 50 |
-| `max_orders_per_window` | Blocks new entries if recent local order-intent history exceeds this count. | 60 |
+| `max_orders_per_window` | Blocks new entries if recent local order-intent history meets or exceeds this count. | 60 |
 | `order_rate_window_seconds` | Rolling window used with `max_orders_per_window`. | 60 |
 | `max_daily_orders` | Blocks new entries after this many local order intents in the UTC day. | 500 |
 | `max_notional_usd` | Optional hard dollar cap per submitted order. | `null` |
@@ -141,6 +141,51 @@ bursts, daily order-count breaches, and optional notional limits.
 
 Governor blocks are fail-closed. Operational lookup/history failures mark the scan
 unhealthy so they are visible in health checks instead of looking like a clean no-trade run.
+
+---
+
+## Protections
+
+```yaml
+protections:
+  enabled: false
+  symbol_cooldown_days: 1.0
+  symbol_stoploss_cooldown_days: 3.0
+  symbol_stoploss_loss_pct: 0.035
+  strategy_stoploss_lookback_days: 10.0
+  strategy_stoploss_threshold: 3
+  strategy_stoploss_cooldown_days: 3.0
+  low_profit_lookback_days: 20.0
+  low_profit_min_trades: 5
+  low_profit_threshold_pct: 0.0
+  low_profit_cooldown_days: 5.0
+  max_drawdown_lookback_days: 20.0
+  max_drawdown_pct: 0.05
+  max_drawdown_cooldown_days: 5.0
+```
+
+Protections are an optional entry-only lock manager. When enabled, recent
+closed trades can temporarily block new entries for a symbol, strategy, or the
+whole portfolio after cooldown exits, stop-loss clusters, low-profit strategy
+performance, or rolling drawdown. Protection refresh failures block new entries
+fail-closed while exit checks continue.
+
+| Setting | Meaning | Current Default |
+|---|---|---:|
+| `enabled` | Enables generated protection locks. Existing default keeps behavior unchanged. | `false` |
+| `symbol_cooldown_days` | Blocks re-entry in the same symbol after any closed sell. | 1.0 |
+| `symbol_stoploss_cooldown_days` | Blocks re-entry in a symbol after a stop-loss-style exit. | 3.0 |
+| `symbol_stoploss_loss_pct` | Minimum sell loss used with stop-loss reasons for symbol locks. | 3.5% |
+| `strategy_stoploss_lookback_days` | Lookback window for clustered stop-loss exits by strategy. | 10.0 |
+| `strategy_stoploss_threshold` | Stop-loss exit count that locks a strategy in the lookback window. | 3 |
+| `strategy_stoploss_cooldown_days` | Strategy lock duration after clustered stop-loss exits. | 3.0 |
+| `low_profit_lookback_days` | Lookback window for recent strategy average P/L. | 20.0 |
+| `low_profit_min_trades` | Minimum closed sells required before low-profit strategy lock evaluation. | 5 |
+| `low_profit_threshold_pct` | Locks a strategy when recent average P/L is at or below this threshold. | 0.0% |
+| `low_profit_cooldown_days` | Strategy lock duration after low-profit performance. | 5.0 |
+| `max_drawdown_lookback_days` | Lookback window for rolling realized-P/L drawdown. | 20.0 |
+| `max_drawdown_pct` | Rolling realized drawdown that locks all new entries. | 5.0% |
+| `max_drawdown_cooldown_days` | Global entry-lock duration after rolling drawdown breach. | 5.0 |
 
 ---
 

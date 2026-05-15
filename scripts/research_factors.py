@@ -207,7 +207,7 @@ def _add_symbol_factors(group: pd.DataFrame, horizons: tuple[int, ...]) -> pd.Da
     bandwidth = (upper - lower).replace(0, np.nan)
 
     group["return_5d"] = close.pct_change(5)
-    group["volume_ratio"] = volume / volume.rolling(20).mean()
+    group["volume_ratio"] = volume / volume.shift(1).rolling(20).mean()
     group["rsi_14"] = _rsi(close, 14)
     group["bb_pct_b"] = ((close - lower) / bandwidth).fillna(0.5)
     group["atr_pct"] = true_range.rolling(14).mean() / close
@@ -246,6 +246,8 @@ def build_factor_dataset(
     horizons: Iterable[int] = DEFAULT_HORIZONS,
 ) -> tuple[pd.DataFrame, list[dict]]:
     horizons = tuple(int(h) for h in horizons)
+    if any(horizon <= 0 for horizon in horizons):
+        raise ValueError("Forward-return horizons must be positive integers")
     raw, issues = _bars_to_frame(bars_by_symbol)
     if raw.empty:
         return raw, issues

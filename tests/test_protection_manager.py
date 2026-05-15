@@ -136,6 +136,13 @@ class ProtectionManagerTests(unittest.TestCase):
         self.assertEqual(len(locks), 1)
         self.assertEqual(locks[0].lock_type, "manual_test_lock")
 
+    def test_malformed_lock_file_raises_instead_of_failing_open(self):
+        manager = self._manager()
+        self.lock_file.write_text("{not valid json", encoding="utf-8")
+
+        with self.assertRaises(ValueError):
+            manager.active_locks(now=self.now)
+
     def test_health_report_dict_includes_active_protection_locks(self):
         lock = {
             "lock_type": "symbol_cooldown_after_exit",
@@ -163,10 +170,14 @@ class ProtectionManagerTests(unittest.TestCase):
 
         payload = health.health_report_to_dict(report)
         terminal = health.format_terminal_report(report)
+        rendered_html = health.render_html_report(report)
 
         self.assertEqual(payload["active_protection_locks"], [lock])
         self.assertIn("PROTECTION LOCKS", terminal)
         self.assertIn("AAPL", terminal)
+        self.assertIn("Protection Locks", rendered_html)
+        self.assertIn("symbol_cooldown_after_exit", rendered_html)
+        self.assertIn("AAPL", rendered_html)
 
 
 if __name__ == "__main__":

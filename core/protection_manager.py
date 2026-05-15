@@ -453,8 +453,10 @@ class ProtectionManager:
                 return []
             try:
                 payload = json.loads(lock_file.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                return []
+            except OSError as exc:
+                raise RuntimeError(f"Could not read protection lock file {lock_file}: {exc}") from exc
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Malformed protection lock file {lock_file}: {exc}") from exc
         rows = payload.get("locks", []) if isinstance(payload, Mapping) else []
         locks = []
         for row in rows:
