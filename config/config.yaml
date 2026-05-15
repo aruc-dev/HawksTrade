@@ -150,7 +150,7 @@ strategies:
     volume_spike_ratio: 2.0        # Entry bar volume must exceed this multiple of the 20-day average
 
   rsi_reversion:
-    enabled: true
+    enabled: false
     asset_class: stocks
     description: "Balanced RSI mean reversion. Entry: RSI<40, %B<20%, liquidity confirmation, 1-bar recovery, price within 15% below and 15% above SMA200, 5-day drawdown <=10%, and ATR/price <=5%. ATR stop extension: 0.8×ATR(14), capped at 6% max stop distance; the global stop governs when the ATR stop is tighter or absent. Exit: price reaches SMA20, RSI>50, 6% daily-close max-loss, or 10-day cap. Regime: skip on severe crash (SPY >20% below 252d peak) or elevated realised-volatility proxy."
     rsi_period: 14
@@ -165,6 +165,9 @@ strategies:
     max_entry_atr_pct: 0.05          # Skip legacy/high-volatility names above 5% ATR/price
     max_stop_loss_pct: 0.06          # Cap RSI-specific ATR stop extension at 6% below entry
     max_loss_exit_pct: 0.06          # Strategy fail-safe exit on daily close >=6% below entry
+    profit_trailing_enabled: true    # Protect winners before the 10-business-day hold cap
+    trail_activation_pct: 0.06        # Enable trailing stop once peak gain reaches 6%
+    trailing_stop_pct: 0.04           # Exit if price falls 4% from post-entry peak
     risk_per_trade_pct: 0.01        # Risk 1% of equity per trade for ATR-based sizing
     sma200_lower_buffer_pct: 0.15   # Entry blocked if price < SMA200 × (1 - this); prevents buying broken stocks
     sma200_upper_buffer_pct: 0.15   # Entry blocked if price > SMA200 × (1 + this); prevents buying overextended stocks
@@ -255,6 +258,9 @@ strategies:
     rsi_entry_max: 82            # Avoid buying severely overextended breakout closes
     rsi_exit_max: 82             # Profit-taking exhaustion exit after profit floor
     profit_floor_pct: 0.03       # RSI exhaustion exit only after at least 3% open profit
+    profit_trailing_enabled: true # Protect winners before the 14-day hold cap
+    trail_activation_pct: 0.06   # Enable trailing stop once peak gain reaches 6%
+    trailing_stop_pct: 0.04      # Exit if price falls 4% from post-entry peak
     breakdown_exit_pct: 0.02     # Exit failed breakout when close falls 2% below entry
     trend_exit_enabled: true     # Exit when completed close falls below trend EMA
     weight: 0.9
@@ -274,7 +280,7 @@ validation:
         days: 365
         end_date: "04/29/2026"
         screener: true
-        strategies: [momentum, rsi_reversion, gap_up, ma_crossover, range_breakout]
+        strategies: [momentum, gap_up, ma_crossover, range_breakout]
         required: true
         min_return_pct: 0.10
         max_drawdown_pct: 0.06
@@ -285,7 +291,7 @@ validation:
         days: 180
         end_date: "04/29/2026"
         screener: true
-        strategies: [momentum, rsi_reversion, gap_up, ma_crossover, range_breakout]
+        strategies: [momentum, gap_up, ma_crossover, range_breakout]
         required: true
         min_return_pct: 0.015
         max_drawdown_pct: 0.04

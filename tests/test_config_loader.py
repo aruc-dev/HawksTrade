@@ -115,7 +115,7 @@ class TestGetConfig(unittest.TestCase):
 
         strategies = cfg["strategies"]
         self.assertTrue(strategies["momentum"]["enabled"])
-        self.assertTrue(strategies["rsi_reversion"]["enabled"])
+        self.assertFalse(strategies["rsi_reversion"]["enabled"])
         self.assertTrue(strategies["ma_crossover"]["enabled"])
         self.assertTrue(strategies["range_breakout"]["enabled"])
         self.assertTrue(strategies["gap_up"]["enabled"])
@@ -130,6 +130,9 @@ class TestGetConfig(unittest.TestCase):
         self.assertEqual(strategies["rsi_reversion"]["max_entry_atr_pct"], 0.05)
         self.assertEqual(strategies["rsi_reversion"]["max_stop_loss_pct"], 0.06)
         self.assertEqual(strategies["rsi_reversion"]["max_loss_exit_pct"], 0.06)
+        self.assertTrue(strategies["rsi_reversion"]["profit_trailing_enabled"])
+        self.assertEqual(strategies["rsi_reversion"]["trail_activation_pct"], 0.06)
+        self.assertEqual(strategies["rsi_reversion"]["trailing_stop_pct"], 0.04)
         self.assertEqual(strategies["rsi_reversion"]["recent_drawdown_lookback_days"], 5)
         self.assertEqual(strategies["rsi_reversion"]["max_recent_drawdown_pct"], 0.10)
         self.assertEqual(strategies["gap_up"]["min_gap_pct"], 0.05)
@@ -154,6 +157,9 @@ class TestGetConfig(unittest.TestCase):
         self.assertEqual(strategies["range_breakout"]["volume_multiplier"], 2.5)
         self.assertEqual(strategies["range_breakout"]["min_range_ratio"], 0.45)
         self.assertEqual(strategies["range_breakout"]["rsi_entry_max"], 82)
+        self.assertTrue(strategies["range_breakout"]["profit_trailing_enabled"])
+        self.assertEqual(strategies["range_breakout"]["trail_activation_pct"], 0.06)
+        self.assertEqual(strategies["range_breakout"]["trailing_stop_pct"], 0.04)
 
         validation = cfg["validation"]
         production_windows = {
@@ -162,7 +168,11 @@ class TestGetConfig(unittest.TestCase):
         }
         self.assertEqual(
             production_windows["default_12m_costed"]["strategies"],
-            ["momentum", "rsi_reversion", "gap_up", "ma_crossover", "range_breakout"],
+            ["momentum", "gap_up", "ma_crossover", "range_breakout"],
+        )
+        self.assertEqual(
+            production_windows["default_6m_costed"]["strategies"],
+            ["momentum", "gap_up", "ma_crossover", "range_breakout"],
         )
         self.assertEqual(production_windows["default_12m_costed"]["end_date"], "04/29/2026")
         self.assertEqual(production_windows["default_6m_costed"]["end_date"], "04/29/2026")

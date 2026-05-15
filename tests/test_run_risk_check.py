@@ -246,6 +246,121 @@ class RunRiskCheckTests(unittest.TestCase):
             force_market=True,
         )
 
+    def test_risk_check_enforces_momentum_profit_protection(self):
+        position = SimpleNamespace(symbol="AAPL", avg_entry_price="100", asset_class="us_equity")
+        open_trade = {
+            "symbol": "AAPL",
+            "side": "buy",
+            "strategy": "momentum",
+            "entry_price": "100",
+            "high_water_price": "108",
+            "asset_class": "stock",
+        }
+
+        with (
+            patch.object(run_risk_check.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_risk_check, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_risk_check.ac, "get_all_positions", return_value=[position]),
+            patch.object(run_risk_check.ac, "get_stock_latest_price", return_value=101),
+            patch.object(run_risk_check.rm, "should_exit_position", return_value=(False, "Hold")),
+            patch.object(run_risk_check.oe, "exit_position") as exit_position,
+        ):
+            run_risk_check.run(dry_run=True)
+
+        reason = exit_position.call_args.kwargs["reason"]
+        exit_position.assert_called_once_with(
+            "AAPL",
+            reason=reason,
+            asset_class="stock",
+            dry_run=True,
+            force_market=True,
+        )
+        self.assertIn("Momentum trailing stop", reason)
+
+    def test_risk_check_enforces_range_breakout_profit_protection(self):
+        position = SimpleNamespace(symbol="DOGEUSD", avg_entry_price="0.10", asset_class="crypto")
+        open_trade = {
+            "symbol": "DOGE/USD",
+            "side": "buy",
+            "strategy": "range_breakout",
+            "entry_price": "0.10",
+            "high_water_price": "0.108",
+            "asset_class": "crypto",
+        }
+
+        with (
+            patch.object(run_risk_check.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_risk_check, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_risk_check.ac, "get_all_positions", return_value=[position]),
+            patch.object(run_risk_check.ac, "get_crypto_latest_price", return_value=0.101),
+            patch.object(run_risk_check.rm, "should_exit_position", return_value=(False, "Hold")),
+            patch.object(run_risk_check.oe, "exit_position") as exit_position,
+        ):
+            run_risk_check.run(dry_run=True)
+
+        reason = exit_position.call_args.kwargs["reason"]
+        exit_position.assert_called_once_with(
+            "DOGE/USD",
+            reason=reason,
+            asset_class="crypto",
+            dry_run=True,
+            force_market=True,
+        )
+        self.assertIn("Range breakout profit protection", reason)
+
+    def test_risk_check_enforces_rsi_reversion_profit_protection(self):
+        position = SimpleNamespace(symbol="AAPL", avg_entry_price="100", asset_class="us_equity")
+        open_trade = {
+            "symbol": "AAPL",
+            "side": "buy",
+            "strategy": "rsi_reversion",
+            "entry_price": "100",
+            "high_water_price": "108",
+            "asset_class": "stock",
+        }
+
+        with (
+            patch.object(run_risk_check.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_risk_check, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_risk_check.ac, "get_all_positions", return_value=[position]),
+            patch.object(run_risk_check.ac, "get_stock_latest_price", return_value=101),
+            patch.object(run_risk_check.rm, "should_exit_position", return_value=(False, "Hold")),
+            patch.object(run_risk_check.oe, "exit_position") as exit_position,
+        ):
+            run_risk_check.run(dry_run=True)
+
+        reason = exit_position.call_args.kwargs["reason"]
+        exit_position.assert_called_once_with(
+            "AAPL",
+            reason=reason,
+            asset_class="stock",
+            dry_run=True,
+            force_market=True,
+        )
+        self.assertIn("RSI reversion profit protection", reason)
+
+    def test_strategy_profit_protection_invalid_policy_logs_and_skips(self):
+        open_trade = {
+            "symbol": "AAPL",
+            "side": "buy",
+            "strategy": "momentum",
+            "high_water_price": "108",
+        }
+
+        with (
+            patch.dict(run_risk_check.CFG["strategies"]["momentum"], {"exit_policy": "typo"}),
+            self.assertLogs("run_risk_check", level="WARNING") as logs,
+        ):
+            should_exit, reason = run_risk_check._strategy_profit_protection_exit(
+                open_trade,
+                entry_price=100,
+                current_price=101,
+            )
+
+        self.assertFalse(should_exit)
+        self.assertEqual(reason, "")
+        self.assertIn("Skipping strategy profit protection", "\n".join(logs.output))
+
     def test_run_marks_error_when_exit_is_blocked_by_pending_order_check_failure(self):
         marker = FakeMarker()
         position = SimpleNamespace(symbol="AAPL", avg_entry_price="100", asset_class="us_equity")

@@ -11,10 +11,10 @@
 | Strategy | Asset | Status | File |
 |---|---|---|---|
 | Momentum | Stocks | **Enabled** | `momentum.py` |
-| RSI Reversion | Stocks | **Enabled** | `rsi_reversion.py` |
+| RSI Reversion | Stocks | **Disabled by default** | `rsi_reversion.py` |
 | Gap-Up | Stocks | **Enabled** | `gap_up.py` |
 | MA Crossover | Crypto | **Enabled** | `ma_crossover.py` |
-| Range Breakout | Crypto | **Enabled** | `range_breakout.py` |
+| Range Breakout | Crypto | **Enabled** | `range_breakout.py`; high-water profit protection enabled |
 
 All strategies share a common global risk layer (8% max position size,
 3.5% stop-loss, 12% take-profit, max 10 open positions, 5% daily-loss halt)
@@ -98,7 +98,7 @@ room while the global 3.5% stop remains the baseline fixed-percentage stop.
 
 ---
 
-## 2. RSI Reversion *(Stocks — Enabled)*
+## 2. RSI Reversion *(Stocks — Disabled by default)*
 
 **Type:** Mean reversion, swing trade.
 
@@ -126,6 +126,7 @@ absent; otherwise the ATR stop can widen the trade's breathing room.
 - RSI(14) > `overbought_threshold` — momentum neutral; edge evaporated (default: 50).
 - Latest daily close is at least 6% below entry (`max_loss_exit_pct`) — strategy
   fail-safe for tail loss control.
+- High-water profit protection once peak gain reaches `trail_activation_pct`.
 - 10-business-day hard cap (`hold_days`).
 
 **Key parameters:**
@@ -143,6 +144,9 @@ absent; otherwise the ATR stop can widen the trade's breathing room.
 | `max_entry_atr_pct` | 5% ATR/price ceiling |
 | `max_stop_loss_pct` | 6% RSI ATR stop cap |
 | `max_loss_exit_pct` | 6% below entry on latest daily close |
+| `profit_trailing_enabled` | true |
+| `trail_activation_pct` | 6% |
+| `trailing_stop_pct` | 4% from post-entry peak |
 | `vix_multiplier` | 0.95 |
 | `sma200_lower_buffer_pct` | 15% |
 | `sma200_upper_buffer_pct` | 15% |
@@ -154,9 +158,9 @@ absent; otherwise the ATR stop can widen the trade's breathing room.
 - Crash filter: skip if SPY is >20% below its 252-day peak.
 - VIX proxy: skip if SPY realised HV(20) > 200-day HV MA × `vix_multiplier` (default: 0.95).
 
-**Monitoring gate:** This strategy is enabled in the active default profile.
+**Monitoring gate:** This strategy is disabled in the active default profile.
 Continue running `python3 scheduler/run_validation_gate.py --profile rsi` before
-scaling its capital allocation. The gate requires cost-aware backtest performance
+enabling it or scaling its capital allocation. The gate requires cost-aware backtest performance
 plus at least 60 paper-trading days, 20 closed RSI trades, 48% win rate, 1.15
 profit factor, +2% aggregate paper return, and max drawdown no worse than 4%.
 
@@ -278,6 +282,8 @@ signals first just because they appear earlier in `crypto.scan_universe`.
 - Close ≤ entry × 0.98 — breakout failure.
 - Close < EMA50 — trend filter failure.
 - RSI(14) ≥ 82 after at least 3% open profit — exhaustion profit-taking.
+- High-water profit protection once peak gain reaches `trail_activation_pct`;
+  exit if price then falls by `trailing_stop_pct` from the observed peak.
 
 Stop-loss and take-profit from the global risk manager apply throughout.
 
@@ -298,6 +304,9 @@ Stop-loss and take-profit from the global risk manager apply throughout.
 | `rsi_entry_max` | 82 |
 | `rsi_exit_max` | 82 |
 | `breakdown_exit_pct` | 2% below entry |
+| `profit_trailing_enabled` | true |
+| `trail_activation_pct` | 6% |
+| `trailing_stop_pct` | 4% from post-entry peak |
 | `timeframe` | 1Day |
 | `hold_days` | 14 calendar days |
 
