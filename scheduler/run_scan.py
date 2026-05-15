@@ -35,7 +35,7 @@ from core import alpaca_client as ac
 from core.config_loader import get_config
 from core import order_executor as oe
 from core import risk_manager as rm
-from core.exit_policy import should_exit_for_hold
+from core.exit_policy import normalize_momentum_exit_policy, should_exit_for_hold
 from core.run_markers import RunScope, run_scope
 from core.logging_config import runtime_log_handlers
 from core.portfolio import get_open_symbols, print_snapshot
@@ -82,15 +82,39 @@ def get_stock_universe() -> List[str]:
 CRYPTO_UNIVERSE = CFG["crypto"]["scan_universe"]
 INTRADAY_ON     = CFG["intraday"]["enabled"]
 
-# Hold-day limits per strategy
-HOLD_DAYS = {
-    "momentum":       CFG["strategies"]["momentum"]["hold_days"],
-    "gap_up":         CFG["strategies"]["gap_up"]["hold_days"],
-    "range_breakout": CFG["strategies"]["range_breakout"]["hold_days"],
-    "rsi_reversion":  CFG["strategies"]["rsi_reversion"]["hold_days"],
-    "ma_crossover":   CFG["strategies"]["ma_crossover"]["hold_days"],
-}
-PROFIT_PROTECTION_STRATEGIES = {"momentum", "range_breakout", "rsi_reversion"}
+def _configured_hold_days(cfg: dict) -> dict:
+    return {
+        name: strategy_cfg["hold_days"]
+        for name, strategy_cfg in cfg.get("strategies", {}).items()
+        if strategy_cfg.get("hold_days")
+    }
+
+
+def _strategy_uses_profit_protection(strategy: str, strategy_cfg: dict) -> bool:
+    if strategy == "momentum":
+        return normalize_momentum_exit_policy(strategy_cfg.get("exit_policy")) == "profit_trailing"
+    return bool(strategy_cfg.get("profit_trailing_enabled", False))
+
+
+def _configured_profit_protection_strategies(cfg: dict) -> set[str]:
+    return {
+        name
+        for name, strategy_cfg in cfg.get("strategies", {}).items()
+        if strategy_cfg.get("hold_days") and _strategy_uses_profit_protection(name, strategy_cfg)
+    }
+
+
+def _hold_exit_uses_market_order(strategy: str, reason: str) -> bool:
+    normalized_reason = str(reason or "").lower()
+    return (
+        strategy == "momentum"
+        or "profit protection" in normalized_reason
+        or "trailing stop" in normalized_reason
+    )
+
+
+HOLD_DAYS = _configured_hold_days(CFG)
+PROFIT_PROTECTION_STRATEGIES = _configured_profit_protection_strategies(CFG)
 
 # ── Strategy Registry ─────────────────────────────────────────────────────────
 
@@ -512,7 +536,7 @@ def _check_hold_day_exits(
                     reason=reason,
                     asset_class=asset_class,
                     dry_run=dry_run,
-                    force_market=True,
+                    force_market=_hold_exit_uses_market_order(strategy, reason),
                 )
                 _mark_unhealthy_exit_result(marker, result, "hold_day_exit")
                 continue

@@ -31,6 +31,22 @@ class RunScanTests(unittest.TestCase):
         )
         return APIError(error, http_error)
 
+    def test_profit_protection_strategies_are_derived_from_config(self):
+        cfg = {
+            "strategies": {
+                "momentum": {"hold_days": 4, "exit_policy": "risk_only_baseline"},
+                "rsi_reversion": {"hold_days": 10, "profit_trailing_enabled": True},
+                "new_strategy": {"hold_days": 5, "profit_trailing_enabled": True},
+                "fixed_hold_strategy": {"hold_days": 3},
+                "no_hold_strategy": {"profit_trailing_enabled": True},
+            }
+        }
+
+        self.assertEqual(
+            run_scan._configured_profit_protection_strategies(cfg),
+            {"rsi_reversion", "new_strategy"},
+        )
+
     def test_asset_class_matching_normalizes_stock_aliases(self):
         self.assertTrue(run_scan._asset_class_matches("stocks", "stock"))
         self.assertTrue(run_scan._asset_class_matches("stock", "stocks"))
@@ -779,6 +795,52 @@ class RunScanTests(unittest.TestCase):
         exit_position.assert_not_called()
         update_high_water.assert_called_once_with({"DOGE/USD": 0.105})
 
+    def test_range_breakout_hold_cap_uses_default_order_type(self):
+        open_trade = {
+            "symbol": "DOGE/USD",
+            "strategy": "range_breakout",
+            "asset_class": "crypto",
+            "entry_price": "0.10",
+            "high_water_price": "0.105",
+        }
+
+        with (
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "get_trade_age_days", return_value=14),
+            patch.object(run_scan, "_latest_price_for_trade", return_value=0.105),
+            patch.object(run_scan, "_estimate_peak_price_since_entry") as estimate_peak,
+            patch.object(run_scan.oe, "exit_position") as exit_position,
+        ):
+            run_scan._check_hold_day_exits([], dry_run=True)
+
+        estimate_peak.assert_not_called()
+        exit_position.assert_called_once()
+        self.assertEqual(exit_position.call_args.kwargs["reason"], "Hold 14d")
+        self.assertFalse(exit_position.call_args.kwargs["force_market"])
+
+    def test_rsi_reversion_hold_cap_uses_default_order_type(self):
+        open_trade = {
+            "symbol": "AAPL",
+            "strategy": "rsi_reversion",
+            "asset_class": "stock",
+            "entry_price": "100",
+            "high_water_price": "105",
+        }
+
+        with (
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "get_trade_age_days", return_value=10),
+            patch.object(run_scan, "_latest_price_for_trade", return_value=105),
+            patch.object(run_scan, "_estimate_peak_price_since_entry") as estimate_peak,
+            patch.object(run_scan.oe, "exit_position") as exit_position,
+        ):
+            run_scan._check_hold_day_exits([], dry_run=True, market_open=True)
+
+        estimate_peak.assert_not_called()
+        exit_position.assert_called_once()
+        self.assertEqual(exit_position.call_args.kwargs["reason"], "Hold 10d")
+        self.assertFalse(exit_position.call_args.kwargs["force_market"])
+
     def test_momentum_hold_price_fetch_failure_marks_error_and_continues(self):
         open_trades = [
             {
@@ -855,6 +917,7 @@ class RunScanTests(unittest.TestCase):
             run_scan._check_hold_day_exits([], dry_run=True, market_open=False)
 
         exit_position.assert_called_once()
+        self.assertFalse(exit_position.call_args.kwargs["force_market"])
 
     # ── MA crossover HOLD_DAYS (HIGH fix) ─────────────────────────────────────
 
