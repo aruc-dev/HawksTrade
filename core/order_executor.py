@@ -17,6 +17,7 @@ from pathlib import Path
 
 
 from core import alpaca_client as ac
+from core.order_governor import GovernorDecision, OrderGovernor, OrderIntent
 from core import risk_manager as rm
 from core.config_loader import get_config
 from tracking import order_intents
@@ -31,10 +32,6 @@ MODE        = CFG["mode"]
 ORDER_TYPE  = CFG["trading"]["order_type"]
 SLIPPAGE    = CFG["trading"]["limit_slippage_pct"]
 log         = logging.getLogger("core.order_executor")
-
-
-class PendingExitOrderCheckFailed(RuntimeError):
-    """Raised when open sell orders cannot be inspected safely."""
 
 
 def _utc_now():
@@ -56,13 +53,6 @@ def _order_status(order) -> str | None:
     if status is None:
         return None
     return str(getattr(status, "value", status)).lower()
-
-
-def _order_side(order) -> str | None:
-    side = _order_value(order, "side")
-    if side is None:
-        return None
-    return str(getattr(side, "value", side)).lower()
 
 
 def _broker_order_id(order) -> str:
@@ -109,22 +99,6 @@ def _mark_order_intent_failed(intent: dict | None, exc: Exception) -> None:
         status="submit_failed",
         error=f"{type(exc).__name__}: {exc}",
     )
-
-
-def _has_pending_exit_order(symbol: str) -> bool:
-    try:
-        orders = ac.get_open_orders()
-    except Exception as e:
-        log.error(f"Could not check pending exit orders for {symbol}; blocking exit fail-closed: {e}")
-        raise PendingExitOrderCheckFailed(f"Could not check pending exit orders for {symbol}") from e
-
-    for order in orders or []:
-        order_symbol = _order_value(order, "symbol", "")
-        if _order_side(order) == "sell" and _symbols_match(str(order_symbol), symbol):
-            order_id = _order_value(order, "id", _order_value(order, "order_id", "unknown"))
-            log.warning(f"Pending sell order already exists for {symbol}; skipping duplicate exit. order_id={order_id}")
-            return True
-    return False
 
 
 def _order_filled_qty(order) -> float:
@@ -225,6 +199,120 @@ def _entry_failure_result(symbol: str, strategy: str, asset_class: str, exc: Exc
         "error_type": type(exc).__name__,
         "error": str(exc),
     }
+
+
+def _entry_governor_block_result(
+    symbol: str,
+    strategy: str,
+    asset_class: str,
+    qty,
+    price,
+    order_type: str,
+    decision: GovernorDecision,
+    limit_price=None,
+) -> dict:
+    result = {
+        "timestamp": _utc_now().isoformat(),
+        "mode": MODE,
+        "symbol": symbol,
+        "strategy": strategy,
+        "asset_class": asset_class,
+        "side": "buy",
+        "qty": qty,
+        "entry_price": price,
+        "order_id": "",
+        "status": "order_governor_blocked",
+        "order_type": order_type,
+        "governor_code": decision.code,
+        "error_type": "OrderGovernorBlocked",
+        "error": decision.reason,
+    }
+    if limit_price is not None:
+        result["limit_price"] = limit_price
+    return result
+
+
+def _exit_governor_block_result(
+    *,
+    symbol: str,
+    strategy: str,
+    asset_class: str,
+    reason: str,
+    qty,
+    entry_price,
+    current_price,
+    pnl_pct,
+    order_type: str,
+    decision: GovernorDecision,
+    limit_price=None,
+) -> dict:
+    if decision.code == "duplicate_pending_exit":
+        status = "pending_exit"
+    elif decision.code in {"broker_orders_lookup_failed", "missing_broker_orders"}:
+        status = "pending_exit_check_failed"
+    else:
+        status = "order_governor_blocked"
+    result = {
+        "timestamp": _utc_now().isoformat(),
+        "mode": MODE,
+        "symbol": symbol,
+        "strategy": strategy,
+        "asset_class": asset_class,
+        "side": "sell",
+        "qty": qty,
+        "entry_price": entry_price,
+        "exit_price": current_price,
+        "pnl_pct": round(pnl_pct, 6) if pnl_pct not in ("", None) else "",
+        "exit_reason": reason,
+        "order_id": "",
+        "status": status,
+        "order_type": order_type,
+        "governor_code": decision.code,
+        "error": decision.reason,
+    }
+    if limit_price is not None:
+        result["limit_price"] = limit_price
+    return result
+
+
+def _evaluate_order_governor(order_intent: OrderIntent) -> GovernorDecision:
+    if MODE == "backtest":
+        return GovernorDecision.allow("Order governor skipped in backtest mode")
+    try:
+        account_state = ac.get_account()
+    except Exception as exc:
+        return GovernorDecision.block(
+            f"Could not fetch account state for order governor: {exc}",
+            code="account_lookup_failed",
+        )
+    try:
+        broker_orders = ac.get_open_orders()
+    except Exception as exc:
+        return GovernorDecision.block(
+            f"Could not fetch open broker orders for order governor: {exc}",
+            code="broker_orders_lookup_failed",
+        )
+    return OrderGovernor.from_config(CFG).evaluate(order_intent, account_state, broker_orders)
+
+
+def _log_governor_decision(symbol: str, side: str, decision: GovernorDecision) -> None:
+    if decision.allowed:
+        if decision.status == "warn":
+            log.warning(
+                "Order governor allowed %s %s with warnings: %s",
+                side,
+                symbol,
+                "; ".join(decision.warnings) or decision.reason,
+            )
+        return
+    log.warning(
+        "Order governor blocked %s %s: code=%s reason=%s context=%s",
+        side,
+        symbol,
+        decision.code,
+        decision.reason,
+        dict(decision.context or {}),
+    )
 
 
 def _effective_entry_stop_loss(entry_price: float, atr_stop_price: float | None) -> float:
@@ -336,13 +424,38 @@ def enter_position(
         if capped_qty < qty:
             log.info(f"Entry size capped for {symbol}: requested={qty} capped={capped_qty}")
         qty = capped_qty
+        order_type = "market" if ORDER_TYPE == "market" else "limit"
+        limit_px = price * (1 + SLIPPAGE) if order_type == "limit" else None
 
         if dry_run:
             log.info(f"DRY RUN: would buy {qty} {symbol} @ {price}")
             return {"symbol": symbol, "status": "dry_run"}
 
+        governor_decision = _evaluate_order_governor(OrderIntent(
+            symbol=symbol,
+            side="buy",
+            qty=qty,
+            order_type=order_type,
+            asset_class=asset_class,
+            strategy=strategy,
+            price=price,
+            limit_price=limit_px,
+        ))
+        _log_governor_decision(symbol, "buy", governor_decision)
+        if not governor_decision.allowed:
+            return _entry_governor_block_result(
+                symbol,
+                strategy,
+                asset_class,
+                qty,
+                price,
+                order_type,
+                governor_decision,
+                limit_price=limit_px,
+            )
+
         # Place Order
-        if ORDER_TYPE == "market":
+        if order_type == "market":
             intent = _create_order_intent(symbol, "buy", strategy, asset_class, qty)
             try:
                 order = ac.place_market_order(
@@ -357,7 +470,6 @@ def enter_position(
                 _mark_order_intent_failed(intent, e)
                 raise
         else:
-            limit_px = price * (1 + SLIPPAGE)
             intent = _create_order_intent(symbol, "buy", strategy, asset_class, qty, limit_price=limit_px)
             try:
                 order = ac.place_limit_order(
@@ -553,42 +665,35 @@ def exit_position(
             )
             return trade
 
-        try:
-            has_pending_exit = _has_pending_exit_order(order_symbol)
-        except PendingExitOrderCheckFailed as e:
-            return {
-                "timestamp": _utc_now().isoformat(),
-                "mode": MODE,
-                "symbol": trade_symbol,
-                "strategy": strategy,
-                "asset_class": asset_class,
-                "side": "sell",
-                "qty": qty,
-                "entry_price": entry_price,
-                "exit_price": current_price,
-                "pnl_pct": round(pnl_pct, 6),
-                "exit_reason": reason,
-                "order_id": "",
-                "status": "pending_exit_check_failed",
-                "error": str(e),
-            }
-
-        if has_pending_exit:
-            return {
-                "timestamp": _utc_now().isoformat(),
-                "mode": MODE,
-                "symbol": trade_symbol,
-                "strategy": strategy,
-                "asset_class": asset_class,
-                "side": "sell",
-                "qty": qty,
-                "entry_price": entry_price,
-                "exit_price": current_price,
-                "pnl_pct": round(pnl_pct, 6),
-                "exit_reason": reason,
-                "order_id": "",
-                "status": "pending_exit",
-            }
+        limit_px = limit_price if order_type == "limit" else None
+        if order_type == "limit" and limit_px is None:
+            limit_px = current_price * (1 - SLIPPAGE)
+        governor_decision = _evaluate_order_governor(OrderIntent(
+            symbol=order_symbol,
+            side="sell",
+            qty=qty,
+            order_type=order_type,
+            asset_class=asset_class,
+            strategy=strategy,
+            price=current_price,
+            limit_price=limit_px,
+            position_qty=qty,
+        ))
+        _log_governor_decision(order_symbol, "sell", governor_decision)
+        if not governor_decision.allowed:
+            return _exit_governor_block_result(
+                symbol=trade_symbol,
+                strategy=strategy,
+                asset_class=asset_class,
+                reason=reason,
+                qty=qty,
+                entry_price=entry_price,
+                current_price=current_price,
+                pnl_pct=pnl_pct,
+                order_type=order_type,
+                decision=governor_decision,
+                limit_price=limit_price,
+            )
 
         if order_type == "market":
             intent = _create_order_intent(order_symbol, "sell", strategy, asset_class, qty)
@@ -605,7 +710,6 @@ def exit_position(
                 _mark_order_intent_failed(intent, e)
                 raise
         else:
-            limit_px = limit_price if limit_price is not None else current_price * (1 - SLIPPAGE)
             intent = _create_order_intent(order_symbol, "sell", strategy, asset_class, qty, limit_price=limit_px)
             try:
                 order = ac.place_limit_order(

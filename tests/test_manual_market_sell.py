@@ -243,6 +243,16 @@ class ManualMarketSellTests(unittest.TestCase):
         exit_position.assert_not_called()
         self.assertIn("No open positions.", output.getvalue())
 
+    def test_result_message_explains_governor_block(self):
+        message = manual_market_sell._result_message({
+            "symbol": "AAPL",
+            "status": "order_governor_blocked",
+            "error": "duplicate pending sell",
+        })
+
+        self.assertIn("order governor blocked the sell", message)
+        self.assertIn("duplicate pending sell", message)
+
 
 if __name__ == "__main__":
     unittest.main()

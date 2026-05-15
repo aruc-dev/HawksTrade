@@ -20,6 +20,16 @@ class OrderExecutorTests(unittest.TestCase):
         self.original_order_intents = order_intents.ORDER_INTENTS
         order_intents.ORDER_INTENTS = Path(self.tmpdir.name) / "order_intents.csv"
         self.addCleanup(setattr, order_intents, "ORDER_INTENTS", self.original_order_intents)
+        account_patch = patch.object(
+            order_executor.ac,
+            "get_account",
+            return_value=SimpleNamespace(portfolio_value="10000", cash="10000", buying_power="10000"),
+        )
+        account_patch.start()
+        self.addCleanup(account_patch.stop)
+        open_orders_patch = patch.object(order_executor.ac, "get_open_orders", return_value=[])
+        open_orders_patch.start()
+        self.addCleanup(open_orders_patch.stop)
 
         trade_log.log_trade({
             "timestamp": "2026-04-10T12:00:00",
@@ -279,6 +289,40 @@ class OrderExecutorTests(unittest.TestCase):
         self.assertEqual(rows[0]["status"], "submitted")
         self.assertEqual(rows[0]["qty"], "2")
         self.assertFalse(any(row["symbol"] == "MSFT" for row in trade_log.get_open_trades()))
+
+    def test_enter_position_blocks_duplicate_pending_entry_before_submit(self):
+        pending_order = SimpleNamespace(id="pending-buy", symbol="MSFT", side="buy", status="new")
+
+        with (
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 2}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=2),
+            patch.object(order_executor.ac, "get_open_orders", return_value=[pending_order]),
+            patch.object(order_executor.ac, "place_limit_order") as place_limit_order,
+            self.assertLogs("core.order_executor", level="WARNING") as logs,
+        ):
+            result = order_executor.enter_position("MSFT", "gap_up", dry_run=False)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "order_governor_blocked")
+        self.assertEqual(result["governor_code"], "duplicate_pending_entry")
+        place_limit_order.assert_not_called()
+        self.assertTrue(any("Order governor blocked buy MSFT" in message for message in logs.output))
+
+    def test_enter_position_blocks_when_governor_account_lookup_fails(self):
+        with (
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 2}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=2),
+            patch.object(order_executor.ac, "get_account", side_effect=RuntimeError("account timeout")),
+            patch.object(order_executor.ac, "place_limit_order") as place_limit_order,
+        ):
+            result = order_executor.enter_position("MSFT", "gap_up", dry_run=False)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "order_governor_blocked")
+        self.assertEqual(result["governor_code"], "account_lookup_failed")
+        place_limit_order.assert_not_called()
 
     def test_enter_position_logs_filled_buy_as_open_with_fill_details(self):
         order = SimpleNamespace(

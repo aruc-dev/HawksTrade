@@ -230,6 +230,8 @@ def _result_message(result: dict | None) -> str:
         return f"Skipped {symbol}; a pending sell order already exists."
     if status == "pending_exit_check_failed":
         return f"Skipped {symbol}; could not verify pending sell orders: {result.get('error', '')}"
+    if status == "order_governor_blocked":
+        return f"Skipped {symbol}; order governor blocked the sell: {result.get('error', '')}"
     if status.startswith("invalid_") or status == "exit_failed":
         return f"Sell failed for {symbol} | status={status} | error={result.get('error', '')}"
     return f"Sell result for {symbol} | status={status} | order_id={order_id}{pnl_suffix}"
