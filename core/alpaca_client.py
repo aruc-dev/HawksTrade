@@ -12,7 +12,7 @@ import logging
 import math
 import time
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -563,6 +563,35 @@ def _bar_request_limit(timeframe: str, limit: int, market: str, batch_size: int)
     return min(MAX_BARS_PER_DATA_REQUEST, max(1, bars_per_symbol * batch_size))
 
 
+def _bar_request_chunk_size_for_range(timeframe: str, start: datetime, end: datetime) -> int:
+    bars_per_symbol = _bars_per_symbol_for_range(timeframe, start, end, market="stock")
+    return max(1, MAX_BARS_PER_DATA_REQUEST // bars_per_symbol)
+
+
+def _business_days_in_range(start: datetime, end: datetime, market: str) -> int:
+    tz = ZoneInfo("America/New_York") if market == "stock" else timezone.utc
+    current = start.astimezone(tz).date()
+    final = end.astimezone(tz).date()
+    days = 0
+    while current <= final:
+        if current.weekday() < 5:
+            days += 1
+        current += timedelta(days=1)
+    return max(1, days)
+
+
+def _bars_per_symbol_for_range(timeframe: str, start: datetime, end: datetime, market: str) -> int:
+    if market == "stock":
+        sessions = _business_days_in_range(start, end, market=market)
+        if timeframe == "1Day":
+            return sessions
+        session_seconds = 390 * 60
+        bars_per_session = max(1, math.ceil(session_seconds / _timeframe_seconds(timeframe)))
+        return sessions * bars_per_session
+    seconds = max(_timeframe_seconds(timeframe), (end - start).total_seconds())
+    return max(1, math.ceil(seconds / _timeframe_seconds(timeframe)))
+
+
 def _bar_timestamp(bar):
     if hasattr(bar, "timestamp"):
         return getattr(bar, "timestamp")
@@ -585,6 +614,32 @@ def _parse_bar_timestamp(value):
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=timezone.utc)
     return ts
+
+
+def _coerce_request_datetime(value, *, end_of_day: bool = False) -> datetime | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, date):
+        if end_of_day:
+            parsed = datetime(value.year, value.month, value.day, 23, 59, 59, 999999)
+        else:
+            parsed = datetime(value.year, value.month, value.day)
+    elif isinstance(value, str):
+        raw = value.strip().replace("Z", "+00:00")
+        date_only = len(raw) == 10 and raw[4] == "-" and raw[7] == "-"
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+        if date_only and end_of_day:
+            parsed = parsed.replace(hour=23, minute=59, second=59, microsecond=999999)
+    else:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _completed_daily_bars(bars, market: str, now: datetime | None = None):
@@ -616,7 +671,13 @@ def _filter_completed_daily_bars(bars_by_symbol: dict, timeframe: str, market: s
 
 # ── Market Data: Stocks ──────────────────────────────────────────────────────
 
-def get_stock_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
+def get_stock_bars(
+    symbols: list,
+    timeframe: str = "1Day",
+    limit: int = 60,
+    start=None,
+    end=None,
+):
     """
     Fetch OHLCV bars for a list of stock symbols. Always split-adjusted.
     Returns a plain dict: { symbol: [Bar, Bar, ...] }.
@@ -635,22 +696,45 @@ def get_stock_bars(symbols: list, timeframe: str = "1Day", limit: int = 60):
     }
     tf = tf_map.get(timeframe, TimeFrame.Day)
 
-    chunk_size = _bar_request_chunk_size(timeframe, limit, market="stock")
-
     all_bars = {}
     feed = DataFeed.SIP if MODE == "live" else DataFeed.IEX
-    end = datetime.now(timezone.utc)
-    start = end - _lookback_delta(timeframe, limit, market="stock")
+    explicit_range = start is not None or end is not None
+    parsed_end = _coerce_request_datetime(end, end_of_day=True)
+    if end is not None and parsed_end is None:
+        raise ValueError(f"Invalid end datetime for stock bars: {end}")
+    end_dt = parsed_end or datetime.now(timezone.utc)
+    parsed_start = _coerce_request_datetime(start)
+    if start is not None and parsed_start is None:
+        raise ValueError(f"Invalid start datetime for stock bars: {start}")
+    start_dt = parsed_start or end_dt - _lookback_delta(timeframe, limit, market="stock")
+    if start_dt > end_dt:
+        raise ValueError("stock bar start must be before end")
+    if explicit_range:
+        bars_per_symbol = _bars_per_symbol_for_range(timeframe, start_dt, end_dt, market="stock")
+        if bars_per_symbol > MAX_BARS_PER_DATA_REQUEST:
+            raise ValueError(
+                "explicit stock bar range exceeds the per-symbol request limit; "
+                "use a narrower start/end window"
+            )
+    chunk_size = (
+        _bar_request_chunk_size_for_range(timeframe, start_dt, end_dt)
+        if explicit_range
+        else _bar_request_chunk_size(timeframe, limit, market="stock")
+    )
 
     for i in range(0, len(symbols), chunk_size):
         batch = symbols[i: i + chunk_size]
-        request_limit = _bar_request_limit(timeframe, limit, market="stock", batch_size=len(batch))
+        request_limit = (
+            MAX_BARS_PER_DATA_REQUEST
+            if explicit_range
+            else _bar_request_limit(timeframe, limit, market="stock", batch_size=len(batch))
+        )
 
         req = StockBarsRequest(
             symbol_or_symbols=batch,
             timeframe=tf,
-            start=start,
-            end=end,
+            start=start_dt,
+            end=end_dt,
             feed=feed,
             adjustment=Adjustment.ALL,
             limit=request_limit,

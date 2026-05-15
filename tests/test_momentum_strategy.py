@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 from strategies.momentum import (
@@ -25,6 +26,16 @@ def _bar_dict(close, high=None, low=None, volume=3000):
         "volume": float(volume),
         "timestamp": "2026-04-23T00:00:00+00:00",
     }
+
+
+def _intraday_bar(volume, timestamp, close=110.0):
+    return SimpleNamespace(
+        close=float(close),
+        high=float(close * 1.01),
+        low=float(close * 0.99),
+        volume=float(volume),
+        timestamp=timestamp,
+    )
 
 
 class MomentumStrategyTests(unittest.TestCase):
@@ -208,6 +219,207 @@ class MomentumStrategyTests(unittest.TestCase):
                 signals = MomentumStrategy().scan(["AAPL"])
             
         self.assertEqual(len(signals), 0)
+
+    def test_momentum_volume_pace_confirmation_uses_elapsed_session_volume(self):
+        prices = [100.0] * 100 + [110.0, 110.0]
+        daily_bars = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=900)]
+        intraday_bars = [
+            _intraday_bar(50, datetime(2026, 4, 23, 13, 35, tzinfo=timezone.utc)),
+            _intraday_bar(40, datetime(2026, 4, 23, 13, 45, tzinfo=timezone.utc)),
+            _intraday_bar(40, datetime(2026, 4, 23, 14, 0, tzinfo=timezone.utc)),
+        ]
+
+        def _get_stock_bars(symbols, timeframe="1Day", limit=60):
+            if timeframe == "1Min":
+                return {"AAPL": intraday_bars}
+            if symbols == ["SPY"]:
+                return {"SPY": [_bar(100.0) for _ in range(30)]}
+            return {"AAPL": daily_bars}
+
+        with (
+            patch("strategies.momentum.ac.get_stock_bars", side_effect=_get_stock_bars),
+            patch("strategies.momentum.rm.market_regime_ok", return_value=True),
+            patch("strategies.momentum.rm.market_breadth_pct", return_value=0.6),
+            patch("strategies.momentum.ac.get_portfolio_value", return_value=10000.0),
+            patch("strategies.momentum.get_sector", return_value="Tech"),
+        ):
+            with patch.dict("strategies.momentum.SCFG", {
+                "enabled": True,
+                "top_n": 1,
+                "min_momentum_pct": 0.01,
+                "min_breadth_coverage_pct": 0.0,
+                "volume_confirmation_mode": "pace",
+                "volume_pace_ratio": 1.5,
+                "volume_pace_timeframe": "1Min",
+                "session_minutes": 390,
+                "volume_spike_ratio": 2.0,
+            }):
+                signals = MomentumStrategy().scan(
+                    ["AAPL"],
+                    current_time=datetime(2026, 4, 23, 14, 0, tzinfo=timezone.utc),
+                )
+
+        self.assertEqual(len(signals), 1)
+        self.assertIn("Volume pace", signals[0]["reason"])
+
+    def test_momentum_volume_pace_gate_blocks_low_pace(self):
+        prices = [100.0] * 100 + [110.0, 110.0]
+        daily_bars = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=2500)]
+        intraday_bars = [
+            _intraday_bar(35, datetime(2026, 4, 23, 13, 45, tzinfo=timezone.utc)),
+            _intraday_bar(35, datetime(2026, 4, 23, 14, 0, tzinfo=timezone.utc)),
+        ]
+
+        def _get_stock_bars(symbols, timeframe="1Day", limit=60):
+            if timeframe == "1Min":
+                return {"AAPL": intraday_bars}
+            if symbols == ["SPY"]:
+                return {"SPY": [_bar(100.0) for _ in range(30)]}
+            return {"AAPL": daily_bars}
+
+        with (
+            patch("strategies.momentum.ac.get_stock_bars", side_effect=_get_stock_bars),
+            patch("strategies.momentum.rm.market_regime_ok", return_value=True),
+            patch("strategies.momentum.rm.market_breadth_pct", return_value=0.6),
+            patch("strategies.momentum.ac.get_portfolio_value", return_value=10000.0),
+            patch("strategies.momentum.get_sector", return_value="Tech"),
+        ):
+            with patch.dict("strategies.momentum.SCFG", {
+                "enabled": True,
+                "top_n": 1,
+                "min_momentum_pct": 0.01,
+                "min_breadth_coverage_pct": 0.0,
+                "volume_confirmation_mode": "pace",
+                "volume_pace_ratio": 1.5,
+                "volume_pace_timeframe": "1Min",
+                "session_minutes": 390,
+                "volume_spike_ratio": 2.0,
+            }):
+                signals = MomentumStrategy().scan(
+                    ["AAPL"],
+                    current_time=datetime(2026, 4, 23, 14, 0, tzinfo=timezone.utc),
+                )
+
+        self.assertEqual(signals, [])
+
+    def test_momentum_volume_pace_uses_intraday_volume_near_close(self):
+        prices = [100.0] * 100 + [110.0, 110.0]
+        daily_bars = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=900)]
+        intraday_bars = [
+            _intraday_bar(2000, datetime(2026, 4, 23, 19, 55, tzinfo=timezone.utc)),
+        ]
+        calls = []
+
+        def _get_stock_bars(symbols, timeframe="1Day", limit=60):
+            calls.append((tuple(symbols), timeframe, limit))
+            if timeframe == "1Min":
+                return {"AAPL": intraday_bars}
+            if symbols == ["SPY"]:
+                return {"SPY": [_bar(100.0) for _ in range(30)]}
+            return {"AAPL": daily_bars}
+
+        with (
+            patch("strategies.momentum.ac.get_stock_bars", side_effect=_get_stock_bars),
+            patch("strategies.momentum.rm.market_regime_ok", return_value=True),
+            patch("strategies.momentum.rm.market_breadth_pct", return_value=0.6),
+            patch("strategies.momentum.ac.get_portfolio_value", return_value=10000.0),
+            patch("strategies.momentum.get_sector", return_value="Tech"),
+        ):
+            with patch.dict("strategies.momentum.SCFG", {
+                "enabled": True,
+                "top_n": 1,
+                "min_momentum_pct": 0.01,
+                "min_breadth_coverage_pct": 0.0,
+                "volume_confirmation_mode": "pace",
+                "volume_pace_ratio": 1.5,
+                "volume_pace_timeframe": "1Min",
+                "session_minutes": 390,
+                "volume_spike_ratio": 2.0,
+            }):
+                signals = MomentumStrategy().scan(
+                    ["AAPL"],
+                    current_time=datetime(2026, 4, 23, 19, 55, tzinfo=timezone.utc),
+                )
+
+        self.assertEqual(len(signals), 1)
+        self.assertIn("Volume pace", signals[0]["reason"])
+        self.assertTrue(any(call[1] == "1Min" for call in calls))
+
+    def test_momentum_volume_pace_near_close_blocks_low_session_volume(self):
+        prices = [100.0] * 100 + [110.0, 110.0]
+        daily_bars = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=2500)]
+        intraday_bars = [
+            _intraday_bar(500, datetime(2026, 4, 23, 19, 55, tzinfo=timezone.utc)),
+        ]
+
+        def _get_stock_bars(symbols, timeframe="1Day", limit=60):
+            if timeframe == "1Min":
+                return {"AAPL": intraday_bars}
+            if symbols == ["SPY"]:
+                return {"SPY": [_bar(100.0) for _ in range(30)]}
+            return {"AAPL": daily_bars}
+
+        with (
+            patch("strategies.momentum.ac.get_stock_bars", side_effect=_get_stock_bars),
+            patch("strategies.momentum.rm.market_regime_ok", return_value=True),
+            patch("strategies.momentum.rm.market_breadth_pct", return_value=0.6),
+            patch("strategies.momentum.ac.get_portfolio_value", return_value=10000.0),
+            patch("strategies.momentum.get_sector", return_value="Tech"),
+        ):
+            with patch.dict("strategies.momentum.SCFG", {
+                "enabled": True,
+                "top_n": 1,
+                "min_momentum_pct": 0.01,
+                "min_breadth_coverage_pct": 0.0,
+                "volume_confirmation_mode": "pace",
+                "volume_pace_ratio": 1.5,
+                "volume_pace_timeframe": "1Min",
+                "session_minutes": 390,
+                "volume_spike_ratio": 2.0,
+            }):
+                signals = MomentumStrategy().scan(
+                    ["AAPL"],
+                    current_time=datetime(2026, 4, 23, 19, 55, tzinfo=timezone.utc),
+                )
+
+        self.assertEqual(signals, [])
+
+    def test_momentum_volume_pace_falls_back_to_daily_ratio_when_intraday_missing(self):
+        prices = [100.0] * 100 + [110.0, 110.0]
+        daily_bars = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=2500)]
+
+        def _get_stock_bars(symbols, timeframe="1Day", limit=60):
+            if timeframe == "1Min":
+                return {}
+            if symbols == ["SPY"]:
+                return {"SPY": [_bar(100.0) for _ in range(30)]}
+            return {"AAPL": daily_bars}
+
+        with (
+            patch("strategies.momentum.ac.get_stock_bars", side_effect=_get_stock_bars),
+            patch("strategies.momentum.rm.market_regime_ok", return_value=True),
+            patch("strategies.momentum.rm.market_breadth_pct", return_value=0.6),
+            patch("strategies.momentum.ac.get_portfolio_value", return_value=10000.0),
+            patch("strategies.momentum.get_sector", return_value="Tech"),
+        ):
+            with patch.dict("strategies.momentum.SCFG", {
+                "enabled": True,
+                "top_n": 1,
+                "min_momentum_pct": 0.01,
+                "min_breadth_coverage_pct": 0.0,
+                "volume_confirmation_mode": "pace",
+                "volume_pace_ratio": 1.5,
+                "volume_pace_timeframe": "1Min",
+                "session_minutes": 390,
+                "volume_spike_ratio": 2.0,
+            }):
+                signals = MomentumStrategy().scan(
+                    ["AAPL"],
+                    current_time=datetime(2026, 4, 23, 14, 0, tzinfo=timezone.utc),
+                )
+
+        self.assertEqual(len(signals), 1)
+        self.assertIn("Volume daily", signals[0]["reason"])
 
     def test_scan_accepts_dict_bars_for_volume_and_atr_sizing(self):
         prices = [100.0] * 100 + [110.0, 110.0]

@@ -28,7 +28,7 @@ import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -42,6 +42,7 @@ from tracking.performance import compute_summary, load_closed_trades
 from tracking.trade_log import get_open_trades
 from scheduler.reconcile_trade_log import safe_reconcile
 from core.config_loader import get_config
+from core.protection_manager import active_locks_for_reporting
 
 CFG = get_config()
 
@@ -218,6 +219,7 @@ class HealthReport:
     log_warnings: list[LogFinding]
     price_failures: list[PriceFailureState]
     html_output: Path
+    active_protection_locks: list[dict] = field(default_factory=list)
     schedule_source: str = "cron"
 
 
@@ -1590,6 +1592,9 @@ def build_health_report(
     window_start = now - timedelta(hours=lookback_hours)
     errors, warnings = _find_matching_error_lines(findings_by_file, since=window_start)
     price_failures = load_price_failure_state(price_failure_state_file)
+    active_protection_locks, protection_warning = _load_active_protection_locks(now)
+    if protection_warning is not None:
+        warnings.append(protection_warning)
 
     overall = _overall_status(alpaca_state, job_health, errors, warnings, price_failures)
 
@@ -1607,8 +1612,31 @@ def build_health_report(
         log_warnings=warnings,
         price_failures=price_failures,
         html_output=Path(html_output).expanduser().resolve(),
+        active_protection_locks=active_protection_locks,
         schedule_source=(schedule_source or "cron").lower(),
     )
+
+
+def _health_reference_utc(now: datetime) -> datetime:
+    if now.tzinfo is None:
+        local_tz = datetime.now().astimezone().tzinfo
+        now = now.replace(tzinfo=local_tz)
+    return now.astimezone(timezone.utc)
+
+
+def _load_active_protection_locks(now: datetime) -> tuple[list[dict], LogFinding | None]:
+    try:
+        return active_locks_for_reporting(_health_reference_utc(now)), None
+    except Exception as exc:
+        message = f"Protection lock reporting unavailable: {exc}"
+        return [], LogFinding(
+            timestamp=now,
+            level="WARNING",
+            logger="check_health_linux",
+            message=message,
+            source_file=Path("protection_locks.json"),
+            raw=message,
+        )
 
 
 def _overall_status(
@@ -1860,6 +1888,17 @@ def format_terminal_report(report: HealthReport, *, use_color: bool = False) -> 
             lines.append("No open positions detected.")
     lines.append("")
 
+    lines.append("PROTECTION LOCKS")
+    if report.active_protection_locks:
+        for lock in report.active_protection_locks:
+            lines.append(
+                f"  - {lock.get('lock_type')} scope={lock.get('scope')} key={lock.get('key')} "
+                f"expires={lock.get('expires_at')} reason={lock.get('reason')}"
+            )
+    else:
+        lines.append("No active protection locks.")
+    lines.append("")
+
     lines.append("PRICE FETCH HEALTH")
     red_price_failures = [failure for failure in report.price_failures if failure.status == "red"]
     yellow_price_failures = [failure for failure in report.price_failures if failure.status == "yellow"]
@@ -1994,6 +2033,20 @@ def render_html_report(report: HealthReport) -> str:
                 </tr>
                 """
             )
+
+    protection_lock_rows = []
+    for lock in report.active_protection_locks:
+        protection_lock_rows.append(
+            f"""
+            <tr class="yellow">
+              <td><code>{esc(lock.get('lock_type'))}</code></td>
+              <td>{esc(lock.get('scope'))}</td>
+              <td><code>{esc(lock.get('key'))}</code></td>
+              <td><code>{esc(lock.get('expires_at'))}</code></td>
+              <td>{esc(lock.get('reason'))}</td>
+            </tr>
+            """
+        )
 
     price_failure_rows = []
     for failure in report.price_failures:
@@ -2309,6 +2362,24 @@ def render_html_report(report: HealthReport) -> str:
     </section>
 
     <section>
+      <h2>Protection Locks</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Scope</th>
+            <th>Key</th>
+            <th>Expires</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          {''.join(protection_lock_rows) if protection_lock_rows else '<tr><td colspan="5" class="muted">No active protection locks.</td></tr>'}
+        </tbody>
+      </table>
+    </section>
+
+    <section>
       <h2>Price Fetch Health</h2>
       <p class="muted">Consecutive latest-price failures: <strong>{esc(price_failure_status)}</strong></p>
       <table>
@@ -2462,6 +2533,7 @@ def health_report_to_dict(report: HealthReport) -> dict:
         },
         "job_health": [_job_health_to_dict(job) for job in report.job_health],
         "trade_summary": report.trade_summary,
+        "active_protection_locks": report.active_protection_locks,
         "price_failures": [_price_failure_to_dict(failure) for failure in report.price_failures],
         "log_errors": [_finding_to_dict(finding) for finding in report.log_errors],
         "log_warnings": [_finding_to_dict(finding) for finding in report.log_warnings],

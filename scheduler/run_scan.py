@@ -34,6 +34,10 @@ from core import alpaca_client as ac
 from core.config_loader import get_config
 from core import order_executor as oe
 from core import risk_manager as rm
+from core.portfolio_construction import build_order_plan, build_portfolio_target
+from core.protection_manager import ProtectionManager
+from core.risk_pipeline import EntryRiskContext, evaluate_entry_target
+from core.trading_models import OrderPlan, RiskDecision, signal_from_strategy_dict
 from core.exit_policy import (
     evaluate_hold_exit,
     finite_positive_float,
@@ -255,6 +259,15 @@ def _max_positions_planned(planned_symbols: set) -> bool:
     return False
 
 
+OPERATIONAL_GOVERNOR_BLOCK_CODES = {
+    "account_lookup_failed",
+    "broker_orders_lookup_failed",
+    "missing_account_state",
+    "missing_broker_orders",
+    "order_history_unavailable",
+}
+
+
 def _planned_asset_class_cap_reached(asset_class: str, planned_asset_classes: dict) -> bool:
     if _max_positions_planned(planned_asset_classes):
         return True
@@ -296,7 +309,7 @@ def _register_entry_result(
 ):
     if not result:
         return
-    if result.get("status") == "entry_failed":
+    if result.get("status") in {"entry_failed", "order_governor_blocked"}:
         return
     normalized = ac.normalize_symbol(symbol)
     planned_symbols.add(normalized)
@@ -330,13 +343,20 @@ def _latest_price_for_trade(symbol: str, asset_class: str) -> float:
 def _mark_unhealthy_exit_result(marker: RunScope | None, result: dict | None, stage: str):
     if marker is None or not result:
         return
-    if result.get("status") == "pending_exit_check_failed":
+    status = result.get("status")
+    governor_code = str(result.get("governor_code") or "")
+    if status == "pending_exit_check_failed" or (
+        status == "order_governor_blocked"
+        and governor_code in OPERATIONAL_GOVERNOR_BLOCK_CODES
+    ):
         marker.mark_error(
             stage=stage,
-            error_type="PendingExitOrderCheckFailed",
+            error_type=result.get("error_type", "PendingExitOrderCheckFailed"),
             blocked_exit_symbol=result.get("symbol", ""),
+            governor_code=governor_code,
+            error=result.get("error", ""),
         )
-    elif result.get("status") in {"exit_failed", "invalid_exit_price", "invalid_entry_price"}:
+    elif status in {"exit_failed", "invalid_exit_price", "invalid_entry_price"}:
         marker.mark_error(
             stage=stage,
             error_type=result.get("error_type", "ExitFailed"),
@@ -348,13 +368,100 @@ def _mark_unhealthy_exit_result(marker: RunScope | None, result: dict | None, st
 def _mark_unhealthy_entry_result(marker: RunScope | None, result: dict | None, stage: str):
     if marker is None or not result:
         return
-    if result.get("status") == "entry_failed":
+    status = result.get("status")
+    governor_code = str(result.get("governor_code") or "")
+    if status == "entry_failed" or (
+        status == "order_governor_blocked"
+        and governor_code in OPERATIONAL_GOVERNOR_BLOCK_CODES
+    ):
         marker.mark_error(
             stage=stage,
             error_type=result.get("error_type", "EntryFailed"),
             failed_entry_symbol=result.get("symbol", ""),
+            governor_code=governor_code,
             error=result.get("error", ""),
         )
+
+
+def _log_active_protection_locks(locks: list) -> None:
+    if not locks:
+        return
+    log.warning("Active protection locks: %s", len(locks))
+    for lock in locks:
+        log.warning(
+            "Protection lock active | type=%s scope=%s key=%s expires_at=%s reason=%s",
+            lock.lock_type,
+            lock.scope,
+            lock.key,
+            lock.expires_at.isoformat(),
+            lock.reason,
+        )
+
+
+def _log_entry_risk_block(decision: RiskDecision) -> None:
+    target = decision.target
+    if decision.code == "duplicate_planned_symbol":
+        log.debug(f"Already holding {target.symbol}, skipping entry.")
+        return
+    if decision.code == "planned_cap_reached":
+        return
+    if decision.code == "protection_refresh_failed":
+        log.warning(
+            "Entry blocked because protection refresh failed | symbol=%s strategy=%s",
+            target.symbol,
+            target.strategy,
+        )
+        return
+    if decision.code == "protection_lock":
+        log.warning(
+            "Entry blocked by protection lock | symbol=%s strategy=%s lock_type=%s scope=%s key=%s reason=%s",
+            target.symbol,
+            target.strategy,
+            decision.context.get("lock_type", ""),
+            decision.context.get("scope", ""),
+            decision.context.get("key", ""),
+            decision.reason,
+        )
+        return
+    log.info(
+        "Entry blocked by risk pipeline | symbol=%s strategy=%s code=%s reason=%s",
+        target.symbol,
+        target.strategy,
+        decision.code,
+        decision.reason,
+    )
+
+
+def _entry_order_plan_for_signal(
+    signal_row: dict,
+    strategy,
+    asset_class: str,
+    planned_symbols: set,
+    planned_asset_classes: dict,
+    protection_manager: ProtectionManager,
+    protection_entries_blocked: bool,
+) -> tuple[OrderPlan | None, bool]:
+    signal = signal_from_strategy_dict(
+        signal_row,
+        strategy_name=strategy.name,
+        asset_class=asset_class,
+    )
+    target = build_portfolio_target(signal)
+    decision = evaluate_entry_target(
+        target,
+        EntryRiskContext(
+            planned_symbols=planned_symbols,
+            planned_asset_classes=planned_asset_classes,
+            protection_manager=protection_manager,
+            protection_entries_blocked=protection_entries_blocked,
+            normalize_symbol=ac.normalize_symbol,
+            cap_reached=_planned_asset_class_cap_reached,
+        ),
+    )
+    if not decision.allowed:
+        _log_entry_risk_block(decision)
+        return None, decision.code == "planned_cap_reached"
+    return build_order_plan(decision), False
 
 
 def _mark_exit_check_exception(marker: RunScope | None, stage: str, symbol: str, exc: Exception):
@@ -741,6 +848,30 @@ def run(
     if pending_entry_symbols:
         log.info(f"Pending entry orders counted as planned positions: {len(pending_entry_symbols)}")
 
+    protection_manager = ProtectionManager.from_config(CFG)
+    protection_entries_blocked = False
+    if protection_manager.enabled:
+        try:
+            if dry_run:
+                active_locks = protection_manager.active_locks()
+            else:
+                active_locks = protection_manager.refresh_from_trade_log()
+        except Exception as e:
+            protection_entries_blocked = True
+            if marker is not None:
+                marker.mark_error(
+                    stage="protection_refresh",
+                    error_type=type(e).__name__,
+                    error=str(e),
+                )
+            log.error(
+                "Protection refresh failed; blocking new entries fail-closed while exit checks continue: %s",
+                e,
+                exc_info=True,
+            )
+        else:
+            _log_active_protection_locks(active_locks)
+
     # --- Pre-fetch regime bars to share across strategies (reduces API calls) ---
     stock_regime_bars = None
     crypto_regime_bars = None
@@ -781,30 +912,36 @@ def run(
                     )
                 signals = strategy.scan(stock_universe, **scan_kwargs)
                 for sig in signals:
-                    sym = sig["symbol"]
-                    normalized = ac.normalize_symbol(sym)
-                    if normalized in planned_symbols:
-                        log.debug(f"Already holding {sym}, skipping entry.")
-                        continue
-                    if _planned_asset_class_cap_reached("stock", planned_asset_classes):
-                        break
                     if sig["action"] == "buy":
+                        plan, stop_strategy = _entry_order_plan_for_signal(
+                            sig,
+                            strategy,
+                            "stock",
+                            planned_symbols,
+                            planned_asset_classes,
+                            protection_manager,
+                            protection_entries_blocked,
+                        )
+                        if stop_strategy:
+                            break
+                        if plan is None:
+                            continue
                         result = oe.enter_position(
-                            sym,
-                            strategy=strategy.name,
-                            asset_class="stock",
+                            plan.symbol,
+                            strategy=plan.strategy,
+                            asset_class=plan.asset_class,
                             dry_run=dry_run,
-                            suggested_qty=sig.get("atr_risk_qty"),
-                            atr_stop_price=sig.get("atr_stop_price"),
+                            suggested_qty=plan.suggested_qty,
+                            atr_stop_price=plan.atr_stop_price,
                         )
                         _mark_unhealthy_entry_result(marker, result, "stock_entry")
                         _register_entry_result(
                             result,
-                            sym,
+                            plan.symbol,
                             open_symbols,
                             planned_symbols,
                             new_entry_symbols,
-                            asset_class="stock",
+                            asset_class=plan.asset_class,
                             planned_asset_classes=planned_asset_classes,
                         )
             except Exception as e:
@@ -823,30 +960,36 @@ def run(
             try:
                 signals = strategy.scan(CRYPTO_UNIVERSE, regime_bars=crypto_regime_bars)
                 for sig in signals:
-                    sym = sig["symbol"]
-                    normalized = ac.normalize_symbol(sym)
-                    if normalized in planned_symbols:
-                        log.debug(f"Already holding {sym}, skipping entry.")
-                        continue
-                    if _planned_asset_class_cap_reached("crypto", planned_asset_classes):
-                        break
                     if sig["action"] == "buy":
+                        plan, stop_strategy = _entry_order_plan_for_signal(
+                            sig,
+                            strategy,
+                            "crypto",
+                            planned_symbols,
+                            planned_asset_classes,
+                            protection_manager,
+                            protection_entries_blocked,
+                        )
+                        if stop_strategy:
+                            break
+                        if plan is None:
+                            continue
                         result = oe.enter_position(
-                            sym,
-                            strategy=strategy.name,
-                            asset_class="crypto",
+                            plan.symbol,
+                            strategy=plan.strategy,
+                            asset_class=plan.asset_class,
                             dry_run=dry_run,
-                            suggested_qty=sig.get("atr_risk_qty"),
-                            atr_stop_price=sig.get("atr_stop_price"),
+                            suggested_qty=plan.suggested_qty,
+                            atr_stop_price=plan.atr_stop_price,
                         )
                         _mark_unhealthy_entry_result(marker, result, "crypto_entry")
                         _register_entry_result(
                             result,
-                            sym,
+                            plan.symbol,
                             open_symbols,
                             planned_symbols,
                             new_entry_symbols,
-                            asset_class="crypto",
+                            asset_class=plan.asset_class,
                             planned_asset_classes=planned_asset_classes,
                         )
             except Exception as e:

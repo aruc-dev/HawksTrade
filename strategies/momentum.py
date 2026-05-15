@@ -17,7 +17,9 @@ Strategy: Swing trade (NOT intraday).
 
 import logging
 import math
-from typing import List, Dict
+from datetime import datetime, time, timezone
+from typing import List, Dict, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -31,6 +33,7 @@ from core.sector_lookup import get_sector
 CFG = get_config()
 
 SCFG = CFG["strategies"]["momentum"]
+ET = ZoneInfo("America/New_York")
 log = logging.getLogger("strategy.momentum")
 
 
@@ -43,6 +46,110 @@ def _bar_value(bar, field: str, default: float = 0.0) -> float:
         return float(value if value is not None else default)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _bar_timestamp(bar):
+    if hasattr(bar, "timestamp"):
+        return getattr(bar, "timestamp")
+    if isinstance(bar, dict):
+        return bar.get("timestamp")
+    return None
+
+
+def _parse_bar_timestamp(value):
+    if isinstance(value, datetime):
+        ts = value
+    elif isinstance(value, str):
+        try:
+            ts = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    elif hasattr(value, "to_pydatetime"):
+        try:
+            ts = value.to_pydatetime()
+        except (TypeError, ValueError):
+            return None
+    else:
+        try:
+            ts = pd.to_datetime(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if pd.isna(ts):
+            return None
+        if hasattr(ts, "to_pydatetime"):
+            ts = ts.to_pydatetime()
+        elif not isinstance(ts, datetime):
+            return None
+    if pd.isna(ts):
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts
+
+
+def _filter_bars_as_of(bars, current_time):
+    cutoff = _parse_bar_timestamp(current_time)
+    if cutoff is None or bars is None:
+        return bars
+    filtered = []
+    for bar in bars:
+        timestamp = _parse_bar_timestamp(_bar_timestamp(bar))
+        if timestamp is None or timestamp <= cutoff:
+            filtered.append(bar)
+    return filtered
+
+
+def _filter_bars_data_as_of(strategy, bars_data, symbols, current_time):
+    if current_time is None or bars_data is None:
+        return bars_data
+    filtered = {}
+    for symbol in symbols:
+        bars = strategy._get_symbol_bars(bars_data, symbol)
+        if bars is not None:
+            filtered[symbol] = _filter_bars_as_of(bars, current_time)
+    return filtered
+
+
+def _as_et(value=None) -> datetime:
+    if value is None:
+        return datetime.now(ET)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(ET)
+
+
+def _regular_session_progress(current_time, session_minutes: float) -> Tuple[float, bool]:
+    now_et = _as_et(current_time)
+    session_start = datetime.combine(now_et.date(), time(9, 30), tzinfo=ET)
+    elapsed = (now_et - session_start).total_seconds() / 60.0
+    in_session = 0 <= elapsed <= session_minutes
+    return max(1.0, min(float(elapsed), float(session_minutes))), in_session
+
+
+def _session_volume_from_bars(bars, current_time) -> Optional[float]:
+    if not bars:
+        return None
+
+    now_et = _as_et(current_time)
+    session_start = datetime.combine(now_et.date(), time(9, 30), tzinfo=ET)
+    total = 0.0
+    saw_timestamp = False
+
+    for bar in bars:
+        volume = _bar_value(bar, "volume")
+        if volume <= 0:
+            continue
+        ts = _parse_bar_timestamp(_bar_timestamp(bar))
+        if ts is None:
+            continue
+        saw_timestamp = True
+        ts_et = ts.astimezone(ET)
+        if session_start <= ts_et <= now_et:
+            total += volume
+
+    if not saw_timestamp:
+        return None
+    return total if total > 0 else None
 
 
 def _calc_atr(bars, period: int = 14) -> float:
@@ -146,9 +253,14 @@ class MomentumStrategy(BaseStrategy):
         except Exception as e:
             log.error(f"[Momentum] Failed to fetch bars: {e}")
             return []
+        current_time = kwargs.get("current_time")
+        bars_data = _filter_bars_data_as_of(self, bars_data, universe, current_time)
 
         # --- Phase 3: Market Breadth Tiered Regime Guard ---
         regime_bars = kwargs.get("regime_bars")
+        if regime_bars is not None:
+            regime_symbols = list(regime_bars.keys()) if isinstance(regime_bars, dict) else ["SPY", "QQQ"]
+            regime_bars = _filter_bars_data_as_of(self, regime_bars, regime_symbols, current_time)
         spy_bull = rm.market_regime_ok(
             bars_data=regime_bars,
             allow_warmup=bool(kwargs.get("allow_regime_warmup", False)),
@@ -199,6 +311,7 @@ class MomentumStrategy(BaseStrategy):
                 # Fallback fetch for SPY if not in regime_bars
                 raw_spy = ac.get_stock_bars(["SPY"], timeframe="1Day", limit=25)
                 s_bars = raw_spy.get("SPY")
+            s_bars = _filter_bars_as_of(s_bars, current_time)
 
             if s_bars and len(s_bars) >= 8:
                 s_closes = pd.Series([
@@ -218,10 +331,36 @@ class MomentumStrategy(BaseStrategy):
         atr_period = int(SCFG.get("atr_period", 14))
         atr_mult   = float(SCFG.get("atr_multiplier", 2.0))
         min_alpha_pct = float(SCFG.get("min_alpha_pct", 0.0))
+        volume_mode = str(SCFG.get("volume_confirmation_mode", "daily")).strip().lower()
+        if volume_mode not in {"daily", "pace"}:
+            log.warning("[Momentum] Unknown volume_confirmation_mode=%s; using daily fallback.", volume_mode)
+            volume_mode = "daily"
+        volume_spike_ratio = float(SCFG.get("volume_spike_ratio", 1.2))
+        volume_pace_ratio = float(SCFG.get("volume_pace_ratio", volume_spike_ratio))
+        session_minutes = max(1.0, float(SCFG.get("session_minutes", 390)))
+        volume_pace_timeframe = str(SCFG.get("volume_pace_timeframe", "1Min"))
+        elapsed_minutes, in_regular_session = _regular_session_progress(current_time, session_minutes)
+        intraday_bars_data = None
+
+        if volume_mode == "pace" and in_regular_session:
+            try:
+                intraday_limit = max(10, min(int(math.ceil(elapsed_minutes)) + 5, int(session_minutes) + 5))
+                intraday_bars_data = ac.get_stock_bars(
+                    universe,
+                    timeframe=volume_pace_timeframe,
+                    limit=intraday_limit,
+                )
+            except Exception as e:
+                log.warning(
+                    "[Momentum] Failed to fetch intraday bars for volume pace; "
+                    "falling back to daily volume ratio: %s",
+                    e,
+                )
 
         for symbol in universe:
             try:
                 bars = self._load_symbol_bars(bars_data, symbol)
+                bars = _filter_bars_as_of(bars, current_time)
                 if bars is None or len(bars) < 21: # Need 21 for avg volume
                     continue
 
@@ -249,17 +388,33 @@ class MomentumStrategy(BaseStrategy):
                     continue
 
                 # 3. Volume Confirmation (Recommendation 3)
-                # Current bar must be a volume spike (> volume_spike_ratio × 20-day avg)
-                vol_spike_ratio = float(SCFG.get("volume_spike_ratio", 1.2))
                 volumes = pd.Series([
                     float(b.volume) if hasattr(b, "volume") else float(b["volume"])
                     for b in bars
                 ])
                 avg_vol_20 = volumes.iloc[-21:-1].mean()
-                # Fix BUG-007: add safety guard for volume access
+                if avg_vol_20 <= 0:
+                    continue
                 curr_vol = _bar_value(bars[-1], "volume")
-                if avg_vol_20 > 0 and curr_vol <= vol_spike_ratio * avg_vol_20:
-                    log.debug(f"[Momentum] {symbol} skipped: volume confirmation failed ({curr_vol:.0f} <= {vol_spike_ratio}x {avg_vol_20:.0f})")
+                daily_volume_ratio = curr_vol / avg_vol_20
+                volume_ratio = daily_volume_ratio
+                volume_required = volume_spike_ratio
+                volume_basis = "daily"
+
+                if volume_mode == "pace" and intraday_bars_data is not None:
+                    intraday_bars = self._get_symbol_bars(intraday_bars_data, symbol)
+                    session_volume = _session_volume_from_bars(intraday_bars, current_time)
+                    expected_volume = avg_vol_20 * elapsed_minutes / session_minutes
+                    if session_volume is not None and expected_volume > 0:
+                        volume_ratio = session_volume / expected_volume
+                        volume_required = volume_pace_ratio
+                        volume_basis = "pace"
+
+                if volume_ratio < volume_required:
+                    log.debug(
+                        f"[Momentum] {symbol} skipped: volume {volume_basis} confirmation "
+                        f"failed ({volume_ratio:.2f}x < {volume_required:.2f}x)"
+                    )
                     continue
 
                 # Phase 1: ATR input for stop and risk sizing
@@ -271,6 +426,8 @@ class MomentumStrategy(BaseStrategy):
                     "alpha":         alpha,
                     "price":         price_now,
                     "atr":           atr,
+                    "volume_ratio":  volume_ratio,
+                    "volume_basis":  volume_basis,
                 })
 
             except Exception as e:
@@ -325,7 +482,10 @@ class MomentumStrategy(BaseStrategy):
                 "confidence": round(min(s["momentum"] / 0.10, 1.0), 3),
                 "momentum_score": round(s["momentum"], 4),
                 "alpha_score":    round(s["alpha"], 4),
-                "reason":     f"Alpha momentum: {s['alpha']:.1%} (Absolute {s['momentum']:.1%})",
+                "reason":     (
+                    f"Alpha momentum: {s['alpha']:.1%} (Absolute {s['momentum']:.1%}) | "
+                    f"Volume {s['volume_basis']}: {s['volume_ratio']:.1f}x"
+                ),
             }
             sig["atr_stop_price"] = atr_stop
             sig["atr_risk_qty"] = atr_risk_qty
@@ -333,6 +493,7 @@ class MomentumStrategy(BaseStrategy):
             log.info(
                 f"[Momentum] Signal: BUY {s['symbol']} | Alpha={s['alpha']:.1%} "
                 f"| Momentum={s['momentum']:.1%} | sector={get_sector(s['symbol'])} "
+                f"| volume_{s['volume_basis']}={s['volume_ratio']:.2f}x "
                 f"| atr_stop={atr_stop} | risk_qty={atr_risk_qty}"
             )
             signals.append(sig)

@@ -22,6 +22,7 @@ from core import alpaca_client as ac
 from core.config_loader import get_config
 from core.logging_config import runtime_log_handlers
 from core.portfolio import get_snapshot, print_snapshot
+from core.protection_manager import active_locks_for_reporting
 from core.run_markers import run_scope
 from scheduler.reconcile_trade_log import safe_reconcile
 from tracking.performance import compute_summary, format_report, save_performance_snapshot
@@ -46,6 +47,23 @@ log = logging.getLogger("run_report")
 CFG = get_config()
 
 
+def _format_protection_locks() -> str:
+    try:
+        locks = active_locks_for_reporting()
+    except Exception as exc:
+        log.warning("Protection lock reporting unavailable: %s", exc, exc_info=True)
+        return f"Protection lock reporting unavailable: {exc}"
+    if not locks:
+        return ""
+    lines = ["Active Protection Locks:"]
+    for lock in locks:
+        lines.append(
+            f"  {lock.get('lock_type')} scope={lock.get('scope')} key={lock.get('key')} "
+            f"expires={lock.get('expires_at')} reason={lock.get('reason')}"
+        )
+    return "\n".join(lines)
+
+
 def run_daily_report():
     log.info("=== DAILY REPORT ===")
     ts = _utc_now().strftime("%Y-%m-%d")
@@ -59,6 +77,9 @@ def run_daily_report():
     summary = compute_summary()
     report_text = format_report(summary)
     log.info(report_text)
+    protection_text = _format_protection_locks()
+    if protection_text:
+        log.warning("\n%s", protection_text)
 
     # Save report to file
     report_path = REPORTS_DIR / f"daily_{ts}.txt"
@@ -77,6 +98,9 @@ def run_daily_report():
                     f"now=${p['current_price']:>10.4f}  "
                     f"P&L={p['unrealized_pnl_pct']:>+.2%}\n"
                 )
+        if protection_text:
+            f.write(protection_text)
+            f.write("\n\n")
         f.write(report_text)
         f.write("\n")
 
@@ -92,11 +116,17 @@ def run_weekly_report():
     summary = compute_summary()
     report_text = format_report(summary)
     log.info(report_text)
+    protection_text = _format_protection_locks()
+    if protection_text:
+        log.warning("\n%s", protection_text)
 
     report_path = REPORTS_DIR / f"weekly_{ts}.txt"
     with open(report_path, "w") as f:
         f.write(f"HawksTrade Weekly Report — {ts}\n")
         f.write(f"Mode: {CFG['mode'].upper()}\n\n")
+        if protection_text:
+            f.write(protection_text)
+            f.write("\n\n")
         f.write(report_text)
         f.write("\n")
 

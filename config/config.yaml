@@ -43,6 +43,36 @@ trading:
   order_type: "limit"            # "market" or "limit"
   limit_slippage_pct: 0.001      # Limit price set 0.1% from current for fast fills
 
+# --- ORDER GOVERNOR ---
+# Broker-state safety gate evaluated immediately before order submission.
+order_governor:
+  enabled: true
+  max_active_orders: 50
+  max_orders_per_window: 60
+  order_rate_window_seconds: 60
+  max_daily_orders: 500
+  max_notional_usd: null
+  max_notional_pct: null
+
+# --- PROTECTIONS ---
+# Optional entry lock manager. Defaults disabled to preserve existing behavior.
+# When enabled, failed refreshes block new entries fail-closed while exits continue.
+protections:
+  enabled: false
+  symbol_cooldown_days: 1.0
+  symbol_stoploss_cooldown_days: 3.0
+  symbol_stoploss_loss_pct: 0.035
+  strategy_stoploss_lookback_days: 10.0
+  strategy_stoploss_threshold: 3
+  strategy_stoploss_cooldown_days: 3.0
+  low_profit_lookback_days: 20.0
+  low_profit_min_trades: 5
+  low_profit_threshold_pct: 0.0
+  low_profit_cooldown_days: 5.0
+  max_drawdown_lookback_days: 20.0
+  max_drawdown_pct: 0.05
+  max_drawdown_cooldown_days: 5.0
+
 # --- STOCK UNIVERSE ---
 stocks:
   scan_universe:                 # Stocks screened for opportunities each cycle
@@ -125,7 +155,7 @@ strategies:
   momentum:
     enabled: true
     asset_class: stocks          # stocks | crypto | both
-    description: "Adaptive momentum: top-2 green-regime ranking with reduced ATR stop extension, 1% risk sizing, sector-neutral ranking, breadth coverage guard, breadth-tiered regime, and moderated volume-spike entry (>2.0x 20d avg volume required)"
+    description: "Adaptive momentum: top-2 green-regime ranking with reduced ATR stop extension, 1% risk sizing, sector-neutral ranking, breadth coverage guard, breadth-tiered regime, and time-of-day normalized volume-pace entry"
     top_n: 2                     # Pick the two strongest stocks by momentum in green regimes
     hold_days: 4                 # Minimum hold before profit-aware exit checks
     exit_policy: "profit_trailing" # fixed_hold | profit_trailing | risk_only_baseline
@@ -147,7 +177,11 @@ strategies:
     breadth_red_threshold: 0.25    # < 25% above SMA50 → Red (no new entries)
     min_breadth_coverage_pct: 0.65 # Require valid SMA50 coverage for at least 65% of the scan universe
     yellow_max_positions: 1        # Max positions in Yellow regime (breadth 25–50%)
-    volume_spike_ratio: 2.0        # Entry bar volume must exceed this multiple of the 20-day average
+    volume_confirmation_mode: "pace" # "pace" compares current session volume to expected volume for elapsed market minutes; "daily" uses legacy full-day ratio
+    volume_pace_ratio: 1.5         # Current session volume pace must exceed this multiple of the 20-day average daily pace
+    volume_pace_timeframe: "1Min"  # Intraday bars used to calculate current session volume pace
+    session_minutes: 390           # Regular US equity session length used for volume-pace normalization
+    volume_spike_ratio: 2.0        # Legacy daily fallback: latest daily volume must exceed this multiple of the 20-day average
 
   rsi_reversion:
     enabled: false

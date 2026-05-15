@@ -49,11 +49,15 @@ filtering:
    - **Yellow** (breadth 25–50%): reduced deployment, up to `yellow_max_positions: 1`.
    - **Green** (breadth ≥ 50%): full `top_n: 2` deployment.
 
-**Volume Confirmation (per-signal):** Each candidate must have entry-bar volume above 200% of
-its 20-day average volume (`volume_spike_ratio: 2.0`). Signals where today's volume is
-suspiciously thin — a common trait of exhaustion moves — are skipped. The screener
-provides a separate 20-day ADV baseline at universe construction time; this check adds
-a per-signal guard at scan time.
+**Volume Confirmation (per-signal):** Momentum uses time-of-day normalized volume
+pace by default (`volume_confirmation_mode: pace`). Current regular-session volume
+must be at least `1.5x` the expected volume for the elapsed market minutes
+(`volume_pace_ratio: 1.5`), based on the candidate's 20-day average daily volume.
+If intraday bars are unavailable, the scan time is outside regular-session
+context, or no valid elapsed-session volume can be calculated, it falls back to
+the legacy daily-volume check
+(`volume_spike_ratio: 2.0`). The screener provides a separate 20-day ADV baseline
+at universe construction time; this check adds a per-signal guard at scan time.
 
 **Optional Alpha Gate:** `min_alpha_pct` can require a candidate's 5-day return to
 exceed SPY's 5-day return by a configured amount. It is set to `0.0` in the validated
@@ -89,7 +93,11 @@ room while the global 3.5% stop remains the baseline fixed-percentage stop.
 | `breadth_red_threshold` | 25% |
 | `min_breadth_coverage_pct` | 65% |
 | `yellow_max_positions` | 1 |
-| `volume_spike_ratio` | 2.0 (entry bar > 200% of 20-day avg volume) |
+| `volume_confirmation_mode` | `pace` |
+| `volume_pace_ratio` | 1.5x expected elapsed-session volume pace |
+| `volume_pace_timeframe` | `1Min` |
+| `session_minutes` | 390 |
+| `volume_spike_ratio` | 2.0 legacy daily fallback |
 
 **Regime filters:**
 - SPY > SMA50 (hard requirement; Red if fails).

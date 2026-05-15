@@ -30,6 +30,7 @@ from core import alpaca_client as ac  # noqa: E402
 from core import risk_manager as rm  # noqa: E402
 from core import order_executor as oe  # noqa: E402
 from core.config_loader import get_config  # noqa: E402
+from core.protection_manager import ProtectionManager  # noqa: E402
 from core.exit_policy import (  # noqa: E402
     VALID_MOMENTUM_EXIT_POLICIES,
     normalize_momentum_exit_policy,
@@ -99,6 +100,9 @@ REGIME_HISTORY_LIMITS = {
     "QQQ": 55,
     "BTC/USD": 60,
 }
+BACKTEST_SESSION_MINUTES = 390.0
+BACKTEST_OPENING_PROXY_MINUTES = 5.0
+BACKTEST_OPENING_PROXY_LIMIT_CUTOFF = 90
 
 
 def _bars_from_frame(df: pd.DataFrame) -> list[SimpleBar]:
@@ -136,6 +140,41 @@ def _gap_up_backtest_scan_time(current_date) -> datetime:
         tzinfo=ZoneInfo("America/New_York"),
     )
     return scan_et.astimezone(timezone.utc)
+
+
+def _momentum_backtest_scan_time(current_date) -> datetime:
+    session_date = _as_datetime(current_date).date()
+    scan_et = datetime(
+        session_date.year,
+        session_date.month,
+        session_date.day,
+        15,
+        55,
+        tzinfo=ZoneInfo("America/New_York"),
+    )
+    return scan_et.astimezone(timezone.utc)
+
+
+def _synthetic_intraday_proxy(current_date, request_limit: int) -> tuple[datetime, float, str]:
+    """Return timestamp, elapsed-session minutes, and proxy kind for daily-bar intraday mocks."""
+    try:
+        limit = int(request_limit)
+    except (TypeError, ValueError):
+        limit = 0
+    if limit <= BACKTEST_OPENING_PROXY_LIMIT_CUTOFF:
+        return _gap_up_backtest_scan_time(current_date), BACKTEST_OPENING_PROXY_MINUTES, "opening"
+
+    session_date = _as_datetime(current_date).date()
+    elapsed = max(1.0, min(float(limit - 5), BACKTEST_SESSION_MINUTES))
+    session_start = datetime(
+        session_date.year,
+        session_date.month,
+        session_date.day,
+        9,
+        30,
+        tzinfo=ZoneInfo("America/New_York"),
+    )
+    return (session_start + timedelta(minutes=elapsed)).astimezone(timezone.utc), elapsed, "session"
 
 
 def _as_datetime(value) -> datetime:
@@ -417,6 +456,23 @@ def _backtest_scan_universe(
     return cfg["crypto"]["scan_universe"]
 
 
+def _backtest_protection_rows(trades_log: list[dict]) -> list[dict]:
+    rows = []
+    for trade in trades_log:
+        exit_date = trade.get("exit_date")
+        timestamp = exit_date.isoformat() if isinstance(exit_date, datetime) else str(exit_date or "")
+        rows.append({
+            "side": "sell",
+            "status": "closed",
+            "symbol": trade.get("symbol", ""),
+            "strategy": trade.get("strategy", "unknown"),
+            "pnl_pct": trade.get("pnl_pct", ""),
+            "timestamp": timestamp,
+            "exit_reason": trade.get("exit_reason", ""),
+        })
+    return rows
+
+
 def _make_bar_fetcher(sim: "BacktestSimulator"):
     """Return a mock_get_bars function bound to the given simulator.
 
@@ -435,10 +491,13 @@ def _make_bar_fetcher(sim: "BacktestSimulator"):
                 mask = df.index <= sim.current_date
                 hist_df = df[mask].tail(limit)
                 if timeframe in {"1Min", "5Min", "15Min"}:
+                    sim.synthetic_minute_proxy_used = True
+                    sim.synthetic_minute_proxy_symbols.add(s)
+                    sim.synthetic_minute_proxy_timeframes.add(timeframe)
                     # Daily historical backtests do not have real minute bars.
-                    # Provide a synthetic 9:35 ET opening bar so gap_up can be
-                    # evaluated at the session open without using the full daily
-                    # close as its entry price.
+                    # Provide opening-window proxies for gap_up and elapsed-session
+                    # volume proxies for momentum without pretending full minute
+                    # replay exists.
                     session_date = _as_datetime(sim.current_date).date()
                     session_mask = pd.Series(
                         [_as_datetime(idx).date() <= session_date for idx in df.index],
@@ -446,14 +505,23 @@ def _make_bar_fetcher(sim: "BacktestSimulator"):
                     )
                     hist_df = df[session_mask].tail(1).copy()
                     if not hist_df.empty:
-                        open_price = hist_df.iloc[-1]["open"]
-                        hist_df.loc[:, "high"] = open_price
-                        hist_df.loc[:, "low"] = open_price
-                        hist_df.loc[:, "close"] = open_price
-                        hist_df.loc[:, "volume"] = hist_df["volume"] * (5.0 / 390.0)
-                        hist_df.index = pd.DatetimeIndex([
-                            _gap_up_backtest_scan_time(sim.current_date)
-                        ])
+                        hist_df = hist_df.astype({"volume": "float64"})
+                        proxy_time, elapsed_minutes, proxy_kind = _synthetic_intraday_proxy(sim.current_date, limit)
+                        if proxy_kind == "opening":
+                            open_price = hist_df.iloc[-1]["open"]
+                            hist_df.loc[:, "high"] = open_price
+                            hist_df.loc[:, "low"] = open_price
+                            hist_df.loc[:, "close"] = open_price
+                        else:
+                            sim.synthetic_session_volume_proxy_used = True
+                            sim.synthetic_session_volume_proxy_symbols.add(s)
+                            sim.synthetic_session_volume_proxy_timeframes.add(timeframe)
+                        hist_df.loc[:, "volume"] = (
+                            hist_df["volume"].astype(float)
+                            * min(elapsed_minutes, BACKTEST_SESSION_MINUTES)
+                            / BACKTEST_SESSION_MINUTES
+                        )
+                        hist_df.index = pd.DatetimeIndex([proxy_time])
                 bars_list = [
                     SimpleBar(
                         open_price=float(row["open"]),
@@ -517,6 +585,45 @@ def _compute_daily_sharpe(df_curve: pd.DataFrame) -> float:
     return float((returns.mean() / std) * math.sqrt(365))
 
 
+def _backtest_execution_notes(cfg: dict, sim: "BacktestSimulator" | None = None) -> list[str]:
+    notes = []
+    gap_up_enabled = cfg.get("strategies", {}).get("gap_up", {}).get("enabled", False)
+    momentum_enabled = cfg.get("strategies", {}).get("momentum", {}).get("enabled", False)
+    if gap_up_enabled:
+        proxy_used = bool(getattr(sim, "synthetic_minute_proxy_used", False)) if sim else True
+        symbols = sorted(getattr(sim, "synthetic_minute_proxy_symbols", set())) if sim else []
+        symbol_suffix = f" Symbols: {', '.join(symbols[:8])}." if symbols else ""
+        if proxy_used:
+            notes.append(
+                "Gap-Up opening-window backtest uses a synthetic 9:35 ET daily-open proxy, "
+                "not real minute bars; Gap-Up fills are not intraday-validated."
+                f"{symbol_suffix}"
+            )
+        else:
+            notes.append(
+                "Gap-Up was enabled, but no opening-window minute replay was exercised in this run."
+            )
+    if momentum_enabled:
+        proxy_used = bool(getattr(sim, "synthetic_session_volume_proxy_used", False)) if sim else False
+        symbols = sorted(getattr(sim, "synthetic_session_volume_proxy_symbols", set())) if sim else []
+        symbol_suffix = f" Symbols: {', '.join(symbols[:8])}." if symbols else ""
+        if proxy_used:
+            notes.append(
+                "Momentum volume-pace backtest uses a synthetic elapsed-session volume proxy "
+                "from daily bars, not real minute bars; volume-pace fills are not intraday-validated."
+                f"{symbol_suffix}"
+            )
+    return notes
+
+
+def _format_execution_notes(notes: list[str]) -> str:
+    if not notes:
+        return ""
+    lines = ["### Backtest Data Semantics"]
+    lines.extend(f"- {note}" for note in notes)
+    return "\n".join(lines) + "\n\n"
+
+
 class BacktestSimulator:
     def __init__(self, initial_fund=10000.0, cost_model: dict | None = None):
         self.portfolio_value = initial_fund
@@ -529,6 +636,12 @@ class BacktestSimulator:
         self.cost_model = _normalise_cost_model(cost_model)
         self.pending_entry_prices = {}
         self.pending_exit_prices = {}
+        self.synthetic_minute_proxy_used = False
+        self.synthetic_minute_proxy_symbols = set()
+        self.synthetic_minute_proxy_timeframes = set()
+        self.synthetic_session_volume_proxy_used = False
+        self.synthetic_session_volume_proxy_symbols = set()
+        self.synthetic_session_volume_proxy_timeframes = set()
 
     def get_portfolio_value(self):
         pos_value = 0
@@ -934,6 +1047,12 @@ def run_backtest(
     with contextlib.ExitStack() as stack:
         baseline_dir = tempfile.TemporaryDirectory()
         stack.callback(baseline_dir.cleanup)
+        protection_dir = tempfile.TemporaryDirectory()
+        stack.callback(protection_dir.cleanup)
+        protection_manager = ProtectionManager.from_config(
+            cfg,
+            lock_file=Path(protection_dir.name) / "protection_locks.json",
+        )
         stack.enter_context(patch(
             "core.risk_manager.DAILY_BASELINE_FILE",
             Path(baseline_dir.name) / "daily_loss_baseline.json",
@@ -974,6 +1093,8 @@ def run_backtest(
 
             # Scan
             new_entry_symbols = set()
+            if protection_manager.enabled:
+                protection_manager.refresh_from_rows(_backtest_protection_rows(sim.trades_log), now=dt)
             for strat in strategies:
                 universe = _backtest_scan_universe(
                     strat,
@@ -988,6 +1109,8 @@ def run_backtest(
                 scan_time = (
                     _gap_up_backtest_scan_time(dt)
                     if strat.name == "gap_up"
+                    else _momentum_backtest_scan_time(dt)
+                    if strat.name == "momentum"
                     else dt
                 )
                 scan_kwargs = {
@@ -1004,6 +1127,15 @@ def run_backtest(
                 for sig in signals:
                     if sig["symbol"] not in sim.positions:
                         asset_class = "crypto" if strat.asset_class == "crypto" else "stock"
+                        protection_decision = protection_manager.evaluate_entry(sig["symbol"], strat.name, now=dt)
+                        if not protection_decision.allowed:
+                            log.info(
+                                "Backtest entry blocked by protection lock: symbol=%s strategy=%s reason=%s",
+                                sig["symbol"],
+                                strat.name,
+                                protection_decision.reason,
+                            )
+                            continue
                         entry_price = sig.get("entry_price")
                         if entry_price and entry_price > 0:
                             sim.pending_entry_prices[sig["symbol"]] = float(entry_price)
@@ -1069,6 +1201,7 @@ def run_backtest(
         profit_factor = _compute_profit_factor(df)
         daily_sharpe = _compute_daily_sharpe(df_curve)
         return_pct = (final_val / initial_fund) - 1
+        execution_notes = _backtest_execution_notes(cfg, sim)
 
         report = f"### Backtest Results ({days} Days)\n"
         report += f"- **Final Value**: ${final_val:,.2f} ({ (final_val/initial_fund-1):+.2%})\n"
@@ -1080,6 +1213,7 @@ def run_backtest(
         report += f"- **Momentum Exit Policy**: {cfg['strategies']['momentum']['exit_policy']}\n"
         report += f"- **Screener**: {'enabled' if screener_enabled else 'disabled'}\n\n"
         report += f"- **Enabled Strategies**: {', '.join(_enabled_strategy_names(cfg))}\n\n"
+        report += _format_execution_notes(execution_notes)
         if any(sim.cost_model.values()):
             report += (
                 f"- **Cost Model**: slippage={sim.cost_model['slippage_bps']:.2f} bps, "
@@ -1122,14 +1256,19 @@ def run_backtest(
                 "screener_enabled": screener_enabled,
                 "enabled_strategies": _enabled_strategy_names(cfg),
                 "cost_model": dict(sim.cost_model),
+                "execution_notes": execution_notes,
             },
             "quarterly": quarterly_data,
         }
         return result if return_result else report
 
     final_val = sim.get_portfolio_value()
+    execution_notes = _backtest_execution_notes(cfg, sim)
+    report = "No trades executed."
+    if execution_notes:
+        report += "\n\n" + _format_execution_notes(execution_notes).rstrip()
     result = {
-        "report": "No trades executed.",
+        "report": report,
         "stats": {
             "days": days,
             "initial_fund": initial_fund,
@@ -1143,6 +1282,7 @@ def run_backtest(
             "screener_enabled": screener_enabled,
             "enabled_strategies": _enabled_strategy_names(cfg),
             "cost_model": dict(sim.cost_model),
+            "execution_notes": execution_notes,
         },
         "quarterly": [],
     }

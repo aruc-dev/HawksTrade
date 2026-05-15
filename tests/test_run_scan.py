@@ -12,9 +12,11 @@ class FakeMarker:
     def __init__(self):
         self.status = "ok"
         self.fields = {}
+        self.errors = []
 
     def mark_error(self, **fields):
         self.status = "error"
+        self.errors.append(dict(fields))
         self.fields.update(fields)
 
     def mark_status(self, status, **fields):
@@ -92,6 +94,27 @@ class RunScanTests(unittest.TestCase):
         )
 
         self.assertEqual(planned_symbols, {run_scan.ac.normalize_symbol("AAPL")})
+        self.assertEqual(open_symbols, [])
+        self.assertEqual(new_entry_symbols, set())
+
+    def test_register_entry_result_does_not_plan_governor_blocked_entry(self):
+        open_symbols = []
+        planned_symbols = set()
+        new_entry_symbols = set()
+
+        run_scan._register_entry_result(
+            {
+                "symbol": "AAPL",
+                "status": "order_governor_blocked",
+                "governor_code": "account_lookup_failed",
+            },
+            "AAPL",
+            open_symbols,
+            planned_symbols,
+            new_entry_symbols,
+        )
+
+        self.assertEqual(planned_symbols, set())
         self.assertEqual(open_symbols, [])
         self.assertEqual(new_entry_symbols, set())
 
@@ -338,6 +361,66 @@ class RunScanTests(unittest.TestCase):
         self.assertEqual(marker.fields["error_type"], "PendingExitOrderCheckFailed")
         self.assertEqual(marker.fields["blocked_exit_symbol"], "AAPL")
 
+    def test_operational_governor_entry_block_marks_scan_unhealthy(self):
+        marker = FakeMarker()
+
+        run_scan._mark_unhealthy_entry_result(
+            marker,
+            {
+                "symbol": "AAPL",
+                "status": "order_governor_blocked",
+                "governor_code": "account_lookup_failed",
+                "error_type": "OrderGovernorBlocked",
+                "error": "account timeout",
+            },
+            "stock_entry",
+        )
+
+        self.assertEqual(marker.status, "error")
+        self.assertEqual(marker.fields["stage"], "stock_entry")
+        self.assertEqual(marker.fields["failed_entry_symbol"], "AAPL")
+        self.assertEqual(marker.fields["governor_code"], "account_lookup_failed")
+
+    def test_order_history_unavailable_governor_block_marks_scan_unhealthy(self):
+        marker = FakeMarker()
+
+        run_scan._mark_unhealthy_entry_result(
+            marker,
+            {
+                "symbol": "AAPL",
+                "status": "order_governor_blocked",
+                "governor_code": "order_history_unavailable",
+                "error_type": "OrderGovernorBlocked",
+                "error": "intent history unavailable",
+            },
+            "stock_entry",
+        )
+
+        self.assertEqual(marker.status, "error")
+        self.assertEqual(marker.fields["stage"], "stock_entry")
+        self.assertEqual(marker.fields["failed_entry_symbol"], "AAPL")
+        self.assertEqual(marker.fields["governor_code"], "order_history_unavailable")
+
+    def test_operational_governor_exit_block_marks_scan_unhealthy(self):
+        marker = FakeMarker()
+
+        run_scan._mark_unhealthy_exit_result(
+            marker,
+            {
+                "symbol": "AAPL",
+                "status": "order_governor_blocked",
+                "governor_code": "account_lookup_failed",
+                "error_type": "OrderGovernorBlocked",
+                "error": "account timeout",
+            },
+            "strategy_exit",
+        )
+
+        self.assertEqual(marker.status, "error")
+        self.assertEqual(marker.fields["stage"], "strategy_exit")
+        self.assertEqual(marker.fields["blocked_exit_symbol"], "AAPL")
+        self.assertEqual(marker.fields["governor_code"], "account_lookup_failed")
+
     def test_strategy_exit_invalid_entry_price_marks_error_and_continues(self):
         class MomentumStrategy:
             name = "momentum"
@@ -523,6 +606,52 @@ class RunScanTests(unittest.TestCase):
 
         enter_position.assert_called_once()
 
+    def test_entry_pipeline_preserves_executor_kwargs(self):
+        class AllowProtectionManager:
+            enabled = False
+
+            def evaluate_entry(self, symbol, strategy):
+                return SimpleNamespace(allowed=True)
+
+        class FakeMomentum:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def scan(self, universe, **kwargs):
+                return [{
+                    "symbol": "AAPL",
+                    "action": "buy",
+                    "atr_risk_qty": 7.5,
+                    "atr_stop_price": 95.25,
+                }]
+
+        with (
+            patch.object(run_scan.ProtectionManager, "from_config", return_value=AllowProtectionManager()),
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(
+                run_scan.ac,
+                "get_stock_bars",
+                return_value={"SPY": [object()] * 252, "QQQ": [object()] * 51},
+            ),
+            patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "get_stock_universe", return_value=["AAPL"]),
+            patch.object(run_scan, "STOCK_STRATEGIES", [FakeMomentum()]),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+            patch.object(run_scan.oe, "enter_position", return_value={"symbol": "AAPL", "status": "dry_run"}) as enter_position,
+        ):
+            run_scan.run(run_stocks=True, run_crypto=False, dry_run=True)
+
+        enter_position.assert_called_once_with(
+            "AAPL",
+            strategy="momentum",
+            asset_class="stock",
+            dry_run=True,
+            suggested_qty=7.5,
+            atr_stop_price=95.25,
+        )
+
     def test_run_respects_max_positions_with_planned_entries(self):
         class FakeMomentum:
             name = "momentum"
@@ -564,6 +693,111 @@ class RunScanTests(unittest.TestCase):
         self.assertEqual(marker.fields["stage"], "pending_entry_order_check")
         self.assertEqual(marker.fields["error_type"], "PendingEntryOrderCheckFailed")
         enter_position.assert_not_called()
+
+    def test_protection_refresh_failure_blocks_entries_but_allows_exits(self):
+        class FakeProtectionManager:
+            enabled = True
+
+            def refresh_from_trade_log(self):
+                raise RuntimeError("lock file unavailable")
+
+            def evaluate_entry(self, symbol, strategy):
+                raise AssertionError("entries should be blocked before lock evaluation")
+
+        class FakeMomentum:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def scan(self, universe, **kwargs):
+                return [{"symbol": "MSFT", "action": "buy"}]
+
+            def should_exit(self, symbol, entry_price):
+                return True, "exit stale trade"
+
+        marker = FakeMarker()
+        open_trade = {
+            "symbol": "AAPL",
+            "side": "buy",
+            "strategy": "momentum",
+            "entry_price": "100",
+            "asset_class": "stock",
+        }
+
+        with (
+            patch.object(run_scan.ProtectionManager, "from_config", return_value=FakeProtectionManager()),
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(
+                run_scan.ac,
+                "get_stock_bars",
+                return_value={"SPY": [object()] * 252, "QQQ": [object()] * 51},
+            ),
+            patch.object(run_scan, "get_open_symbols", side_effect=[["AAPL"], ["AAPL"]]),
+            patch.object(run_scan, "_pending_entry_symbols", return_value={}),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "get_stock_universe", return_value=["MSFT"]),
+            patch.object(run_scan, "STOCK_STRATEGIES", [FakeMomentum()]),
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "safe_reconcile", return_value={}),
+            patch.object(run_scan, "print_snapshot"),
+            patch.object(run_scan.oe, "enter_position") as enter_position,
+            patch.object(run_scan.oe, "exit_position", return_value={"symbol": "AAPL", "status": "dry_run"}) as exit_position,
+        ):
+            run_scan.run(run_stocks=True, run_crypto=False, dry_run=False, marker=marker)
+
+        self.assertEqual(marker.status, "error")
+        self.assertTrue(any(error["stage"] == "protection_refresh" for error in marker.errors))
+        enter_position.assert_not_called()
+        exit_position.assert_called_once_with(
+            "AAPL", reason="exit stale trade", asset_class="stock", dry_run=False
+        )
+
+    def test_dry_run_reads_protection_locks_without_refreshing_trade_log(self):
+        class FakeProtectionManager:
+            enabled = True
+
+            def __init__(self):
+                self.active_calls = 0
+                self.refresh_calls = 0
+
+            def active_locks(self):
+                self.active_calls += 1
+                return []
+
+            def refresh_from_trade_log(self):
+                self.refresh_calls += 1
+                raise AssertionError("dry-run must not refresh protection locks")
+
+            def evaluate_entry(self, symbol, strategy):
+                return SimpleNamespace(allowed=True)
+
+        class FakeMomentum:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def scan(self, universe, **kwargs):
+                return [{"symbol": "AAPL", "action": "buy"}]
+
+        fake_protection = FakeProtectionManager()
+        with (
+            patch.object(run_scan.ProtectionManager, "from_config", return_value=fake_protection),
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(
+                run_scan.ac,
+                "get_stock_bars",
+                return_value={"SPY": [object()] * 252, "QQQ": [object()] * 51},
+            ),
+            patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "get_stock_universe", return_value=["AAPL"]),
+            patch.object(run_scan, "STOCK_STRATEGIES", [FakeMomentum()]),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+            patch.object(run_scan.oe, "enter_position", return_value={"symbol": "AAPL", "status": "dry_run"}),
+        ):
+            run_scan.run(run_stocks=True, run_crypto=False, dry_run=True)
+
+        self.assertEqual(fake_protection.active_calls, 1)
+        self.assertEqual(fake_protection.refresh_calls, 0)
 
     def test_planned_crypto_entries_count_against_crypto_cap(self):
         class FakeCrypto:

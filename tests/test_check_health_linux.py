@@ -1,6 +1,6 @@
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1001,6 +1001,32 @@ RuntimeError: old boom
             self.assertIn("Daily report", html_text)
             self.assertIn("Window", html_text)
             self.assertIn("2026-04-16 16:35:00", html_text)
+
+    def test_protection_lock_reporting_failure_becomes_warning(self):
+        now = datetime(2026, 4, 16, 16, 35, 0)
+
+        with patch.object(health, "active_locks_for_reporting", side_effect=ValueError("bad lock json")):
+            locks, warning = health._load_active_protection_locks(now)
+
+        self.assertEqual(locks, [])
+        self.assertIsNotNone(warning)
+        self.assertIn("Protection lock reporting unavailable", warning.message)
+        self.assertIn("bad lock json", warning.message)
+
+    def test_protection_lock_reporting_uses_aware_utc_time(self):
+        seen = []
+
+        def fake_active_locks(now):
+            seen.append(now)
+            return []
+
+        with patch.object(health, "active_locks_for_reporting", side_effect=fake_active_locks):
+            locks, warning = health._load_active_protection_locks(datetime(2026, 4, 16, 16, 35, 0))
+
+        self.assertEqual(locks, [])
+        self.assertIsNone(warning)
+        self.assertIsNotNone(seen[0].tzinfo)
+        self.assertEqual(seen[0].utcoffset(), timezone.utc.utcoffset(seen[0]))
 
 
 if __name__ == "__main__":
