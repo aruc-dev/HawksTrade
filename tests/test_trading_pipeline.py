@@ -127,8 +127,11 @@ class TradingPipelineTests(unittest.TestCase):
         self.assertIsNone(build_order_plan(decision))
 
     def test_entry_sizing_preserves_atr_then_kelly_then_pretrade_precedence(self):
-        capper = lambda price, qty: min(qty, 8.0)
-        kelly_sizer = lambda price: 6.0
+        def capper(price, qty):
+            return min(qty, 8.0)
+
+        def kelly_sizer(price):
+            return 6.0
 
         atr_sizing = construct_entry_size(
             price=100.0,

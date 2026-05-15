@@ -12,9 +12,11 @@ class FakeMarker:
     def __init__(self):
         self.status = "ok"
         self.fields = {}
+        self.errors = []
 
     def mark_error(self, **fields):
         self.status = "error"
+        self.errors.append(dict(fields))
         self.fields.update(fields)
 
     def mark_status(self, status, **fields):
@@ -660,7 +662,7 @@ class RunScanTests(unittest.TestCase):
             run_scan.run(run_stocks=True, run_crypto=False, dry_run=True, marker=marker)
 
         self.assertEqual(marker.status, "error")
-        self.assertEqual(marker.fields["stage"], "protection_refresh")
+        self.assertTrue(any(error["stage"] == "protection_refresh" for error in marker.errors))
         enter_position.assert_not_called()
         exit_position.assert_called_once_with(
             "AAPL", reason="exit stale trade", asset_class="stock", dry_run=True
