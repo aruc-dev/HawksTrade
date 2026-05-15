@@ -324,6 +324,22 @@ class OrderExecutorTests(unittest.TestCase):
         self.assertEqual(result["governor_code"], "account_lookup_failed")
         place_limit_order.assert_not_called()
 
+    def test_exit_position_reports_account_lookup_failure_as_exit_check_failure(self):
+        position = SimpleNamespace(qty="2", avg_entry_price="100")
+
+        with (
+            patch.object(order_executor.ac, "get_position", return_value=position),
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=110),
+            patch.object(order_executor.ac, "get_account", side_effect=RuntimeError("account timeout")),
+            patch.object(order_executor.ac, "place_limit_order") as place_limit_order,
+        ):
+            result = order_executor.exit_position("AAPL", "risk exit", dry_run=False)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "pending_exit_check_failed")
+        self.assertEqual(result["governor_code"], "account_lookup_failed")
+        place_limit_order.assert_not_called()
+
     def test_enter_position_logs_filled_buy_as_open_with_fill_details(self):
         order = SimpleNamespace(
             id="entry-filled",

@@ -13,7 +13,6 @@ import argparse
 import json
 import math
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Mapping
 
@@ -101,13 +100,15 @@ def _bars_to_frame(bars_by_symbol: Mapping[str, Iterable]) -> tuple[pd.DataFrame
             if row["date"] is None or any(row[field] is None for field in ("open", "high", "low", "close", "volume")):
                 issues.append({"symbol": symbol, "issue": "invalid_bar"})
                 continue
+            prices = [row[field] for field in ("open", "high", "low", "close")]
             if (
-                row["high"] < row["low"]
+                any(value <= 0 for value in prices)
+                or row["high"] < row["low"]
                 or row["open"] < row["low"]
                 or row["open"] > row["high"]
                 or row["close"] < row["low"]
                 or row["close"] > row["high"]
-                or row["volume"] < 0
+                or row["volume"] <= 0
             ):
                 issues.append({"symbol": symbol, "issue": "invalid_ohlcv"})
                 continue
@@ -122,6 +123,28 @@ def _bars_to_frame(bars_by_symbol: Mapping[str, Iterable]) -> tuple[pd.DataFrame
 
     df = pd.DataFrame.from_records(records)
     df = df.sort_values(["symbol", "date"]).drop_duplicates(["symbol", "date"], keep="last")
+    all_observed_dates = pd.DatetimeIndex(df["date"].dropna().sort_values().unique())
+    symbol_count = int(df["symbol"].nunique())
+    for symbol, group in df.groupby("symbol", sort=True):
+        dates = pd.DatetimeIndex(group["date"].dropna().sort_values().unique())
+        if len(dates) < 2:
+            continue
+        if symbol_count > 1:
+            expected_dates = all_observed_dates[
+                (all_observed_dates >= dates.min()) & (all_observed_dates <= dates.max())
+            ]
+        else:
+            expected_dates = pd.date_range(dates.min(), dates.max(), freq="B")
+        missing_dates = expected_dates.difference(dates)
+        if len(missing_dates) > 0:
+            issues.append(
+                {
+                    "symbol": symbol,
+                    "issue": "date_gap",
+                    "missing_count": int(len(missing_dates)),
+                    "first_missing": str(missing_dates[0].date()),
+                }
+            )
     return df.reset_index(drop=True), issues
 
 
@@ -316,9 +339,10 @@ def compute_factor_report(
     horizons: Iterable[int] = DEFAULT_HORIZONS,
     quantiles: int = 5,
     data_quality_issues: list[dict] | None = None,
+    generated_at: str | None = "not_recorded",
 ) -> dict:
     summary = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": "not_recorded" if generated_at in (None, "") else str(generated_at),
         "rows": int(len(dataset)),
         "symbols": sorted(dataset["symbol"].dropna().unique().tolist()) if "symbol" in dataset else [],
         "date_range": {
@@ -461,7 +485,13 @@ def run_research(args) -> dict:
     )
     if not symbols:
         raise SystemExit("No symbols resolved for research.")
-    bars = ac.get_stock_bars(symbols, timeframe="1Day", limit=args.days)
+    bars = ac.get_stock_bars(
+        symbols,
+        timeframe="1Day",
+        limit=args.days,
+        start=args.start,
+        end=args.end,
+    )
     dataset, issues = build_factor_dataset(
         bars,
         start=args.start,
@@ -472,6 +502,7 @@ def run_research(args) -> dict:
         dataset,
         horizons=args.horizons,
         data_quality_issues=issues,
+        generated_at=args.generated_at,
     )
     outputs = write_research_outputs(dataset, summary, Path(args.output_dir))
     return {"summary": summary, "outputs": outputs}
@@ -481,6 +512,11 @@ def parse_args(argv: list[str] | None = None):
     parser = argparse.ArgumentParser(description="Run offline HawksTrade factor research.")
     parser.add_argument("--start", help="Inclusive YYYY-MM-DD start date for dataset rows.")
     parser.add_argument("--end", help="Inclusive YYYY-MM-DD end date for dataset rows.")
+    parser.add_argument(
+        "--generated-at",
+        default="not_recorded",
+        help="Stable timestamp label for output metadata; defaults to deterministic 'not_recorded'.",
+    )
     parser.add_argument("--days", type=int, default=260, help="Daily bars to fetch per symbol.")
     parser.add_argument("--symbols", nargs="*", help="Symbols or comma-separated symbol lists.")
     parser.add_argument("--use-screener", action="store_true", help="Resolve today's universe through UniverseBuilder.")

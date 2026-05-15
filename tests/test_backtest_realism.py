@@ -10,8 +10,10 @@ from scheduler.run_backtest import (
     _backtest_execution_notes,
     _format_execution_notes,
     _make_bar_fetcher,
+    _momentum_backtest_scan_time,
 )
 from scripts import validate_backtest_realism as realism
+from strategies.momentum import _regular_session_progress
 
 
 def _frame(periods=6):
@@ -41,7 +43,7 @@ class DataQualityTests(unittest.TestCase):
         bad = expected.drop(expected.index[2]).copy()
         bad.loc[bad.index[0], "high"] = bad.loc[bad.index[0], "low"] - 1
         bad.loc[bad.index[1], "close"] = bad.loc[bad.index[1], "high"] + 1
-        bad.loc[bad.index[3], "volume"] = -1
+        bad.loc[bad.index[3], "volume"] = 0
 
         findings = realism.validate_ohlcv_frame("AAPL", bad, expected_index=expected.index)
         messages = {finding.message for finding in findings}
@@ -49,7 +51,23 @@ class DataQualityTests(unittest.TestCase):
         self.assertIn("OHLCV frame is missing expected bars", messages)
         self.assertIn("OHLCV frame has high below low", messages)
         self.assertIn("OHLCV frame has close outside high/low range", messages)
-        self.assertIn("OHLCV frame has negative volume", messages)
+        self.assertIn("OHLCV frame has zero or negative volume", messages)
+
+    def test_dataset_quality_reports_expected_symbol_missing_entirely(self):
+        expected = _frame()
+
+        findings = realism.validate_ohlcv_dataset(
+            {"AAPL": expected},
+            expected_indexes={"AAPL": expected.index, "MSFT": expected.index},
+        )
+
+        self.assertTrue(
+            any(
+                finding.symbol == "MSFT"
+                and finding.message == "OHLCV frame is empty or missing"
+                for finding in findings
+            )
+        )
 
     def test_data_quality_warns_on_stale_close_streak(self):
         frame = _frame()
@@ -153,6 +171,14 @@ class GapUpIntradayTests(unittest.TestCase):
         self.assertIn("Gap-Up opening-window backtest uses a synthetic 9:35 ET daily-open proxy", rendered)
         self.assertIn("not intraday-validated", rendered)
 
+    def test_momentum_backtest_scan_time_is_regular_session_near_close(self):
+        scan_time = _momentum_backtest_scan_time(pd.Timestamp("2026-01-05T00:00:00Z"))
+
+        elapsed, in_session = _regular_session_progress(scan_time, 390)
+
+        self.assertTrue(in_session)
+        self.assertGreaterEqual(elapsed, 390 * 0.95)
+
 
 class TradeReplayTests(unittest.TestCase):
     def test_matching_trade_replay_passes(self):
@@ -179,6 +205,9 @@ class AcceptanceScriptTests(unittest.TestCase):
         self.assertEqual(result["status"], "pass")
         self.assertEqual(result["errors"], 0)
         self.assertGreaterEqual(result["warnings"], 1)
+        self.assertTrue(
+            any(finding["check"] == "backtest_window_replay" for finding in result["findings"])
+        )
 
     def test_acceptance_fails_when_real_gap_up_intraday_is_required(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -196,6 +225,21 @@ class AcceptanceScriptTests(unittest.TestCase):
             code = realism.main(["--days", "30", "--baseline-file", str(Path(tmpdir) / "missing.json")])
 
         self.assertEqual(code, 0)
+
+    def test_acceptance_baseline_mismatch_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            baseline = Path(tmpdir) / "baseline.json"
+            baseline.write_text(
+                '{"version": 1, "status": "fail", "expected_checks": ["missing_check"]}',
+                encoding="utf-8",
+            )
+
+            result = realism.run_acceptance(days=30, baseline_file=baseline)
+
+        self.assertEqual(result["status"], "fail")
+        self.assertTrue(
+            any(finding["check"] == "acceptance_baseline" for finding in result["findings"])
+        )
 
 
 if __name__ == "__main__":

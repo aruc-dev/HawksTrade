@@ -97,6 +97,27 @@ class RunScanTests(unittest.TestCase):
         self.assertEqual(open_symbols, [])
         self.assertEqual(new_entry_symbols, set())
 
+    def test_register_entry_result_does_not_plan_governor_blocked_entry(self):
+        open_symbols = []
+        planned_symbols = set()
+        new_entry_symbols = set()
+
+        run_scan._register_entry_result(
+            {
+                "symbol": "AAPL",
+                "status": "order_governor_blocked",
+                "governor_code": "account_lookup_failed",
+            },
+            "AAPL",
+            open_symbols,
+            planned_symbols,
+            new_entry_symbols,
+        )
+
+        self.assertEqual(planned_symbols, set())
+        self.assertEqual(open_symbols, [])
+        self.assertEqual(new_entry_symbols, set())
+
     def test_prefetched_regime_bars_require_all_symbols_and_minimum_history(self):
         self.assertTrue(
             run_scan._prefetched_bars_are_sufficient(
@@ -339,6 +360,46 @@ class RunScanTests(unittest.TestCase):
         self.assertEqual(marker.fields["stage"], "strategy_exit")
         self.assertEqual(marker.fields["error_type"], "PendingExitOrderCheckFailed")
         self.assertEqual(marker.fields["blocked_exit_symbol"], "AAPL")
+
+    def test_operational_governor_entry_block_marks_scan_unhealthy(self):
+        marker = FakeMarker()
+
+        run_scan._mark_unhealthy_entry_result(
+            marker,
+            {
+                "symbol": "AAPL",
+                "status": "order_governor_blocked",
+                "governor_code": "account_lookup_failed",
+                "error_type": "OrderGovernorBlocked",
+                "error": "account timeout",
+            },
+            "stock_entry",
+        )
+
+        self.assertEqual(marker.status, "error")
+        self.assertEqual(marker.fields["stage"], "stock_entry")
+        self.assertEqual(marker.fields["failed_entry_symbol"], "AAPL")
+        self.assertEqual(marker.fields["governor_code"], "account_lookup_failed")
+
+    def test_operational_governor_exit_block_marks_scan_unhealthy(self):
+        marker = FakeMarker()
+
+        run_scan._mark_unhealthy_exit_result(
+            marker,
+            {
+                "symbol": "AAPL",
+                "status": "order_governor_blocked",
+                "governor_code": "account_lookup_failed",
+                "error_type": "OrderGovernorBlocked",
+                "error": "account timeout",
+            },
+            "strategy_exit",
+        )
+
+        self.assertEqual(marker.status, "error")
+        self.assertEqual(marker.fields["stage"], "strategy_exit")
+        self.assertEqual(marker.fields["blocked_exit_symbol"], "AAPL")
+        self.assertEqual(marker.fields["governor_code"], "account_lookup_failed")
 
     def test_strategy_exit_invalid_entry_price_marks_error_and_continues(self):
         class MomentumStrategy:

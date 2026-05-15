@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
+from unittest.mock import patch
 
 from scripts import research_factors as rf
 
@@ -73,6 +74,7 @@ class FactorResearchTests(unittest.TestCase):
         )
 
         self.assertGreater(summary["rows"], 0)
+        self.assertEqual(summary["generated_at"], "not_recorded")
         self.assertIn("return_5d", summary["factors"])
         one_day = summary["factors"]["return_5d"]["1"]
         self.assertGreater(one_day["observations"], 0)
@@ -121,6 +123,51 @@ class FactorResearchTests(unittest.TestCase):
         self.assertNotIn("BAD", set(dataset["symbol"].tolist()))
         self.assertIn({"symbol": "BAD", "issue": "invalid_ohlcv"}, issues)
 
+    def test_non_positive_price_and_volume_rows_are_invalid(self):
+        bad_price = SimpleNamespace(
+            timestamp=pd.Timestamp("2025-01-01"),
+            open=0.0,
+            high=101.0,
+            low=99.0,
+            close=100.0,
+            volume=1_000,
+        )
+        zero_volume = SimpleNamespace(
+            timestamp=pd.Timestamp("2025-01-02"),
+            open=100.0,
+            high=101.0,
+            low=99.0,
+            close=100.0,
+            volume=0,
+        )
+
+        dataset, issues = rf.build_factor_dataset(
+            {
+                "BAD": [bad_price, zero_volume],
+                "MSFT": _bars(),
+            },
+            horizons=(1,),
+        )
+
+        self.assertNotIn("BAD", set(dataset["symbol"].tolist()))
+        self.assertIn({"symbol": "BAD", "issue": "invalid_ohlcv"}, issues)
+
+    def test_symbol_date_gaps_are_reported(self):
+        bars = _bars(periods=5)
+        bars.pop(2)
+
+        dataset, issues = rf.build_factor_dataset({"AAPL": bars}, horizons=(1,))
+
+        self.assertFalse(dataset.empty)
+        self.assertTrue(
+            any(
+                issue["symbol"] == "AAPL"
+                and issue["issue"] == "date_gap"
+                and issue["missing_count"] == 1
+                for issue in issues
+            )
+        )
+
     def test_write_research_outputs_writes_csv_json_and_markdown(self):
         dataset, issues = rf.build_factor_dataset({"AAPL": _bars()}, horizons=(1,))
         summary = rf.compute_factor_report(
@@ -151,6 +198,35 @@ class FactorResearchTests(unittest.TestCase):
         )
 
         self.assertEqual(symbols, ["AAPL"])
+
+    def test_run_research_passes_explicit_date_range_to_fetch(self):
+        args = type("Args", (), {
+            "symbols": ["AAPL"],
+            "use_screener": False,
+            "max_symbols": None,
+            "days": 260,
+            "start": "2025-01-01",
+            "end": "2025-03-31",
+            "horizons": [1],
+            "generated_at": "test-run",
+            "output_dir": "/tmp/research",
+        })()
+
+        with (
+            patch.object(rf, "get_config", return_value={"stocks": {"scan_universe": []}}),
+            patch.object(rf.ac, "get_stock_bars", return_value={"AAPL": _bars(periods=80)}) as get_bars,
+            patch.object(rf, "write_research_outputs", return_value={}),
+        ):
+            result = rf.run_research(args)
+
+        get_bars.assert_called_once_with(
+            ["AAPL"],
+            timeframe="1Day",
+            limit=260,
+            start="2025-01-01",
+            end="2025-03-31",
+        )
+        self.assertEqual(result["summary"]["generated_at"], "test-run")
 
 
 if __name__ == "__main__":

@@ -43,6 +43,17 @@ trading:
   order_type: "limit"            # "market" or "limit"
   limit_slippage_pct: 0.001      # Limit price set 0.1% from current for fast fills
 
+# --- ORDER GOVERNOR ---
+# Broker-state safety gate evaluated immediately before order submission.
+order_governor:
+  enabled: true
+  max_active_orders: 50
+  max_orders_per_window: 60
+  order_rate_window_seconds: 60
+  max_daily_orders: 500
+  max_notional_usd: null
+  max_notional_pct: null
+
 # --- STOCK UNIVERSE ---
 stocks:
   scan_universe:                 # Stocks screened for opportunities each cycle

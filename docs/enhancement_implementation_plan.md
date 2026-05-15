@@ -1,6 +1,8 @@
-# HawksTrade Implementation TODO
+# HawksTrade Enhancement Implementation Plan
 
-This file tracks the recommended implementation plan from the repo research across Freqtrade, vn.py, QuantConnect Lean, and LumiBot. The order is intentional: add validation first, then safety controls, then architecture changes, then research tooling.
+This document captures the recommended implementation plan from the repo research across Freqtrade, vn.py, QuantConnect Lean, and LumiBot. The order is intentional: add validation first, then safety controls, then architecture changes, then research tooling.
+
+Active task tracking lives in beads (`bd`). Do not use this document as a task list.
 
 ## Execution Order
 

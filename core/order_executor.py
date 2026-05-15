@@ -249,7 +249,12 @@ def _exit_governor_block_result(
 ) -> dict:
     if decision.code == "duplicate_pending_exit":
         status = "pending_exit"
-    elif decision.code in {"broker_orders_lookup_failed", "missing_broker_orders"}:
+    elif decision.code in {
+        "account_lookup_failed",
+        "broker_orders_lookup_failed",
+        "missing_account_state",
+        "missing_broker_orders",
+    }:
         status = "pending_exit_check_failed"
     else:
         status = "order_governor_blocked"
@@ -269,6 +274,7 @@ def _exit_governor_block_result(
         "status": status,
         "order_type": order_type,
         "governor_code": decision.code,
+        "error_type": "OrderGovernorBlocked",
         "error": decision.reason,
     }
     if limit_price is not None:

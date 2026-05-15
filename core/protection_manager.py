@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -447,12 +448,13 @@ class ProtectionManager:
         )
 
     def _read_locks(self) -> list[ProtectionLock]:
-        if not self.lock_file.exists():
-            return []
-        try:
-            payload = json.loads(self.lock_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return []
+        with trade_log.locked_trade_log(self.lock_file, exclusive=False) as lock_file:
+            if not lock_file.exists():
+                return []
+            try:
+                payload = json.loads(lock_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return []
         rows = payload.get("locks", []) if isinstance(payload, Mapping) else []
         locks = []
         for row in rows:
@@ -462,11 +464,16 @@ class ProtectionManager:
         return locks
 
     def _write_locks(self, locks: list[ProtectionLock]) -> None:
-        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
         payload = {"version": 1, "locks": [lock.to_dict() for lock in locks]}
-        tmp_path = self.lock_file.with_suffix(".tmp")
-        tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-        tmp_path.replace(self.lock_file)
+        with trade_log.locked_trade_log(self.lock_file, exclusive=True) as lock_file:
+            lock_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = lock_file.with_name(f"{lock_file.name}.{uuid.uuid4().hex}.tmp")
+            try:
+                tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+                tmp_path.replace(lock_file)
+            finally:
+                if tmp_path.exists():
+                    tmp_path.unlink()
 
 
 def active_locks_for_reporting(now: datetime | None = None) -> list[dict]:

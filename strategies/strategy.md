@@ -53,8 +53,10 @@ filtering:
 pace by default (`volume_confirmation_mode: pace`). Current regular-session volume
 must be at least `1.5x` the expected volume for the elapsed market minutes
 (`volume_pace_ratio: 1.5`), based on the candidate's 20-day average daily volume.
-If intraday bars are unavailable, or the scan time is outside regular-session
-context, it falls back to the legacy daily-volume check
+If intraday bars are unavailable, the scan time is outside regular-session
+context, or the scan is in the final 5% of the regular session where the
+completed daily bar is a better approximation, it falls back to the legacy
+daily-volume check
 (`volume_spike_ratio: 2.0`). The screener provides a separate 20-day ADV baseline
 at universe construction time; this check adds a per-signal guard at scan time.
 

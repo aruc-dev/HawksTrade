@@ -205,6 +205,26 @@ class AlpacaClientTests(unittest.TestCase):
 
         self.assertEqual(fake_client.req.limit, 360)
 
+    def test_get_stock_bars_uses_explicit_date_range_when_provided(self):
+        class FakeDataClient:
+            def get_stock_bars(self, req):
+                self.req = req
+                return {"AAPL": []}
+
+        fake_client = FakeDataClient()
+        with patch.object(alpaca_client, "get_stock_data_client", return_value=fake_client):
+            alpaca_client.get_stock_bars(
+                ["AAPL"],
+                timeframe="1Day",
+                limit=30,
+                start="2026-01-01",
+                end="2026-01-31",
+            )
+
+        self.assertEqual(fake_client.req.start.date().isoformat(), "2026-01-01")
+        self.assertEqual(fake_client.req.end.date().isoformat(), "2026-01-31")
+        self.assertEqual(fake_client.req.limit, alpaca_client.MAX_BARS_PER_DATA_REQUEST)
+
     def test_get_crypto_bars_scales_limit_for_batch_request_and_pair_symbols(self):
         class FakeDataClient:
             def get_crypto_bars(self, req):

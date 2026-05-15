@@ -4,6 +4,7 @@
     "lookahead_self_test",
     "warmup_self_test",
     "trade_replay_self_test",
+    "backtest_window_replay",
     "gap_up_intraday"
   ],
   "gap_up_intraday": {

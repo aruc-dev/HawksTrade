@@ -259,6 +259,14 @@ def _max_positions_planned(planned_symbols: set) -> bool:
     return False
 
 
+OPERATIONAL_GOVERNOR_BLOCK_CODES = {
+    "account_lookup_failed",
+    "broker_orders_lookup_failed",
+    "missing_account_state",
+    "missing_broker_orders",
+}
+
+
 def _planned_asset_class_cap_reached(asset_class: str, planned_asset_classes: dict) -> bool:
     if _max_positions_planned(planned_asset_classes):
         return True
@@ -300,7 +308,7 @@ def _register_entry_result(
 ):
     if not result:
         return
-    if result.get("status") == "entry_failed":
+    if result.get("status") in {"entry_failed", "order_governor_blocked"}:
         return
     normalized = ac.normalize_symbol(symbol)
     planned_symbols.add(normalized)
@@ -334,13 +342,20 @@ def _latest_price_for_trade(symbol: str, asset_class: str) -> float:
 def _mark_unhealthy_exit_result(marker: RunScope | None, result: dict | None, stage: str):
     if marker is None or not result:
         return
-    if result.get("status") == "pending_exit_check_failed":
+    status = result.get("status")
+    governor_code = str(result.get("governor_code") or "")
+    if status == "pending_exit_check_failed" or (
+        status == "order_governor_blocked"
+        and governor_code in OPERATIONAL_GOVERNOR_BLOCK_CODES
+    ):
         marker.mark_error(
             stage=stage,
-            error_type="PendingExitOrderCheckFailed",
+            error_type=result.get("error_type", "PendingExitOrderCheckFailed"),
             blocked_exit_symbol=result.get("symbol", ""),
+            governor_code=governor_code,
+            error=result.get("error", ""),
         )
-    elif result.get("status") in {"exit_failed", "invalid_exit_price", "invalid_entry_price"}:
+    elif status in {"exit_failed", "invalid_exit_price", "invalid_entry_price"}:
         marker.mark_error(
             stage=stage,
             error_type=result.get("error_type", "ExitFailed"),
@@ -352,11 +367,17 @@ def _mark_unhealthy_exit_result(marker: RunScope | None, result: dict | None, st
 def _mark_unhealthy_entry_result(marker: RunScope | None, result: dict | None, stage: str):
     if marker is None or not result:
         return
-    if result.get("status") == "entry_failed":
+    status = result.get("status")
+    governor_code = str(result.get("governor_code") or "")
+    if status == "entry_failed" or (
+        status == "order_governor_blocked"
+        and governor_code in OPERATIONAL_GOVERNOR_BLOCK_CODES
+    ):
         marker.mark_error(
             stage=stage,
             error_type=result.get("error_type", "EntryFailed"),
             failed_entry_symbol=result.get("symbol", ""),
+            governor_code=governor_code,
             error=result.get("error", ""),
         )
 

@@ -17,17 +17,27 @@ import math
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Iterable
 
 import pandas as pd
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BASE_DIR))
 DEFAULT_BASELINE_FILE = BASE_DIR / "data" / "backtest_acceptance_baselines.json"
 
 ERROR = "error"
 WARNING = "warning"
 INFO = "info"
 REQUIRED_OHLCV_COLUMNS = ("open", "high", "low", "close", "volume")
+ACCEPTANCE_CHECKS = (
+    "data_quality_self_test",
+    "lookahead_self_test",
+    "warmup_self_test",
+    "trade_replay_self_test",
+    "backtest_window_replay",
+    "gap_up_intraday",
+)
 
 
 @dataclass(frozen=True)
@@ -128,10 +138,16 @@ def validate_ohlcv_frame(
             )
         )
 
-    negative_volume = numeric["volume"] < 0
-    if bool(negative_volume.any()):
+    non_positive_volume = numeric["volume"] <= 0
+    if bool(non_positive_volume.any()):
         findings.append(
-            _finding(check, ERROR, "OHLCV frame has negative volume", symbol, count=int(negative_volume.sum()))
+            _finding(
+                check,
+                ERROR,
+                "OHLCV frame has zero or negative volume",
+                symbol,
+                count=int(non_positive_volume.sum()),
+            )
         )
 
     high_below_low = numeric["high"] < numeric["low"]
@@ -188,8 +204,12 @@ def validate_ohlcv_dataset(
     expected_indexes: dict[str, Iterable] | None = None,
     stale_close_bars: int = 5,
 ) -> list[RealismFinding]:
+    frames = frames or {}
     findings: list[RealismFinding] = []
-    for symbol, frame in frames.items():
+    expected_symbols = set(expected_indexes or {})
+    symbols = sorted(set(frames) | expected_symbols)
+    for symbol in symbols:
+        frame = frames.get(symbol)
         expected_index = expected_indexes.get(symbol) if expected_indexes else None
         findings.extend(
             validate_ohlcv_frame(
@@ -429,14 +449,14 @@ def _self_test_data_quality() -> list[RealismFinding]:
     bad = good.drop(good.index[3]).copy()
     bad.loc[bad.index[0], "high"] = bad.loc[bad.index[0], "low"] - 1
     bad.loc[bad.index[1], "close"] = bad.loc[bad.index[1], "high"] + 1
-    bad.loc[bad.index[2], "volume"] = -10
+    bad.loc[bad.index[2], "volume"] = 0
     detected = validate_ohlcv_frame("BAD", bad, expected_index=good.index)
     detected_messages = {finding.message for finding in detected}
     expected_messages = {
         "OHLCV frame is missing expected bars",
         "OHLCV frame has high below low",
         "OHLCV frame has close outside high/low range",
-        "OHLCV frame has negative volume",
+        "OHLCV frame has zero or negative volume",
     }
     missing = sorted(expected_messages - detected_messages)
     if missing:
@@ -496,6 +516,61 @@ def _self_test_replay() -> list[RealismFinding]:
     return []
 
 
+def _self_test_backtest_window(days: int) -> list[RealismFinding]:
+    check = "backtest_window_replay"
+    if days <= 0:
+        return [_finding(check, ERROR, "Acceptance window must be positive", days=days)]
+    try:
+        from scheduler.run_backtest import BacktestSimulator
+    except Exception as exc:
+        return [_finding(check, ERROR, "Could not import backtest simulator", error=str(exc))]
+
+    periods = max(2, min(int(days), 60))
+    frame = _fixture_ohlcv_frame()
+    if periods > len(frame):
+        extension = pd.date_range(
+            frame.index[-1] + pd.tseries.offsets.BDay(),
+            periods=periods - len(frame),
+            freq="B",
+            tz="UTC",
+        )
+        last_close = float(frame["close"].iloc[-1])
+        extra = pd.DataFrame(
+            {
+                "open": [last_close + i for i in range(1, len(extension) + 1)],
+                "high": [last_close + i + 1 for i in range(1, len(extension) + 1)],
+                "low": [last_close + i - 1 for i in range(1, len(extension) + 1)],
+                "close": [last_close + i + 0.5 for i in range(1, len(extension) + 1)],
+                "volume": [1800 + i * 100 for i in range(len(extension))],
+            },
+            index=extension,
+        )
+        frame = pd.concat([frame, extra])
+    frame = frame.tail(periods)
+
+    sim = BacktestSimulator(initial_fund=10000.0)
+    sim.historical_data = {"AAPL": frame}
+    sim.current_date = frame.index[0]
+    sim.submit_order(SimpleNamespace(symbol="AAPL", side=SimpleNamespace(value="buy"), qty=1, strategy="acceptance"))
+    if "AAPL" not in sim.positions:
+        return [_finding(check, ERROR, "Backtest simulator did not open fixture position")]
+    sim.current_date = frame.index[-1]
+    sim.submit_order(SimpleNamespace(symbol="AAPL", side=SimpleNamespace(value="sell"), qty=1, strategy="acceptance"))
+    if not sim.trades_log:
+        return [_finding(check, ERROR, "Backtest simulator did not close fixture position")]
+    replay_findings = compare_trade_replay(sim.trades_log, [dict(sim.trades_log[0])])
+    if replay_findings:
+        return [
+            _finding(
+                check,
+                ERROR,
+                "Backtest fixture trade failed replay comparison",
+                replay_findings=[asdict(finding) for finding in replay_findings],
+            )
+        ]
+    return [_finding(check, INFO, "Backtest simulator replayed acceptance window", days=days, periods=periods)]
+
+
 def load_baseline(path: Path) -> dict:
     if not path.exists():
         return {}
@@ -505,6 +580,92 @@ def load_baseline(path: Path) -> dict:
 def write_baseline(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+def _acceptance_result(
+    *,
+    days: int,
+    baseline_file: Path,
+    baseline_loaded: bool,
+    gap_status: GapUpIntradayStatus,
+    findings: list[RealismFinding],
+) -> dict:
+    error_count = sum(1 for finding in findings if finding.severity == ERROR)
+    warning_count = sum(1 for finding in findings if finding.severity == WARNING)
+    return {
+        "status": "fail" if error_count else "pass",
+        "days": days,
+        "baseline_file": str(baseline_file),
+        "baseline_loaded": baseline_loaded,
+        "errors": error_count,
+        "warnings": warning_count,
+        "executed_checks": list(ACCEPTANCE_CHECKS),
+        "gap_up_intraday": asdict(gap_status),
+        "findings": [asdict(finding) for finding in findings],
+    }
+
+
+def compare_acceptance_baseline(result: dict, baseline: dict) -> list[RealismFinding]:
+    if not baseline:
+        return []
+    findings: list[RealismFinding] = []
+    check = "acceptance_baseline"
+
+    expected_status = baseline.get("status")
+    if expected_status is not None and result.get("status") != expected_status:
+        findings.append(
+            _finding(
+                check,
+                ERROR,
+                "Acceptance status differs from baseline",
+                expected=expected_status,
+                actual=result.get("status"),
+            )
+        )
+
+    for count_field in ("errors", "warnings"):
+        if count_field in baseline and result.get(count_field) != baseline.get(count_field):
+            findings.append(
+                _finding(
+                    check,
+                    ERROR,
+                    f"Acceptance {count_field} count differs from baseline",
+                    expected=baseline.get(count_field),
+                    actual=result.get(count_field),
+                )
+            )
+
+    expected_gap = baseline.get("gap_up_intraday")
+    actual_gap = result.get("gap_up_intraday", {})
+    if isinstance(expected_gap, dict):
+        for field in ("mode", "validated", "severity"):
+            if field in expected_gap and actual_gap.get(field) != expected_gap.get(field):
+                findings.append(
+                    _finding(
+                        check,
+                        ERROR,
+                        "Gap-Up intraday acceptance differs from baseline",
+                        field=field,
+                        expected=expected_gap.get(field),
+                        actual=actual_gap.get(field),
+                    )
+                )
+
+    expected_checks = set(baseline.get("expected_checks") or [])
+    if expected_checks:
+        actual_checks = set(result.get("executed_checks") or [])
+        actual_checks.update(finding.get("check") for finding in result.get("findings", []))
+        missing_checks = sorted(expected_checks - actual_checks)
+        if missing_checks:
+            findings.append(
+                _finding(
+                    check,
+                    ERROR,
+                    "Acceptance checks missing from current run",
+                    missing_checks=missing_checks,
+                )
+            )
+    return findings
 
 
 def run_acceptance(
@@ -518,6 +679,7 @@ def run_acceptance(
     findings.extend(_self_test_lookahead())
     findings.extend(_self_test_warmup())
     findings.extend(_self_test_replay())
+    findings.extend(_self_test_backtest_window(days))
 
     gap_status = evaluate_gap_up_intraday_status(
         gap_up_enabled=True,
@@ -536,19 +698,21 @@ def run_acceptance(
     )
 
     baseline = load_baseline(baseline_file)
-    error_count = sum(1 for finding in findings if finding.severity == ERROR)
-    warning_count = sum(1 for finding in findings if finding.severity == WARNING)
-
-    return {
-        "status": "fail" if error_count else "pass",
-        "days": days,
-        "baseline_file": str(baseline_file),
-        "baseline_loaded": bool(baseline),
-        "errors": error_count,
-        "warnings": warning_count,
-        "gap_up_intraday": asdict(gap_status),
-        "findings": [asdict(finding) for finding in findings],
-    }
+    result = _acceptance_result(
+        days=days,
+        baseline_file=baseline_file,
+        baseline_loaded=bool(baseline),
+        gap_status=gap_status,
+        findings=findings,
+    )
+    findings.extend(compare_acceptance_baseline(result, baseline))
+    return _acceptance_result(
+        days=days,
+        baseline_file=baseline_file,
+        baseline_loaded=bool(baseline),
+        gap_status=gap_status,
+        findings=findings,
+    )
 
 
 def _print_text_report(result: dict) -> None:
@@ -589,11 +753,7 @@ def main(argv: list[str] | None = None) -> int:
                 "status": result["status"],
                 "gap_up_intraday": result["gap_up_intraday"],
                 "expected_checks": [
-                    "data_quality_self_test",
-                    "lookahead_self_test",
-                    "warmup_self_test",
-                    "trade_replay_self_test",
-                    "gap_up_intraday",
+                    *ACCEPTANCE_CHECKS,
                 ],
             },
         )

@@ -139,6 +139,19 @@ def _gap_up_backtest_scan_time(current_date) -> datetime:
     return scan_et.astimezone(timezone.utc)
 
 
+def _momentum_backtest_scan_time(current_date) -> datetime:
+    session_date = _as_datetime(current_date).date()
+    scan_et = datetime(
+        session_date.year,
+        session_date.month,
+        session_date.day,
+        15,
+        55,
+        tzinfo=ZoneInfo("America/New_York"),
+    )
+    return scan_et.astimezone(timezone.utc)
+
+
 def _as_datetime(value) -> datetime:
     if isinstance(value, pd.Timestamp):
         value = value.to_pydatetime()
@@ -1049,6 +1062,8 @@ def run_backtest(
                 scan_time = (
                     _gap_up_backtest_scan_time(dt)
                     if strat.name == "gap_up"
+                    else _momentum_backtest_scan_time(dt)
+                    if strat.name == "momentum"
                     else dt
                 )
                 scan_kwargs = {
