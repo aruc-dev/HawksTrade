@@ -148,7 +148,7 @@ unhealthy so they are visible in health checks instead of looking like a clean n
 
 ```yaml
 protections:
-  enabled: false
+  enabled: true
   symbol_cooldown_days: 1.0
   symbol_stoploss_cooldown_days: 3.0
   symbol_stoploss_loss_pct: 0.035
@@ -164,15 +164,15 @@ protections:
   max_drawdown_cooldown_days: 5.0
 ```
 
-Protections are an optional entry-only lock manager. When enabled, recent
-closed trades can temporarily block new entries for a symbol, strategy, or the
-whole portfolio after cooldown exits, stop-loss clusters, low-profit strategy
-performance, or rolling drawdown. Protection refresh failures block new entries
-fail-closed while exit checks continue.
+Protections are an entry-only lock manager. Recent closed trades can
+temporarily block new entries for a symbol, strategy, or the whole portfolio
+after cooldown exits, stop-loss clusters, low-profit strategy performance, or
+rolling drawdown. Protection refresh failures block new entries fail-closed
+while exit checks continue.
 
 | Setting | Meaning | Current Default |
 |---|---|---:|
-| `enabled` | Enables generated protection locks. Existing default keeps behavior unchanged. | `false` |
+| `enabled` | Enables generated protection locks for new entries while preserving exits. | `true` |
 | `symbol_cooldown_days` | Blocks re-entry in the same symbol after any closed sell. | 1.0 |
 | `symbol_stoploss_cooldown_days` | Blocks re-entry in a symbol after a stop-loss-style exit. | 3.0 |
 | `symbol_stoploss_loss_pct` | Minimum sell loss used with stop-loss reasons for symbol locks. | 3.5% |
