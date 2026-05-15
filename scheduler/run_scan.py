@@ -443,72 +443,78 @@ def _check_hold_day_exits(
 
             target_days = HOLD_DAYS[strategy]
             age_days    = get_trade_age_days(symbol)
-            if age_days >= target_days:
-                if strategy == "momentum":
-                    asset_class = trade.get("asset_class", "stock")
-                    try:
-                        entry_price = float(trade.get("entry_price") or 0)
-                    except (TypeError, ValueError) as e:
-                        log.error(f"Invalid entry price for hold-day check {symbol}: {trade.get('entry_price')}")
-                        _mark_exit_check_exception(marker, "hold_day_exit", symbol, e)
-                        continue
-                    if entry_price <= 0:
-                        log.warning(f"Skipping momentum hold check for {symbol}: missing entry price.")
-                        continue
-                    try:
-                        current_price = _latest_price_for_trade(symbol, asset_class)
-                    except Exception as e:
-                        info = _mark_exit_check_exception(marker, "hold_day_exit", symbol, e)
-                        log.error(
-                            "Hold-day price fetch failed for %s; deferring exit check: %s "
-                            "| category=%s retryable=%s status_code=%s",
-                            symbol,
-                            e,
-                            info.category,
-                            info.retryable,
-                            info.status_code or "",
-                            exc_info=True,
-                        )
-                        continue
-                    if current_price <= 0:
-                        log.warning(f"Skipping momentum hold check for {symbol}: invalid current price {current_price}.")
-                        continue
-                    peak_price = None
-                    high_water_text = str(trade.get("high_water_price") or "").strip()
-                    if high_water_text:
-                        try:
-                            high_water_price = float(high_water_text)
-                        except (ValueError, TypeError):
-                            high_water_price = 0.0
-                        if math.isfinite(high_water_price) and high_water_price > 0:
-                            peak_price = high_water_price
-                    if peak_price is None:
-                        peak_price = _estimate_peak_price_since_entry(symbol, asset_class, current_price, age_days)
-                    should_exit, reason = should_exit_for_hold(
-                        strategy=strategy,
-                        age_days=age_days,
-                        entry_price=entry_price,
-                        current_price=current_price,
-                        peak_price=peak_price,
-                        strategy_cfg=CFG["strategies"][strategy],
+            if strategy == "momentum":
+                asset_class = trade.get("asset_class", "stock")
+                try:
+                    entry_price = float(trade.get("entry_price") or 0)
+                except (TypeError, ValueError) as e:
+                    log.error(f"Invalid entry price for hold-day check {symbol}: {trade.get('entry_price')}")
+                    _mark_exit_check_exception(marker, "hold_day_exit", symbol, e)
+                    continue
+                if entry_price <= 0:
+                    log.warning(f"Skipping momentum hold check for {symbol}: missing entry price.")
+                    continue
+                try:
+                    current_price = _latest_price_for_trade(symbol, asset_class)
+                except Exception as e:
+                    info = _mark_exit_check_exception(marker, "hold_day_exit", symbol, e)
+                    log.error(
+                        "Hold-day price fetch failed for %s; deferring exit check: %s "
+                        "| category=%s retryable=%s status_code=%s",
+                        symbol,
+                        e,
+                        info.category,
+                        info.retryable,
+                        info.status_code or "",
+                        exc_info=True,
                     )
-                    if not should_exit:
+                    continue
+                if current_price <= 0:
+                    log.warning(f"Skipping momentum hold check for {symbol}: invalid current price {current_price}.")
+                    continue
+                peak_price = None
+                high_water_text = str(trade.get("high_water_price") or "").strip()
+                if high_water_text:
+                    try:
+                        high_water_price = float(high_water_text)
+                    except (ValueError, TypeError):
+                        high_water_price = 0.0
+                    if math.isfinite(high_water_price) and high_water_price > 0:
+                        peak_price = max(high_water_price, current_price)
+                if peak_price is None:
+                    peak_price = _estimate_peak_price_since_entry(symbol, asset_class, current_price, age_days)
+                should_exit, reason = should_exit_for_hold(
+                    strategy=strategy,
+                    age_days=age_days,
+                    entry_price=entry_price,
+                    current_price=current_price,
+                    peak_price=peak_price,
+                    strategy_cfg=CFG["strategies"][strategy],
+                )
+                if not should_exit:
+                    if age_days >= target_days:
                         log.info(
                             f"Momentum hold extended for {symbol}: "
                             f"age={age_days:.1f}d pnl={(current_price / entry_price - 1):+.2%}"
                         )
-                        continue
-                    log.info(f"Momentum hold exit for {symbol}: {reason}")
-                    result = oe.exit_position(
-                        symbol,
-                        reason=reason,
-                        asset_class=asset_class,
-                        dry_run=dry_run,
-                        force_market=True,
-                    )
-                    _mark_unhealthy_exit_result(marker, result, "hold_day_exit")
+                    else:
+                        log.debug(
+                            f"Momentum profit protection not triggered for {symbol}: "
+                            f"age={age_days:.1f}d pnl={(current_price / entry_price - 1):+.2%}"
+                        )
                     continue
+                log.info(f"Momentum hold exit for {symbol}: {reason}")
+                result = oe.exit_position(
+                    symbol,
+                    reason=reason,
+                    asset_class=asset_class,
+                    dry_run=dry_run,
+                    force_market=True,
+                )
+                _mark_unhealthy_exit_result(marker, result, "hold_day_exit")
+                continue
 
+            if age_days >= target_days:
                 log.info(
                     f"Hold period expired for {symbol} ({strategy}): "
                     f"{age_days:.1f}d >= {target_days}d — exiting."

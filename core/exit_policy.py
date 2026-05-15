@@ -1,8 +1,9 @@
 """
-Exit policy helpers shared by live scans and backtests.
+Exit policy helpers shared by live scans, risk checks, and backtests.
 
 The risk manager still owns hard stop-loss and take-profit exits. This module
-only decides whether a strategy-specific hold period should force an exit.
+decides whether a strategy-specific hold or profit-protection policy should
+force an exit.
 """
 
 from __future__ import annotations

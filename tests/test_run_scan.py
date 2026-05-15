@@ -684,6 +684,30 @@ class RunScanTests(unittest.TestCase):
         self.assertTrue(exit_position.call_args.kwargs["dry_run"])
         self.assertTrue(exit_position.call_args.kwargs["force_market"])
 
+    def test_momentum_trailing_stop_can_exit_before_min_hold(self):
+        open_trade = {
+            "symbol": "AAPL",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "entry_price": "100",
+            "high_water_price": "108",
+        }
+
+        with (
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "get_trade_age_days", return_value=2),
+            patch.object(run_scan, "_latest_price_for_trade", return_value=101),
+            patch.object(run_scan, "_estimate_peak_price_since_entry") as estimate_peak,
+            patch.object(run_scan.oe, "exit_position") as exit_position,
+        ):
+            run_scan._check_hold_day_exits([], dry_run=True)
+
+        estimate_peak.assert_not_called()
+        exit_position.assert_called_once()
+        self.assertEqual(exit_position.call_args.args, ("AAPL",))
+        self.assertIn("Momentum trailing stop", exit_position.call_args.kwargs["reason"])
+        self.assertTrue(exit_position.call_args.kwargs["force_market"])
+
     def test_momentum_hold_price_fetch_failure_marks_error_and_continues(self):
         open_trades = [
             {
