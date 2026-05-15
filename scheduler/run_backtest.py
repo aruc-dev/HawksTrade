@@ -100,6 +100,9 @@ REGIME_HISTORY_LIMITS = {
     "QQQ": 55,
     "BTC/USD": 60,
 }
+BACKTEST_SESSION_MINUTES = 390.0
+BACKTEST_OPENING_PROXY_MINUTES = 5.0
+BACKTEST_OPENING_PROXY_LIMIT_CUTOFF = 90
 
 
 def _bars_from_frame(df: pd.DataFrame) -> list[SimpleBar]:
@@ -150,6 +153,28 @@ def _momentum_backtest_scan_time(current_date) -> datetime:
         tzinfo=ZoneInfo("America/New_York"),
     )
     return scan_et.astimezone(timezone.utc)
+
+
+def _synthetic_intraday_proxy(current_date, request_limit: int) -> tuple[datetime, float, str]:
+    """Return timestamp, elapsed-session minutes, and proxy kind for daily-bar intraday mocks."""
+    try:
+        limit = int(request_limit)
+    except (TypeError, ValueError):
+        limit = 0
+    if limit <= BACKTEST_OPENING_PROXY_LIMIT_CUTOFF:
+        return _gap_up_backtest_scan_time(current_date), BACKTEST_OPENING_PROXY_MINUTES, "opening"
+
+    session_date = _as_datetime(current_date).date()
+    elapsed = max(1.0, min(float(limit - 5), BACKTEST_SESSION_MINUTES))
+    session_start = datetime(
+        session_date.year,
+        session_date.month,
+        session_date.day,
+        9,
+        30,
+        tzinfo=ZoneInfo("America/New_York"),
+    )
+    return (session_start + timedelta(minutes=elapsed)).astimezone(timezone.utc), elapsed, "session"
 
 
 def _as_datetime(value) -> datetime:
@@ -470,9 +495,9 @@ def _make_bar_fetcher(sim: "BacktestSimulator"):
                     sim.synthetic_minute_proxy_symbols.add(s)
                     sim.synthetic_minute_proxy_timeframes.add(timeframe)
                     # Daily historical backtests do not have real minute bars.
-                    # Provide a synthetic 9:35 ET opening bar so gap_up can be
-                    # evaluated at the session open without using the full daily
-                    # close as its entry price.
+                    # Provide opening-window proxies for gap_up and elapsed-session
+                    # volume proxies for momentum without pretending full minute
+                    # replay exists.
                     session_date = _as_datetime(sim.current_date).date()
                     session_mask = pd.Series(
                         [_as_datetime(idx).date() <= session_date for idx in df.index],
@@ -481,14 +506,22 @@ def _make_bar_fetcher(sim: "BacktestSimulator"):
                     hist_df = df[session_mask].tail(1).copy()
                     if not hist_df.empty:
                         hist_df = hist_df.astype({"volume": "float64"})
-                        open_price = hist_df.iloc[-1]["open"]
-                        hist_df.loc[:, "high"] = open_price
-                        hist_df.loc[:, "low"] = open_price
-                        hist_df.loc[:, "close"] = open_price
-                        hist_df.loc[:, "volume"] = hist_df["volume"].astype(float) * (5.0 / 390.0)
-                        hist_df.index = pd.DatetimeIndex([
-                            _gap_up_backtest_scan_time(sim.current_date)
-                        ])
+                        proxy_time, elapsed_minutes, proxy_kind = _synthetic_intraday_proxy(sim.current_date, limit)
+                        if proxy_kind == "opening":
+                            open_price = hist_df.iloc[-1]["open"]
+                            hist_df.loc[:, "high"] = open_price
+                            hist_df.loc[:, "low"] = open_price
+                            hist_df.loc[:, "close"] = open_price
+                        else:
+                            sim.synthetic_session_volume_proxy_used = True
+                            sim.synthetic_session_volume_proxy_symbols.add(s)
+                            sim.synthetic_session_volume_proxy_timeframes.add(timeframe)
+                        hist_df.loc[:, "volume"] = (
+                            hist_df["volume"].astype(float)
+                            * min(elapsed_minutes, BACKTEST_SESSION_MINUTES)
+                            / BACKTEST_SESSION_MINUTES
+                        )
+                        hist_df.index = pd.DatetimeIndex([proxy_time])
                 bars_list = [
                     SimpleBar(
                         open_price=float(row["open"]),
@@ -555,6 +588,7 @@ def _compute_daily_sharpe(df_curve: pd.DataFrame) -> float:
 def _backtest_execution_notes(cfg: dict, sim: "BacktestSimulator" | None = None) -> list[str]:
     notes = []
     gap_up_enabled = cfg.get("strategies", {}).get("gap_up", {}).get("enabled", False)
+    momentum_enabled = cfg.get("strategies", {}).get("momentum", {}).get("enabled", False)
     if gap_up_enabled:
         proxy_used = bool(getattr(sim, "synthetic_minute_proxy_used", False)) if sim else True
         symbols = sorted(getattr(sim, "synthetic_minute_proxy_symbols", set())) if sim else []
@@ -568,6 +602,16 @@ def _backtest_execution_notes(cfg: dict, sim: "BacktestSimulator" | None = None)
         else:
             notes.append(
                 "Gap-Up was enabled, but no opening-window minute replay was exercised in this run."
+            )
+    if momentum_enabled:
+        proxy_used = bool(getattr(sim, "synthetic_session_volume_proxy_used", False)) if sim else False
+        symbols = sorted(getattr(sim, "synthetic_session_volume_proxy_symbols", set())) if sim else []
+        symbol_suffix = f" Symbols: {', '.join(symbols[:8])}." if symbols else ""
+        if proxy_used:
+            notes.append(
+                "Momentum volume-pace backtest uses a synthetic elapsed-session volume proxy "
+                "from daily bars, not real minute bars; volume-pace fills are not intraday-validated."
+                f"{symbol_suffix}"
             )
     return notes
 
@@ -595,6 +639,9 @@ class BacktestSimulator:
         self.synthetic_minute_proxy_used = False
         self.synthetic_minute_proxy_symbols = set()
         self.synthetic_minute_proxy_timeframes = set()
+        self.synthetic_session_volume_proxy_used = False
+        self.synthetic_session_volume_proxy_symbols = set()
+        self.synthetic_session_volume_proxy_timeframes = set()
 
     def get_portfolio_value(self):
         pos_value = 0

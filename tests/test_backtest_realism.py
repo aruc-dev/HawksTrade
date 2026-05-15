@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from datetime import timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -159,6 +160,21 @@ class GapUpIntradayTests(unittest.TestCase):
         self.assertIn("AAPL", sim.synthetic_minute_proxy_symbols)
         self.assertEqual(len(bars["AAPL"]), 1)
 
+    def test_backtest_minute_fetch_uses_near_close_volume_proxy_for_momentum(self):
+        sim = BacktestSimulator(initial_fund=10000.0)
+        sim.current_date = _frame().index[-1]
+        sim.historical_data = {"AAPL": _frame()}
+
+        fetcher = _make_bar_fetcher(sim)
+        bars = fetcher(["AAPL"], timeframe="1Min", limit=390)
+        proxy_bar = bars["AAPL"][0]
+        proxy_time_et = proxy_bar.timestamp.astimezone(ZoneInfo("America/New_York"))
+
+        self.assertTrue(sim.synthetic_session_volume_proxy_used)
+        self.assertIn("AAPL", sim.synthetic_session_volume_proxy_symbols)
+        self.assertEqual((proxy_time_et.hour, proxy_time_et.minute), (15, 55))
+        self.assertAlmostEqual(proxy_bar.volume, float(_frame()["volume"].iloc[-1]) * 385 / 390)
+
     def test_backtest_report_notes_call_out_gap_up_daily_proxy(self):
         sim = BacktestSimulator(initial_fund=10000.0)
         sim.synthetic_minute_proxy_used = True
@@ -170,6 +186,18 @@ class GapUpIntradayTests(unittest.TestCase):
 
         self.assertIn("Gap-Up opening-window backtest uses a synthetic 9:35 ET daily-open proxy", rendered)
         self.assertIn("not intraday-validated", rendered)
+
+    def test_backtest_report_notes_call_out_momentum_volume_proxy(self):
+        sim = BacktestSimulator(initial_fund=10000.0)
+        sim.synthetic_session_volume_proxy_used = True
+        sim.synthetic_session_volume_proxy_symbols.add("AAPL")
+        cfg = {"strategies": {"momentum": {"enabled": True}, "gap_up": {"enabled": False}}}
+
+        notes = _backtest_execution_notes(cfg, sim)
+        rendered = _format_execution_notes(notes)
+
+        self.assertIn("Momentum volume-pace backtest uses a synthetic elapsed-session volume proxy", rendered)
+        self.assertIn("not real minute bars", rendered)
 
     def test_momentum_backtest_scan_time_is_regular_session_near_close(self):
         scan_time = _momentum_backtest_scan_time(pd.Timestamp("2026-01-05T00:00:00Z"))

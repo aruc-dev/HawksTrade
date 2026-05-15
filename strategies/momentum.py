@@ -312,10 +312,9 @@ class MomentumStrategy(BaseStrategy):
         volume_pace_timeframe = str(SCFG.get("volume_pace_timeframe", "1Min"))
         current_time = kwargs.get("current_time")
         elapsed_minutes, in_regular_session = _regular_session_progress(current_time, session_minutes)
-        near_close = elapsed_minutes >= session_minutes * 0.95
         intraday_bars_data = None
 
-        if volume_mode == "pace" and in_regular_session and not near_close:
+        if volume_mode == "pace" and in_regular_session:
             try:
                 intraday_limit = max(10, min(int(math.ceil(elapsed_minutes)) + 5, int(session_minutes) + 5))
                 intraday_bars_data = ac.get_stock_bars(
@@ -373,7 +372,7 @@ class MomentumStrategy(BaseStrategy):
                 volume_required = volume_spike_ratio
                 volume_basis = "daily"
 
-                if volume_mode == "pace" and intraday_bars_data is not None and not near_close:
+                if volume_mode == "pace" and intraday_bars_data is not None:
                     intraday_bars = self._get_symbol_bars(intraday_bars_data, symbol)
                     session_volume = _session_volume_from_bars(intraday_bars, current_time)
                     expected_volume = avg_vol_20 * elapsed_minutes / session_minutes
