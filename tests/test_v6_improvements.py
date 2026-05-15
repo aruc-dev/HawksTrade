@@ -479,6 +479,26 @@ class TestMomentumExitPolicy(unittest.TestCase):
         )
         self.assertFalse(should_exit)
 
+    def test_profit_trailing_ignores_invalid_prices(self):
+        cases = (
+            {"entry_price": 0, "current_price": 101, "peak_price": 108},
+            {"entry_price": None, "current_price": 101, "peak_price": 108},
+            {"entry_price": float("nan"), "current_price": 101, "peak_price": 108},
+            {"entry_price": 100, "current_price": float("nan"), "peak_price": 108},
+            {"entry_price": 100, "current_price": 101, "peak_price": float("nan")},
+        )
+
+        for prices in cases:
+            with self.subTest(prices=prices):
+                should_exit, reason = should_exit_for_hold(
+                    strategy="momentum",
+                    age_days=2,
+                    strategy_cfg=self._cfg(),
+                    **prices,
+                )
+                self.assertFalse(should_exit)
+                self.assertEqual(reason, "")
+
     def test_risk_only_baseline_ignores_hold_days(self):
         should_exit, _ = should_exit_for_hold(
             strategy="momentum",

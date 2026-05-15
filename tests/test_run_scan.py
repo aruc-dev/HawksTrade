@@ -31,7 +31,7 @@ class RunScanTests(unittest.TestCase):
         )
         return APIError(error, http_error)
 
-    def test_profit_protection_strategies_are_derived_from_config(self):
+    def test_policy_aware_hold_strategies_are_derived_from_config(self):
         cfg = {
             "strategies": {
                 "momentum": {"hold_days": 4, "exit_policy": "risk_only_baseline"},
@@ -42,10 +42,6 @@ class RunScanTests(unittest.TestCase):
             }
         }
 
-        self.assertEqual(
-            run_scan._configured_profit_protection_strategies(cfg),
-            {"rsi_reversion", "new_strategy"},
-        )
         self.assertEqual(
             run_scan._configured_policy_aware_hold_strategies(cfg),
             {"momentum", "rsi_reversion", "new_strategy"},
@@ -741,14 +737,17 @@ class RunScanTests(unittest.TestCase):
             patch.dict(run_scan.CFG["strategies"]["momentum"], {"exit_policy": "risk_only_baseline"}),
             patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
             patch.object(run_scan, "get_trade_age_days", return_value=30),
-            patch.object(run_scan, "_latest_price_for_trade", return_value=101),
+            patch.object(run_scan, "_latest_price_for_trade") as latest_price,
             patch.object(run_scan, "_estimate_peak_price_since_entry") as estimate_peak,
             patch.object(run_scan.oe, "exit_position") as exit_position,
+            patch.object(run_scan.log, "info") as log_info,
         ):
             run_scan._check_hold_day_exits([], dry_run=True)
 
+        latest_price.assert_not_called()
         estimate_peak.assert_not_called()
         exit_position.assert_not_called()
+        log_info.assert_not_called()
 
     def test_range_breakout_profit_protection_can_exit_before_hold_cap(self):
         open_trade = {

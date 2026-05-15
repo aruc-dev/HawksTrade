@@ -8,6 +8,8 @@ force an exit.
 
 from __future__ import annotations
 
+import math
+
 VALID_MOMENTUM_EXIT_POLICIES = {
     "fixed_hold",
     "profit_trailing",
@@ -19,6 +21,16 @@ PROFIT_TRAILING_REASON_PREFIXES = {
     "range_breakout": "Range breakout profit protection",
     "rsi_reversion": "RSI reversion profit protection",
 }
+
+
+def _finite_positive_float(value) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed) or parsed <= 0:
+        return None
+    return parsed
 
 
 def normalize_momentum_exit_policy(policy: str | None) -> str:
@@ -52,9 +64,14 @@ def _profit_trailing_exit(
     peak_price: float | None,
     strategy_cfg: dict,
 ) -> tuple[bool, str]:
-    peak = float(peak_price if peak_price is not None else current_price)
-    peak_gain_pct = (peak / float(entry_price)) - 1.0
-    drawdown_from_peak = (float(current_price) / peak) - 1.0 if peak > 0 else 0.0
+    entry = _finite_positive_float(entry_price)
+    current = _finite_positive_float(current_price)
+    peak = _finite_positive_float(peak_price if peak_price is not None else current_price)
+    if entry is None or current is None or peak is None:
+        return False, ""
+
+    peak_gain_pct = (peak / entry) - 1.0
+    drawdown_from_peak = (current / peak) - 1.0
 
     activation_pct = float(strategy_cfg.get("trail_activation_pct", 0.06))
     trailing_stop_pct = float(strategy_cfg.get("trailing_stop_pct", 0.04))

@@ -96,14 +96,6 @@ def _strategy_uses_profit_protection(strategy: str, strategy_cfg: dict) -> bool:
     return bool(strategy_cfg.get("profit_trailing_enabled", False))
 
 
-def _configured_profit_protection_strategies(cfg: dict) -> set[str]:
-    return {
-        name
-        for name, strategy_cfg in cfg.get("strategies", {}).items()
-        if strategy_cfg.get("hold_days") and _strategy_uses_profit_protection(name, strategy_cfg)
-    }
-
-
 def _configured_policy_aware_hold_strategies(cfg: dict) -> set[str]:
     return {
         name
@@ -123,7 +115,6 @@ def _hold_exit_uses_market_order(strategy: str, reason: str) -> bool:
 
 
 HOLD_DAYS = _configured_hold_days(CFG)
-PROFIT_PROTECTION_STRATEGIES = _configured_profit_protection_strategies(CFG)
 POLICY_AWARE_HOLD_STRATEGIES = _configured_policy_aware_hold_strategies(CFG)
 
 # ── Strategy Registry ─────────────────────────────────────────────────────────
@@ -480,6 +471,18 @@ def _check_hold_day_exits(
             target_days = HOLD_DAYS[strategy]
             age_days    = get_trade_age_days(symbol)
             if strategy in POLICY_AWARE_HOLD_STRATEGIES:
+                strategy_cfg = CFG["strategies"][strategy]
+                if (
+                    strategy == "momentum"
+                    and normalize_momentum_exit_policy(strategy_cfg.get("exit_policy")) == "risk_only_baseline"
+                ):
+                    log.debug(
+                        "Momentum risk_only_baseline ignores hold_days for %s; "
+                        "deferring to risk checks only.",
+                        symbol,
+                    )
+                    continue
+
                 asset_class = trade.get("asset_class", "stock")
                 try:
                     entry_price = float(trade.get("entry_price") or 0)
@@ -526,7 +529,7 @@ def _check_hold_day_exits(
                     entry_price=entry_price,
                     current_price=current_price,
                     peak_price=peak_price,
-                    strategy_cfg=CFG["strategies"][strategy],
+                    strategy_cfg=strategy_cfg,
                 )
                 if not should_exit:
                     if age_days >= target_days:
