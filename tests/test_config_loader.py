@@ -115,7 +115,7 @@ class TestGetConfig(unittest.TestCase):
 
         strategies = cfg["strategies"]
         self.assertTrue(strategies["momentum"]["enabled"])
-        self.assertTrue(strategies["rsi_reversion"]["enabled"])
+        self.assertFalse(strategies["rsi_reversion"]["enabled"])
         self.assertTrue(strategies["ma_crossover"]["enabled"])
         self.assertTrue(strategies["range_breakout"]["enabled"])
         self.assertTrue(strategies["gap_up"]["enabled"])
@@ -168,7 +168,11 @@ class TestGetConfig(unittest.TestCase):
         }
         self.assertEqual(
             production_windows["default_12m_costed"]["strategies"],
-            ["momentum", "rsi_reversion", "gap_up", "ma_crossover", "range_breakout"],
+            ["momentum", "gap_up", "ma_crossover", "range_breakout"],
+        )
+        self.assertEqual(
+            production_windows["default_6m_costed"]["strategies"],
+            ["momentum", "gap_up", "ma_crossover", "range_breakout"],
         )
         self.assertEqual(production_windows["default_12m_costed"]["end_date"], "04/29/2026")
         self.assertEqual(production_windows["default_6m_costed"]["end_date"], "04/29/2026")

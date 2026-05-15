@@ -11,7 +11,7 @@
 | Strategy | Asset | Status | File |
 |---|---|---|---|
 | Momentum | Stocks | **Enabled** | `momentum.py` |
-| RSI Reversion | Stocks | **Enabled** | `rsi_reversion.py` |
+| RSI Reversion | Stocks | **Disabled by default** | `rsi_reversion.py` |
 | Gap-Up | Stocks | **Enabled** | `gap_up.py` |
 | MA Crossover | Crypto | **Enabled** | `ma_crossover.py` |
 | Range Breakout | Crypto | **Enabled** | `range_breakout.py`; high-water profit protection enabled |
@@ -98,7 +98,7 @@ room while the global 3.5% stop remains the baseline fixed-percentage stop.
 
 ---
 
-## 2. RSI Reversion *(Stocks — Enabled)*
+## 2. RSI Reversion *(Stocks — Disabled by default)*
 
 **Type:** Mean reversion, swing trade.
 
@@ -158,9 +158,9 @@ absent; otherwise the ATR stop can widen the trade's breathing room.
 - Crash filter: skip if SPY is >20% below its 252-day peak.
 - VIX proxy: skip if SPY realised HV(20) > 200-day HV MA × `vix_multiplier` (default: 0.95).
 
-**Monitoring gate:** This strategy is enabled in the active default profile.
+**Monitoring gate:** This strategy is disabled in the active default profile.
 Continue running `python3 scheduler/run_validation_gate.py --profile rsi` before
-scaling its capital allocation. The gate requires cost-aware backtest performance
+enabling it or scaling its capital allocation. The gate requires cost-aware backtest performance
 plus at least 60 paper-trading days, 20 closed RSI trades, 48% win rate, 1.15
 profit factor, +2% aggregate paper return, and max drawdown no worse than 4%.
 

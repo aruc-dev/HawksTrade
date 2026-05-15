@@ -83,11 +83,11 @@ EMA50 trend confirmation, volatility confirmation, ATR-risk sizing, and a
 - **Current improvement area:** continue forward-validating fill quality and
   slippage on crypto breakouts before increasing allocation.
 
-### 2.4 RSI Reversion (stocks, now enabled)
+### 2.4 RSI Reversion (stocks, disabled by default)
 
 Requires RSI < 40, %B < 20%, one-bar recovery, volume above 0.7× average,
 price within the SMA200 band, ATR/price ≤ 5%, a 5-day drawdown cap of 10%,
-and crash/realised-volatility guards. It is enabled in the all-strategy
+and crash/realised-volatility guards. It is disabled in the default
 profile. The costed 12-month RSI-only backtest gate now passes, while the
 forward paper-trading evidence gate remains pending until enough closed RSI
 paper trades accumulate.
@@ -193,18 +193,19 @@ strategies:
     hold_days: 14                # up from 3
 ```
 
-### 3.5 Re-enable rsi_reversion as a diversifier — IMPLEMENTED
+### 3.5 Re-enable rsi_reversion as a diversifier — MONITORED
 
-The current implementation keeps RSI Reversion enabled with broader RSI<40
-entries plus ATR and recent-drawdown quality gates. The earlier momentum-cold
-proposal below is retained as historical context, not the active config.
+The current implementation keeps RSI Reversion available with broader RSI<40
+entries plus ATR and recent-drawdown quality gates, but disabled by default
+pending forward paper evidence. The earlier momentum-cold proposal below is
+retained as historical context, not the active config.
 
 **Config:**
 
 ```yaml
 strategies:
   rsi_reversion:
-    enabled: true
+    enabled: false
     oversold_threshold: 30          # was 38 — tighter
     overbought_threshold: 55        # exit sooner
     require_sma50_uptrend: true     # price > SMA50 (stronger than "within 15% of SMA200")
@@ -401,7 +402,7 @@ Then, in order:
 5. §3.3 — Stale-days exit for momentum (requires trade-log schema update)
 6. §3.7 — New RS momentum strategy (new file + dedupe wiring)
 7. §3.6 — Regime-aware position sizer (touches core/order_executor.py)
-8. §3.5 — rsi_reversion revival (implemented with RSI<40 plus ATR/drawdown gates)
+8. §3.5 — rsi_reversion revival (available with RSI<40 plus ATR/drawdown gates; default disabled)
 
 Items 1–4 are independent and can land in any order. Items 5–8 depend on
 earlier items or on core plumbing changes — sequence them as above.

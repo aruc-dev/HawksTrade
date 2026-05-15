@@ -43,7 +43,7 @@ HawksTrade includes a high-fidelity historical simulator. The current tail-risk-
 | Strategy | Market | Key Parameters | Approach |
 |----------|--------|----------------|----------|
 | **Momentum** | US Stocks | Top 2 by 5-day return in green regimes, min 8% momentum, 2.0x volume spike, 65% breadth coverage, 1.2x ATR stop extension, profit-aware exit | Captures high-conviction rallies with a moderate opportunity increase while yellow regimes remain capped at one signal. |
-| **RSI Reversion** | US Stocks | Enabled; RSI < 40, %B < 20%, SMA-200 within +/-15%, 0.7x volume confirmation, 1-bar recovery, 5-day drawdown <= 10%, ATR/price <= 5%, 0.8x ATR stop capped at 6%, and profit protection | Mean reversion with crash, realised-volatility, tail-loss, and high-water trailing guards. |
+| **RSI Reversion** | US Stocks | Disabled by default; RSI < 40, %B < 20%, SMA-200 within +/-15%, 0.7x volume confirmation, 1-bar recovery, 5-day drawdown <= 10%, ATR/price <= 5%, 0.8x ATR stop capped at 6%, and profit protection when enabled | Mean reversion with crash, realised-volatility, tail-loss, and high-water trailing guards. |
 | **Gap-Up** | US Stocks | Enabled; true 5-15% opening gap, 1.3x opening-volume pace, 65% breadth guard, prior close above SMA-200, <=35% SMA-200 extension, top-1 ranked signal, 2-day hold, failed-gap exit | Opening momentum sleeve with completed-bar trend confirmation, minute-bar entry confirmation, and ATR-risk sizing. |
 | **EMA Crossover** | Crypto | 6/18 EMA, latest completed cross only, top-1 ranked signal, RSI 35-75, slope + volatility filters, 3-day drawdown guard, price/EMA confirmation, 2% daily-close max-loss exit, 16-day hold cap | Bullish EMA crossover with BTC regime gate and tighter same-scan concentration control. |
 | **Range Breakout** | Crypto | Enabled; 20-day high close breakout, 2.5x volume, rising EMA-50, RSI, 0.8%-8% breakout-extension, upper-range close guards, and profit protection | Ranked Donchian-style breakout sleeve with failed-breakout, trend-loss, and high-water trailing exits. |
@@ -65,7 +65,7 @@ Momentum, RSI Reversion, Gap-Up, EMA Crossover, and Range Breakout emit ATR-risk
 
 Momentum uses `exit_policy: profit_trailing` by default. The trailing stop can exit before the 4-trading-day minimum hold once a position reaches a 6% peak gain and then falls 4% from that peak. Live and paper runners enforce that profit protection during the 15-minute risk check and the scan hold-exit pass. After the minimum hold, flat or losing trades are exited and profitable trades can continue under the same trailing stop. Backtests can compare policies with:
 
-RSI Reversion and Range Breakout also use high-water profit protection. Once an open position reaches the configured `trail_activation_pct`, the scan hold-exit pass and risk check can exit it if price falls by `trailing_stop_pct` from the observed peak, before the strategy hold cap.
+Range Breakout also uses high-water profit protection. RSI Reversion has the same protection available when enabled. Once an open position reaches the configured `trail_activation_pct`, the scan hold-exit pass and risk check can exit it if price falls by `trailing_stop_pct` from the observed peak, before the strategy hold cap.
 
 ```bash
 python3 scheduler/run_backtest.py --days 365 --exit-policy fixed_hold
@@ -96,7 +96,7 @@ windows, and reports watch-only warnings for weak recent crypto windows:
 python3 scheduler/run_validation_gate.py --profile production
 ```
 
-RSI Reversion is enabled in the active default profile. Use its dedicated gate as an ongoing monitoring check before scaling its capital allocation:
+RSI Reversion is disabled in the active default profile. Use its dedicated gate as an ongoing monitoring check before enabling it or scaling its capital allocation:
 
 ```bash
 python3 scheduler/run_validation_gate.py --profile rsi
