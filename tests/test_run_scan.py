@@ -523,6 +523,52 @@ class RunScanTests(unittest.TestCase):
 
         enter_position.assert_called_once()
 
+    def test_entry_pipeline_preserves_executor_kwargs(self):
+        class AllowProtectionManager:
+            enabled = False
+
+            def evaluate_entry(self, symbol, strategy):
+                return SimpleNamespace(allowed=True)
+
+        class FakeMomentum:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def scan(self, universe, **kwargs):
+                return [{
+                    "symbol": "AAPL",
+                    "action": "buy",
+                    "atr_risk_qty": 7.5,
+                    "atr_stop_price": 95.25,
+                }]
+
+        with (
+            patch.object(run_scan.ProtectionManager, "from_config", return_value=AllowProtectionManager()),
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(
+                run_scan.ac,
+                "get_stock_bars",
+                return_value={"SPY": [object()] * 252, "QQQ": [object()] * 51},
+            ),
+            patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "get_stock_universe", return_value=["AAPL"]),
+            patch.object(run_scan, "STOCK_STRATEGIES", [FakeMomentum()]),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+            patch.object(run_scan.oe, "enter_position", return_value={"symbol": "AAPL", "status": "dry_run"}) as enter_position,
+        ):
+            run_scan.run(run_stocks=True, run_crypto=False, dry_run=True)
+
+        enter_position.assert_called_once_with(
+            "AAPL",
+            strategy="momentum",
+            asset_class="stock",
+            dry_run=True,
+            suggested_qty=7.5,
+            atr_stop_price=95.25,
+        )
+
     def test_run_respects_max_positions_with_planned_entries(self):
         class FakeMomentum:
             name = "momentum"

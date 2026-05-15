@@ -20,6 +20,7 @@ from core import alpaca_client as ac
 from core.order_governor import GovernorDecision, OrderGovernor, OrderIntent
 from core import risk_manager as rm
 from core.config_loader import get_config
+from core.portfolio_construction import construct_entry_size
 from tracking import order_intents
 from tracking.trade_log import log_trade, mark_trade_closed, get_trade_age_days
 
@@ -408,21 +409,20 @@ def enter_position(
             log.info(f"Entry blocked for {symbol}: {check['reason']}")
             return None
 
-        qty = check["qty"]
-        if suggested_qty and suggested_qty > 0:
-            # ATR-risk sizing from signal takes priority
-            qty = suggested_qty
-        elif strategy == "momentum":
-            # Kelly override for momentum — uses dynamic rolling 30-trade params
-            kelly_qty = rm.kelly_position_size(price=price)
-            if kelly_qty > 0:
-                qty = kelly_qty
-        capped_qty = rm.cap_position_qty(price, qty)
+        sizing = construct_entry_size(
+            price=price,
+            strategy=strategy,
+            pre_trade_qty=check["qty"],
+            suggested_qty=suggested_qty,
+            kelly_sizer=rm.kelly_position_size,
+            capper=rm.cap_position_qty,
+        )
+        capped_qty = sizing.capped_qty
         if capped_qty <= 0:
             log.info(f"Entry blocked for {symbol}: capped quantity is zero.")
             return None
-        if capped_qty < qty:
-            log.info(f"Entry size capped for {symbol}: requested={qty} capped={capped_qty}")
+        if sizing.capped:
+            log.info(f"Entry size capped for {symbol}: requested={sizing.requested_qty} capped={capped_qty}")
         qty = capped_qty
         order_type = "market" if ORDER_TYPE == "market" else "limit"
         limit_px = price * (1 + SLIPPAGE) if order_type == "limit" else None
