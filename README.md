@@ -96,6 +96,18 @@ windows, and reports watch-only warnings for weak recent crypto windows:
 python3 scheduler/run_validation_gate.py --profile production
 ```
 
+For read-only factor research, generate a reproducible OHLCV factor dataset and
+forward-return summary without changing live strategy defaults or placing
+orders:
+
+```bash
+python3 scripts/research_factors.py --symbols AAPL MSFT --days 260 --output-dir reports/factor_research
+```
+
+The research harness writes `factor_dataset.csv`, `factor_summary.json`, and
+`factor_summary.md`. Treat those outputs as evidence for a separate strategy
+change; do not tune production defaults from the harness alone.
+
 RSI Reversion is disabled in the active default profile. Use its dedicated gate as an ongoing monitoring check before enabling it or scaling its capital allocation:
 
 ```bash
