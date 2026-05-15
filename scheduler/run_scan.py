@@ -264,6 +264,7 @@ OPERATIONAL_GOVERNOR_BLOCK_CODES = {
     "broker_orders_lookup_failed",
     "missing_account_state",
     "missing_broker_orders",
+    "order_history_unavailable",
 }
 
 

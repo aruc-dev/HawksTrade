@@ -225,6 +225,19 @@ class AlpacaClientTests(unittest.TestCase):
         self.assertEqual(fake_client.req.end.date().isoformat(), "2026-01-31")
         self.assertEqual(fake_client.req.limit, alpaca_client.MAX_BARS_PER_DATA_REQUEST)
 
+    def test_get_stock_bars_rejects_oversized_explicit_intraday_range(self):
+        with patch.object(alpaca_client, "get_stock_data_client") as get_client:
+            with self.assertRaisesRegex(ValueError, "per-symbol request limit"):
+                alpaca_client.get_stock_bars(
+                    ["AAPL"],
+                    timeframe="1Min",
+                    limit=30,
+                    start="2026-01-01",
+                    end="2026-03-31",
+                )
+
+        get_client.assert_not_called()
+
     def test_get_crypto_bars_scales_limit_for_batch_request_and_pair_symbols(self):
         class FakeDataClient:
             def get_crypto_bars(self, req):

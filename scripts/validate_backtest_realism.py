@@ -673,6 +673,7 @@ def run_acceptance(
     days: int,
     baseline_file: Path = DEFAULT_BASELINE_FILE,
     require_real_gap_up_intraday: bool = False,
+    compare_baseline: bool = True,
 ) -> dict:
     findings: list[RealismFinding] = []
     findings.extend(_self_test_data_quality())
@@ -705,7 +706,8 @@ def run_acceptance(
         gap_status=gap_status,
         findings=findings,
     )
-    findings.extend(compare_acceptance_baseline(result, baseline))
+    if compare_baseline:
+        findings.extend(compare_acceptance_baseline(result, baseline))
     return _acceptance_result(
         days=days,
         baseline_file=baseline_file,
@@ -743,6 +745,7 @@ def main(argv: list[str] | None = None) -> int:
         days=args.days,
         baseline_file=args.baseline_file,
         require_real_gap_up_intraday=args.require_real_gap_up_intraday,
+        compare_baseline=not args.write_baseline,
     )
 
     if args.write_baseline:

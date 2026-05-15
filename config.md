@@ -18,7 +18,7 @@ The latest validated default configuration is:
 | Trading mode | `mode: paper` | Paper trading should remain the default until live trading is explicitly approved. |
 | Intraday trading | `intraday.enabled: false` | The system is validated as a swing-trading bot. |
 | Screener | `screener.enabled: true` | The tightened screener improved 12-month return versus the old screener and recent fixed-universe test. |
-| Momentum | enabled, `top_n: 2`, `min_momentum_pct: 0.08`, `volume_spike_ratio: 2.0`, `min_breadth_coverage_pct: 0.65` | Allows a second green-regime stock candidate while keeping yellow regimes capped at one signal and preserving sector/risk guards. |
+| Momentum | enabled, `top_n: 2`, `min_momentum_pct: 0.08`, `volume_confirmation_mode: pace`, `volume_pace_ratio: 1.5`, `min_breadth_coverage_pct: 0.65` | Allows a second green-regime stock candidate while keeping yellow regimes capped at one signal and preserving sector/risk guards. |
 | RSI Reversion | enabled, `oversold_threshold: 40`, `max_entry_atr_pct: 0.05`, `max_recent_drawdown_pct: 0.10` | Active mean-reversion stock sleeve with crash, realised-volatility, high-ATR, recent-waterfall, and max-loss guards. |
 | Gap-Up | enabled, `require_prior_close_above_trend: true` | Opening-momentum sleeve with true-gap, opening-volume pace, completed-bar trend, and top-1 ranking guards. |
 | MA Crossover | enabled, `hold_days: 16`, `max_loss_exit_pct: 0.02` | Positive crypto contribution with recent-window weakness reduced while avoiding the older large-loss tail seen with a 3% exit. |
@@ -108,6 +108,39 @@ These are risk parameters. Keep them unchanged unless you are deliberately reval
 `scheduler/run_risk_check.py` (stop-loss, take-profit, and daily-loss emergency exits)
 and momentum hold exits from `scheduler/run_scan.py` use market sell orders so exit
 certainty is not dependent on DAY limit orders filling.
+
+---
+
+## Order Governor
+
+```yaml
+order_governor:
+  enabled: true
+  max_active_orders: 50
+  max_orders_per_window: 60
+  order_rate_window_seconds: 60
+  max_daily_orders: 500
+  max_notional_usd: null
+  max_notional_pct: null
+```
+
+The order governor is a default-on broker-state safety gate that runs immediately
+before order submission. It blocks duplicate active orders for the same symbol and
+side, missing broker/account state, excessive active broker orders, order-rate
+bursts, daily order-count breaches, and optional notional limits.
+
+| Setting | Meaning | Current Default |
+|---|---|---:|
+| `enabled` | Enables the pre-submit safety gate. Disable only for controlled debugging. | `true` |
+| `max_active_orders` | Blocks new entries when active broker orders meet or exceed this count. | 50 |
+| `max_orders_per_window` | Blocks new entries if recent local order-intent history exceeds this count. | 60 |
+| `order_rate_window_seconds` | Rolling window used with `max_orders_per_window`. | 60 |
+| `max_daily_orders` | Blocks new entries after this many local order intents in the UTC day. | 500 |
+| `max_notional_usd` | Optional hard dollar cap per submitted order. | `null` |
+| `max_notional_pct` | Optional cap as a fraction of portfolio value per submitted order. | `null` |
+
+Governor blocks are fail-closed. Operational lookup/history failures mark the scan
+unhealthy so they are visible in health checks instead of looking like a clean no-trade run.
 
 ---
 
@@ -233,12 +266,16 @@ momentum:
   min_momentum_pct: 0.08
   min_alpha_pct: 0.0
   min_breadth_coverage_pct: 0.65
+  volume_confirmation_mode: "pace"
+  volume_pace_ratio: 1.5
+  volume_pace_timeframe: "1Min"
+  session_minutes: 390
   volume_spike_ratio: 2.0
 ```
 
 Recommended: enabled.
 
-Momentum is the primary stock contributor. The moderate-growth profile uses `top_n: 2`, `min_momentum_pct: 0.08`, `volume_spike_ratio: 2.0`, and `min_breadth_coverage_pct: 0.65` to increase qualified opportunities while keeping yellow regimes capped at one position and sector concentration capped.
+Momentum is the primary stock contributor. The moderate-growth profile uses `top_n: 2`, `min_momentum_pct: 0.08`, `volume_confirmation_mode: pace`, `volume_pace_ratio: 1.5`, and `min_breadth_coverage_pct: 0.65` to increase qualified opportunities while keeping yellow regimes capped at one position and sector concentration capped. If intraday bars are unavailable, pace mode falls back to the legacy `volume_spike_ratio: 2.0` full-day ratio.
 
 ### RSI Reversion
 

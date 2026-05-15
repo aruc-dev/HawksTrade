@@ -68,6 +68,23 @@ class OrderGovernorTests(unittest.TestCase):
         self.assertEqual(decision.code, "duplicate_pending_entry")
         self.assertEqual(decision.context["order_id"], "pending-buy")
 
+    def test_unknown_broker_order_status_counts_as_active(self):
+        intent = OrderIntent("AAPL", "buy", 1, "limit", price=100, limit_price=100.1)
+        pending = SimpleNamespace(symbol="AAPL", side="buy", status="broker_open_status", id="pending-buy")
+
+        decision = self._governor().evaluate(intent, self.account, [pending])
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.code, "duplicate_pending_entry")
+
+    def test_terminal_broker_order_status_does_not_count_as_active(self):
+        intent = OrderIntent("AAPL", "buy", 1, "limit", price=100, limit_price=100.1)
+        filled = SimpleNamespace(symbol="AAPL", side="buy", status="filled", id="filled-buy")
+
+        decision = self._governor().evaluate(intent, self.account, [filled])
+
+        self.assertTrue(decision.allowed)
+
     def test_blocks_max_active_orders_for_entries(self):
         orders = [
             SimpleNamespace(symbol=f"SYM{i}", side="buy", status="new", id=f"order-{i}")

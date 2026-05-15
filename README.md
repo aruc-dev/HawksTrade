@@ -42,7 +42,7 @@ HawksTrade includes a high-fidelity historical simulator. The current tail-risk-
 
 | Strategy | Market | Key Parameters | Approach |
 |----------|--------|----------------|----------|
-| **Momentum** | US Stocks | Top 2 by 5-day return in green regimes, min 8% momentum, 2.0x volume spike, 65% breadth coverage, 1.2x ATR stop extension, profit-aware exit | Captures high-conviction rallies with a moderate opportunity increase while yellow regimes remain capped at one signal. |
+| **Momentum** | US Stocks | Top 2 by 5-day return in green regimes, min 8% momentum, 1.5x elapsed-session volume pace, 65% breadth coverage, 1.2x ATR stop extension, profit-aware exit | Captures high-conviction rallies with a moderate opportunity increase while yellow regimes remain capped at one signal. |
 | **RSI Reversion** | US Stocks | Disabled by default; RSI < 40, %B < 20%, SMA-200 within +/-15%, 0.7x volume confirmation, 1-bar recovery, 5-day drawdown <= 10%, ATR/price <= 5%, 0.8x ATR stop capped at 6%, and profit protection when enabled | Mean reversion with crash, realised-volatility, tail-loss, and high-water trailing guards. |
 | **Gap-Up** | US Stocks | Enabled; true 5-15% opening gap, 1.3x opening-volume pace, 65% breadth guard, prior close above SMA-200, <=35% SMA-200 extension, top-1 ranked signal, 2-day hold, failed-gap exit | Opening momentum sleeve with completed-bar trend confirmation, minute-bar entry confirmation, and ATR-risk sizing. |
 | **EMA Crossover** | Crypto | 6/18 EMA, latest completed cross only, top-1 ranked signal, RSI 35-75, slope + volatility filters, 3-day drawdown guard, price/EMA confirmation, 2% daily-close max-loss exit, 16-day hold cap | Bullish EMA crossover with BTC regime gate and tighter same-scan concentration control. |

@@ -564,9 +564,32 @@ def _bar_request_limit(timeframe: str, limit: int, market: str, batch_size: int)
 
 
 def _bar_request_chunk_size_for_range(timeframe: str, start: datetime, end: datetime) -> int:
-    seconds = max(_timeframe_seconds(timeframe), (end - start).total_seconds())
-    bars_per_symbol = max(1, math.ceil(seconds / _timeframe_seconds(timeframe)))
+    bars_per_symbol = _bars_per_symbol_for_range(timeframe, start, end, market="stock")
     return max(1, MAX_BARS_PER_DATA_REQUEST // bars_per_symbol)
+
+
+def _business_days_in_range(start: datetime, end: datetime, market: str) -> int:
+    tz = ZoneInfo("America/New_York") if market == "stock" else timezone.utc
+    current = start.astimezone(tz).date()
+    final = end.astimezone(tz).date()
+    days = 0
+    while current <= final:
+        if current.weekday() < 5:
+            days += 1
+        current += timedelta(days=1)
+    return max(1, days)
+
+
+def _bars_per_symbol_for_range(timeframe: str, start: datetime, end: datetime, market: str) -> int:
+    if market == "stock":
+        sessions = _business_days_in_range(start, end, market=market)
+        if timeframe == "1Day":
+            return sessions
+        session_seconds = 390 * 60
+        bars_per_session = max(1, math.ceil(session_seconds / _timeframe_seconds(timeframe)))
+        return sessions * bars_per_session
+    seconds = max(_timeframe_seconds(timeframe), (end - start).total_seconds())
+    return max(1, math.ceil(seconds / _timeframe_seconds(timeframe)))
 
 
 def _bar_timestamp(bar):
@@ -686,6 +709,13 @@ def get_stock_bars(
     start_dt = parsed_start or end_dt - _lookback_delta(timeframe, limit, market="stock")
     if start_dt > end_dt:
         raise ValueError("stock bar start must be before end")
+    if explicit_range:
+        bars_per_symbol = _bars_per_symbol_for_range(timeframe, start_dt, end_dt, market="stock")
+        if bars_per_symbol > MAX_BARS_PER_DATA_REQUEST:
+            raise ValueError(
+                "explicit stock bar range exceeds the per-symbol request limit; "
+                "use a narrower start/end window"
+            )
     chunk_size = (
         _bar_request_chunk_size_for_range(timeframe, start_dt, end_dt)
         if explicit_range

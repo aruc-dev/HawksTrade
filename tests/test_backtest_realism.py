@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from datetime import timezone
@@ -268,6 +269,21 @@ class AcceptanceScriptTests(unittest.TestCase):
         self.assertTrue(
             any(finding["check"] == "acceptance_baseline" for finding in result["findings"])
         )
+
+    def test_write_baseline_skips_existing_baseline_comparison(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            baseline = Path(tmpdir) / "baseline.json"
+            baseline.write_text(
+                '{"version": 1, "status": "fail", "expected_checks": ["missing_check"]}',
+                encoding="utf-8",
+            )
+
+            code = realism.main(["--days", "30", "--baseline-file", str(baseline), "--write-baseline"])
+            written = json.loads(baseline.read_text(encoding="utf-8"))
+
+        self.assertEqual(code, 0)
+        self.assertEqual(written["status"], "pass")
+        self.assertIn("gap_up_intraday", written)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,8 @@ from typing import Iterable, Mapping
 
 import numpy as np
 import pandas as pd
+from pandas.tseries.holiday import AbstractHolidayCalendar, GoodFriday, Holiday, MO, TH, nearest_workday
+from pandas.tseries.offsets import DateOffset
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -40,6 +42,28 @@ DEFAULT_FACTORS = (
     "gap_pct",
     "breadth_pct",
 )
+
+
+class USEquityHolidayCalendar(AbstractHolidayCalendar):
+    rules = [
+        Holiday("New Year's Day", month=1, day=1, observance=nearest_workday),
+        Holiday("Martin Luther King Jr. Day", month=1, day=1, offset=DateOffset(weekday=MO(3))),
+        Holiday("Presidents Day", month=2, day=1, offset=DateOffset(weekday=MO(3))),
+        GoodFriday,
+        Holiday("Memorial Day", month=5, day=31, offset=DateOffset(weekday=MO(-1))),
+        Holiday("Juneteenth", month=6, day=19, observance=nearest_workday, start_date="2022-01-01"),
+        Holiday("Independence Day", month=7, day=4, observance=nearest_workday),
+        Holiday("Labor Day", month=9, day=1, offset=DateOffset(weekday=MO(1))),
+        Holiday("Thanksgiving Day", month=11, day=1, offset=DateOffset(weekday=TH(4))),
+        Holiday("Christmas Day", month=12, day=25, observance=nearest_workday),
+    ]
+
+
+US_EQUITY_BUSINESS_DAY = pd.offsets.CustomBusinessDay(calendar=USEquityHolidayCalendar())
+
+
+def _expected_single_symbol_dates(start: pd.Timestamp, end: pd.Timestamp) -> pd.DatetimeIndex:
+    return pd.date_range(start, end, freq=US_EQUITY_BUSINESS_DAY)
 
 
 def _bar_value(bar, field: str, default=None):
@@ -134,7 +158,7 @@ def _bars_to_frame(bars_by_symbol: Mapping[str, Iterable]) -> tuple[pd.DataFrame
                 (all_observed_dates >= dates.min()) & (all_observed_dates <= dates.max())
             ]
         else:
-            expected_dates = pd.date_range(dates.min(), dates.max(), freq="B")
+            expected_dates = _expected_single_symbol_dates(dates.min(), dates.max())
         missing_dates = expected_dates.difference(dates)
         if len(missing_dates) > 0:
             issues.append(

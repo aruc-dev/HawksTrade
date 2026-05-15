@@ -381,6 +381,26 @@ class RunScanTests(unittest.TestCase):
         self.assertEqual(marker.fields["failed_entry_symbol"], "AAPL")
         self.assertEqual(marker.fields["governor_code"], "account_lookup_failed")
 
+    def test_order_history_unavailable_governor_block_marks_scan_unhealthy(self):
+        marker = FakeMarker()
+
+        run_scan._mark_unhealthy_entry_result(
+            marker,
+            {
+                "symbol": "AAPL",
+                "status": "order_governor_blocked",
+                "governor_code": "order_history_unavailable",
+                "error_type": "OrderGovernorBlocked",
+                "error": "intent history unavailable",
+            },
+            "stock_entry",
+        )
+
+        self.assertEqual(marker.status, "error")
+        self.assertEqual(marker.fields["stage"], "stock_entry")
+        self.assertEqual(marker.fields["failed_entry_symbol"], "AAPL")
+        self.assertEqual(marker.fields["governor_code"], "order_history_unavailable")
+
     def test_operational_governor_exit_block_marks_scan_unhealthy(self):
         marker = FakeMarker()
 

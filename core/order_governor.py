@@ -17,16 +17,13 @@ from core import alpaca_client as ac
 from tracking import order_intents
 
 
-ACTIVE_ORDER_STATUSES = {
-    "",
-    "accepted",
-    "accepted_for_bidding",
-    "new",
-    "partially_filled",
-    "pending_cancel",
-    "pending_new",
-    "pending_replace",
-    "pending_review",
+TERMINAL_ORDER_STATUSES = {
+    "canceled",
+    "cancelled",
+    "expired",
+    "filled",
+    "rejected",
+    "replaced",
 }
 
 
@@ -131,7 +128,7 @@ def _active_orders(orders: Iterable) -> list:
     active = []
     for order in orders or []:
         status = _lower_value(order, "status")
-        if status in ACTIVE_ORDER_STATUSES:
+        if status not in TERMINAL_ORDER_STATUSES:
             active.append(order)
     return active
 

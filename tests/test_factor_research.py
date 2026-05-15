@@ -168,6 +168,26 @@ class FactorResearchTests(unittest.TestCase):
             )
         )
 
+    def test_single_symbol_holidays_do_not_report_date_gaps(self):
+        def _bar(date):
+            return SimpleNamespace(
+                timestamp=pd.Timestamp(date),
+                open=100.0,
+                high=101.0,
+                low=99.0,
+                close=100.0,
+                volume=1_000_000,
+            )
+
+        _, issues = rf.build_factor_dataset(
+            {"AAPL": [_bar("2025-01-17"), _bar("2025-01-21")]},
+            horizons=(1,),
+        )
+
+        self.assertFalse(
+            any(issue["symbol"] == "AAPL" and issue["issue"] == "date_gap" for issue in issues)
+        )
+
     def test_write_research_outputs_writes_csv_json_and_markdown(self):
         dataset, issues = rf.build_factor_dataset({"AAPL": _bars()}, horizons=(1,))
         summary = rf.compute_factor_report(
