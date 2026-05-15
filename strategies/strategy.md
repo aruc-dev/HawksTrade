@@ -282,6 +282,8 @@ signals first just because they appear earlier in `crypto.scan_universe`.
 - Close ≤ entry × 0.98 — breakout failure.
 - Close < EMA50 — trend filter failure.
 - RSI(14) ≥ 82 after at least 3% open profit — exhaustion profit-taking.
+- High-water profit protection once peak gain reaches `trail_activation_pct`;
+  exit if price then falls by `trailing_stop_pct` from the observed peak.
 
 Stop-loss and take-profit from the global risk manager apply throughout.
 
@@ -302,6 +304,9 @@ Stop-loss and take-profit from the global risk manager apply throughout.
 | `rsi_entry_max` | 82 |
 | `rsi_exit_max` | 82 |
 | `breakdown_exit_pct` | 2% below entry |
+| `profit_trailing_enabled` | true |
+| `trail_activation_pct` | 6% |
+| `trailing_stop_pct` | 4% from post-entry peak |
 | `timeframe` | 1Day |
 | `hold_days` | 14 calendar days |
 

@@ -104,6 +104,15 @@ def _configured_profit_protection_strategies(cfg: dict) -> set[str]:
     }
 
 
+def _configured_policy_aware_hold_strategies(cfg: dict) -> set[str]:
+    return {
+        name
+        for name, strategy_cfg in cfg.get("strategies", {}).items()
+        if strategy_cfg.get("hold_days")
+        and (name == "momentum" or _strategy_uses_profit_protection(name, strategy_cfg))
+    }
+
+
 def _hold_exit_uses_market_order(strategy: str, reason: str) -> bool:
     normalized_reason = str(reason or "").lower()
     return (
@@ -115,6 +124,7 @@ def _hold_exit_uses_market_order(strategy: str, reason: str) -> bool:
 
 HOLD_DAYS = _configured_hold_days(CFG)
 PROFIT_PROTECTION_STRATEGIES = _configured_profit_protection_strategies(CFG)
+POLICY_AWARE_HOLD_STRATEGIES = _configured_policy_aware_hold_strategies(CFG)
 
 # ── Strategy Registry ─────────────────────────────────────────────────────────
 
@@ -469,7 +479,7 @@ def _check_hold_day_exits(
 
             target_days = HOLD_DAYS[strategy]
             age_days    = get_trade_age_days(symbol)
-            if strategy in PROFIT_PROTECTION_STRATEGIES:
+            if strategy in POLICY_AWARE_HOLD_STRATEGIES:
                 asset_class = trade.get("asset_class", "stock")
                 try:
                     entry_price = float(trade.get("entry_price") or 0)

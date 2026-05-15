@@ -46,6 +46,10 @@ class RunScanTests(unittest.TestCase):
             run_scan._configured_profit_protection_strategies(cfg),
             {"rsi_reversion", "new_strategy"},
         )
+        self.assertEqual(
+            run_scan._configured_policy_aware_hold_strategies(cfg),
+            {"momentum", "rsi_reversion", "new_strategy"},
+        )
 
     def test_asset_class_matching_normalizes_stock_aliases(self):
         self.assertTrue(run_scan._asset_class_matches("stocks", "stock"))
@@ -723,6 +727,28 @@ class RunScanTests(unittest.TestCase):
         self.assertEqual(exit_position.call_args.args, ("AAPL",))
         self.assertIn("Momentum trailing stop", exit_position.call_args.kwargs["reason"])
         self.assertTrue(exit_position.call_args.kwargs["force_market"])
+
+    def test_momentum_risk_only_baseline_ignores_scan_hold_cap(self):
+        open_trade = {
+            "symbol": "AAPL",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "entry_price": "100",
+            "high_water_price": "108",
+        }
+
+        with (
+            patch.dict(run_scan.CFG["strategies"]["momentum"], {"exit_policy": "risk_only_baseline"}),
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "get_trade_age_days", return_value=30),
+            patch.object(run_scan, "_latest_price_for_trade", return_value=101),
+            patch.object(run_scan, "_estimate_peak_price_since_entry") as estimate_peak,
+            patch.object(run_scan.oe, "exit_position") as exit_position,
+        ):
+            run_scan._check_hold_day_exits([], dry_run=True)
+
+        estimate_peak.assert_not_called()
+        exit_position.assert_not_called()
 
     def test_range_breakout_profit_protection_can_exit_before_hold_cap(self):
         open_trade = {
