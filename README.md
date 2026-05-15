@@ -80,7 +80,8 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
   --strategies momentum,rsi_reversion,gap_up,ma_crossover,range_breakout \
   --set strategies.momentum.top_n=2 \
   --set strategies.momentum.min_momentum_pct=0.08 \
-  --set strategies.momentum.volume_spike_ratio=2.0 \
+  --set strategies.momentum.volume_confirmation_mode=pace \
+  --set strategies.momentum.volume_pace_ratio=1.5 \
   --set strategies.momentum.min_breadth_coverage_pct=0.65 \
   --set strategies.ma_crossover.fast_ema=6 \
   --set strategies.ma_crossover.slow_ema=18 \
