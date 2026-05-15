@@ -90,7 +90,7 @@ HOLD_DAYS = {
     "rsi_reversion":  CFG["strategies"]["rsi_reversion"]["hold_days"],
     "ma_crossover":   CFG["strategies"]["ma_crossover"]["hold_days"],
 }
-PROFIT_PROTECTION_STRATEGIES = {"momentum", "range_breakout"}
+PROFIT_PROTECTION_STRATEGIES = {"momentum", "range_breakout", "rsi_reversion"}
 
 # ── Strategy Registry ─────────────────────────────────────────────────────────
 

@@ -732,6 +732,30 @@ class RunScanTests(unittest.TestCase):
         self.assertIn("Range breakout profit protection", exit_position.call_args.kwargs["reason"])
         self.assertTrue(exit_position.call_args.kwargs["force_market"])
 
+    def test_rsi_reversion_profit_protection_can_exit_before_hold_cap(self):
+        open_trade = {
+            "symbol": "AAPL",
+            "strategy": "rsi_reversion",
+            "asset_class": "stock",
+            "entry_price": "100",
+            "high_water_price": "108",
+        }
+
+        with (
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "get_trade_age_days", return_value=3),
+            patch.object(run_scan, "_latest_price_for_trade", return_value=101),
+            patch.object(run_scan, "_estimate_peak_price_since_entry") as estimate_peak,
+            patch.object(run_scan.oe, "exit_position") as exit_position,
+        ):
+            run_scan._check_hold_day_exits([], dry_run=True, market_open=True)
+
+        estimate_peak.assert_not_called()
+        exit_position.assert_called_once()
+        self.assertEqual(exit_position.call_args.args, ("AAPL",))
+        self.assertIn("RSI reversion profit protection", exit_position.call_args.kwargs["reason"])
+        self.assertTrue(exit_position.call_args.kwargs["force_market"])
+
     def test_scan_updates_profit_protection_high_water_prices(self):
         open_trade = {
             "symbol": "DOGE/USD",

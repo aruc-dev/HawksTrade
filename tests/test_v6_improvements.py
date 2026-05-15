@@ -553,6 +553,56 @@ class TestRangeBreakoutExitPolicy(unittest.TestCase):
         self.assertEqual(reason, "Hold 14d")
 
 
+class TestRSIReversionExitPolicy(unittest.TestCase):
+    """Tests for RSI Reversion profit protection before the hold cap."""
+
+    def _cfg(self, enabled=True):
+        return {
+            "hold_days": 10,
+            "profit_trailing_enabled": enabled,
+            "trail_activation_pct": 0.06,
+            "trailing_stop_pct": 0.04,
+        }
+
+    def test_rsi_reversion_profit_protection_exits_before_hold_cap(self):
+        should_exit, reason = should_exit_for_hold(
+            strategy="rsi_reversion",
+            age_days=3,
+            entry_price=100,
+            current_price=101,
+            peak_price=108,
+            strategy_cfg=self._cfg(),
+        )
+
+        self.assertTrue(should_exit)
+        self.assertIn("RSI reversion profit protection", reason)
+
+    def test_rsi_reversion_profit_protection_can_be_disabled(self):
+        should_exit, _ = should_exit_for_hold(
+            strategy="rsi_reversion",
+            age_days=3,
+            entry_price=100,
+            current_price=101,
+            peak_price=108,
+            strategy_cfg=self._cfg(enabled=False),
+        )
+
+        self.assertFalse(should_exit)
+
+    def test_rsi_reversion_fixed_hold_remains_after_hold_cap(self):
+        should_exit, reason = should_exit_for_hold(
+            strategy="rsi_reversion",
+            age_days=10,
+            entry_price=100,
+            current_price=105,
+            peak_price=105,
+            strategy_cfg=self._cfg(),
+        )
+
+        self.assertTrue(should_exit)
+        self.assertEqual(reason, "Hold 10d")
+
+
 class TestQuarterlyReporting(unittest.TestCase):
     """Tests for Fix 2: quarterly performance breakdown."""
 
