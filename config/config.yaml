@@ -55,10 +55,11 @@ order_governor:
   max_notional_pct: null
 
 # --- PROTECTIONS ---
-# Optional entry lock manager. Defaults disabled to preserve existing behavior.
+# Entry lock manager. Blocks new entries after recent symbol, strategy, or
+# portfolio-level weakness while allowing exits to continue.
 # When enabled, failed refreshes block new entries fail-closed while exits continue.
 protections:
-  enabled: false
+  enabled: true
   symbol_cooldown_days: 1.0
   symbol_stoploss_cooldown_days: 3.0
   symbol_stoploss_loss_pct: 0.035

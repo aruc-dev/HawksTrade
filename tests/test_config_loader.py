@@ -114,6 +114,7 @@ class TestGetConfig(unittest.TestCase):
         cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
         strategies = cfg["strategies"]
+        self.assertTrue(cfg["protections"]["enabled"])
         self.assertTrue(strategies["momentum"]["enabled"])
         self.assertFalse(strategies["rsi_reversion"]["enabled"])
         self.assertTrue(strategies["ma_crossover"]["enabled"])
