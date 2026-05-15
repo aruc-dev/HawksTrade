@@ -52,6 +52,22 @@ class RunScanTests(unittest.TestCase):
             {"momentum", "rsi_reversion", "new_strategy"},
         )
 
+    def test_invalid_momentum_policy_does_not_break_policy_derivation(self):
+        cfg = {
+            "strategies": {
+                "momentum": {"hold_days": 4, "exit_policy": "typo"},
+                "rsi_reversion": {"hold_days": 10, "profit_trailing_enabled": True},
+            }
+        }
+
+        with self.assertLogs("run_scan", level="WARNING") as logs:
+            self.assertEqual(
+                run_scan._configured_policy_aware_hold_strategies(cfg),
+                {"rsi_reversion"},
+            )
+
+        self.assertIn("Invalid momentum exit_policy", "\n".join(logs.output))
+
     def test_asset_class_matching_normalizes_stock_aliases(self):
         self.assertTrue(run_scan._asset_class_matches("stocks", "stock"))
         self.assertTrue(run_scan._asset_class_matches("stock", "stocks"))
@@ -753,6 +769,29 @@ class RunScanTests(unittest.TestCase):
         estimate_peak.assert_not_called()
         exit_position.assert_not_called()
         log_info.assert_not_called()
+
+    def test_invalid_momentum_policy_ignores_scan_hold_cap(self):
+        open_trade = {
+            "symbol": "AAPL",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "entry_price": "100",
+            "high_water_price": "108",
+        }
+
+        with (
+            patch.dict(run_scan.CFG["strategies"]["momentum"], {"exit_policy": "typo"}),
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "get_trade_age_days", return_value=30),
+            patch.object(run_scan, "_latest_price_for_trade") as latest_price,
+            patch.object(run_scan.oe, "exit_position") as exit_position,
+            self.assertLogs("run_scan", level="WARNING") as logs,
+        ):
+            run_scan._check_hold_day_exits([], dry_run=True)
+
+        latest_price.assert_not_called()
+        exit_position.assert_not_called()
+        self.assertIn("Invalid momentum exit_policy", "\n".join(logs.output))
 
     def test_momentum_fixed_hold_before_cap_skips_price_fetch(self):
         open_trade = {

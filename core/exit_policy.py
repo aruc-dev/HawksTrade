@@ -8,6 +8,7 @@ force an exit.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import math
 
 VALID_MOMENTUM_EXIT_POLICIES = {
@@ -23,7 +24,14 @@ PROFIT_TRAILING_REASON_PREFIXES = {
 }
 
 
-def _finite_positive_float(value) -> float | None:
+@dataclass(frozen=True)
+class HoldExitDecision:
+    should_exit: bool
+    reason: str = ""
+    force_market: bool = False
+
+
+def finite_positive_float(value) -> float | None:
     try:
         parsed = float(value)
     except (TypeError, ValueError):
@@ -76,9 +84,9 @@ def _profit_trailing_exit(
     peak_price: float | None,
     strategy_cfg: dict,
 ) -> tuple[bool, str]:
-    entry = _finite_positive_float(entry_price)
-    current = _finite_positive_float(current_price)
-    peak = _finite_positive_float(peak_price if peak_price is not None else current_price)
+    entry = finite_positive_float(entry_price)
+    current = finite_positive_float(current_price)
+    peak = finite_positive_float(peak_price if peak_price is not None else current_price)
     if entry is None or current is None or peak is None:
         return False, ""
 
@@ -109,7 +117,7 @@ def _profit_trailing_exit(
     )
 
 
-def should_exit_for_hold(
+def evaluate_hold_exit(
     *,
     strategy: str,
     age_days: float,
@@ -117,9 +125,9 @@ def should_exit_for_hold(
     current_price: float,
     strategy_cfg: dict,
     peak_price: float | None = None,
-) -> tuple[bool, str]:
+) -> HoldExitDecision:
     """
-    Return whether the strategy hold policy should exit the position.
+    Return a structured strategy hold/profit-protection exit decision.
 
     Policies:
       - fixed_hold: existing behavior; exit immediately once hold_days expires.
@@ -132,7 +140,7 @@ def should_exit_for_hold(
     """
     hold_days = strategy_cfg.get("hold_days")
     if not hold_days:
-        return False, ""
+        return HoldExitDecision(False)
     hold_days = float(hold_days)
 
     if strategy != "momentum":
@@ -145,18 +153,18 @@ def should_exit_for_hold(
                 strategy_cfg=strategy_cfg,
             )
             if should_exit:
-                return should_exit, reason
+                return HoldExitDecision(True, reason, force_market=True)
         if age_days < hold_days:
-            return False, ""
-        return True, f"Hold {int(age_days)}d"
+            return HoldExitDecision(False)
+        return HoldExitDecision(True, f"Hold {int(age_days)}d", force_market=False)
 
     policy = normalize_momentum_exit_policy(strategy_cfg.get("exit_policy"))
     if policy == "risk_only_baseline":
-        return False, ""
+        return HoldExitDecision(False)
     if policy == "fixed_hold":
         if age_days < hold_days:
-            return False, ""
-        return True, f"Hold {int(age_days)}d"
+            return HoldExitDecision(False)
+        return HoldExitDecision(True, f"Hold {int(age_days)}d", force_market=True)
 
     should_exit, reason = _profit_trailing_exit(
         strategy=strategy,
@@ -166,21 +174,43 @@ def should_exit_for_hold(
         strategy_cfg=strategy_cfg,
     )
     if should_exit:
-        return should_exit, reason
+        return HoldExitDecision(True, reason, force_market=True)
 
     if age_days < hold_days:
-        return False, ""
+        return HoldExitDecision(False)
 
     pnl_pct = (float(current_price) / float(entry_price)) - 1.0
     profit_floor_pct = float(strategy_cfg.get("profit_floor_pct", 0.0))
     if pnl_pct <= profit_floor_pct:
-        return (
+        return HoldExitDecision(
             True,
             f"Momentum hold expired without profit: {pnl_pct:+.2%} <= {profit_floor_pct:+.2%}",
+            force_market=True,
         )
 
     max_hold_days = strategy_cfg.get("max_hold_days")
     if max_hold_days and age_days >= float(max_hold_days):
-        return True, f"Momentum max hold {int(age_days)}d"
+        return HoldExitDecision(True, f"Momentum max hold {int(age_days)}d", force_market=True)
 
-    return False, ""
+    return HoldExitDecision(False)
+
+
+def should_exit_for_hold(
+    *,
+    strategy: str,
+    age_days: float,
+    entry_price: float,
+    current_price: float,
+    strategy_cfg: dict,
+    peak_price: float | None = None,
+) -> tuple[bool, str]:
+    """Return the legacy tuple form of a hold/profit-protection decision."""
+    decision = evaluate_hold_exit(
+        strategy=strategy,
+        age_days=age_days,
+        entry_price=entry_price,
+        current_price=current_price,
+        peak_price=peak_price,
+        strategy_cfg=strategy_cfg,
+    )
+    return decision.should_exit, decision.reason

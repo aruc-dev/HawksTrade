@@ -27,7 +27,7 @@ from core import alpaca_client as ac
 from core.config_loader import get_config
 from core import risk_manager as rm
 from core import order_executor as oe
-from core.exit_policy import should_exit_for_hold
+from core.exit_policy import finite_positive_float, should_exit_for_hold
 from core.run_markers import RunScope, run_scope
 from core.logging_config import runtime_log_handlers
 from scheduler.reconcile_trade_log import safe_reconcile
@@ -72,16 +72,6 @@ def _find_matching_trade(symbol: str, open_trades: list) -> dict | None:
     return None
 
 
-def _finite_positive_float(value) -> float | None:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        return None
-    if math.isfinite(parsed) and parsed > 0:
-        return parsed
-    return None
-
-
 def _strategy_profit_protection_exit(
     trade: dict | None,
     entry_price: float,
@@ -95,16 +85,25 @@ def _strategy_profit_protection_exit(
     if not strategy_cfg:
         return False, ""
 
-    high_water_price = _finite_positive_float(trade.get("high_water_price"))
+    high_water_price = finite_positive_float(trade.get("high_water_price"))
     peak_price = max(high_water_price or current_price, current_price)
-    return should_exit_for_hold(
-        strategy=strategy,
-        age_days=0.0,
-        entry_price=entry_price,
-        current_price=current_price,
-        peak_price=peak_price,
-        strategy_cfg=strategy_cfg,
-    )
+    try:
+        return should_exit_for_hold(
+            strategy=strategy,
+            age_days=0.0,
+            entry_price=entry_price,
+            current_price=current_price,
+            peak_price=peak_price,
+            strategy_cfg=strategy_cfg,
+        )
+    except (TypeError, ValueError) as e:
+        log.warning(
+            "Skipping strategy profit protection for %s: invalid %s config: %s",
+            trade.get("symbol", ""),
+            strategy,
+            e,
+        )
+        return False, ""
 
 
 def _mark_unhealthy_exit_result(marker: RunScope | None, result: dict | None, stage: str):

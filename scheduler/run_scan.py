@@ -22,7 +22,6 @@ from __future__ import annotations
 import sys
 import logging
 import argparse
-import math
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -35,7 +34,11 @@ from core import alpaca_client as ac
 from core.config_loader import get_config
 from core import order_executor as oe
 from core import risk_manager as rm
-from core.exit_policy import normalize_momentum_exit_policy, should_exit_for_hold
+from core.exit_policy import (
+    evaluate_hold_exit,
+    finite_positive_float,
+    normalize_momentum_exit_policy,
+)
 from core.run_markers import RunScope, run_scope
 from core.logging_config import runtime_log_handlers
 from core.portfolio import get_open_symbols, print_snapshot
@@ -92,7 +95,7 @@ def _configured_hold_days(cfg: dict) -> dict:
 
 def _strategy_uses_profit_protection(strategy: str, strategy_cfg: dict) -> bool:
     if strategy == "momentum":
-        return normalize_momentum_exit_policy(strategy_cfg.get("exit_policy")) == "profit_trailing"
+        return _momentum_exit_policy_for_scan(strategy_cfg) == "profit_trailing"
     return bool(strategy_cfg.get("profit_trailing_enabled", False))
 
 
@@ -104,13 +107,17 @@ def _configured_policy_aware_hold_strategies(cfg: dict) -> set[str]:
     }
 
 
-def _hold_exit_uses_market_order(strategy: str, reason: str) -> bool:
-    normalized_reason = str(reason or "").lower()
-    return (
-        strategy == "momentum"
-        or "profit protection" in normalized_reason
-        or "trailing stop" in normalized_reason
-    )
+def _momentum_exit_policy_for_scan(strategy_cfg: dict, *, symbol: str | None = None) -> str:
+    try:
+        return normalize_momentum_exit_policy(strategy_cfg.get("exit_policy"))
+    except ValueError as e:
+        context = f" for {symbol}" if symbol else ""
+        log.warning(
+            "Invalid momentum exit_policy%s: %s; using risk_only_baseline for scan hold checks.",
+            context,
+            e,
+        )
+        return "risk_only_baseline"
 
 
 HOLD_DAYS = _configured_hold_days(CFG)
@@ -471,7 +478,7 @@ def _check_hold_day_exits(
             age_days    = get_trade_age_days(symbol)
             strategy_cfg = CFG["strategies"][strategy]
             if strategy == "momentum":
-                momentum_policy = normalize_momentum_exit_policy(strategy_cfg.get("exit_policy"))
+                momentum_policy = _momentum_exit_policy_for_scan(strategy_cfg, symbol=symbol)
                 if momentum_policy == "risk_only_baseline":
                     log.debug(
                         "Momentum risk_only_baseline ignores hold_days for %s; "
@@ -496,17 +503,12 @@ def _check_hold_day_exits(
 
             if strategy in POLICY_AWARE_HOLD_STRATEGIES:
                 asset_class = trade.get("asset_class", "stock")
-                try:
-                    entry_price = float(trade.get("entry_price") or 0)
-                except (TypeError, ValueError) as e:
-                    log.error(f"Invalid entry price for hold-day check {symbol}: {trade.get('entry_price')}")
-                    _mark_exit_check_exception(marker, "hold_day_exit", symbol, e)
-                    continue
-                if not math.isfinite(entry_price) or entry_price <= 0:
+                entry_price = finite_positive_float(trade.get("entry_price"))
+                if entry_price is None:
                     log.warning(f"Skipping {strategy} hold check for {symbol}: missing entry price.")
                     continue
                 try:
-                    current_price = float(_latest_price_for_trade(symbol, asset_class))
+                    current_price = finite_positive_float(_latest_price_for_trade(symbol, asset_class))
                 except Exception as e:
                     info = _mark_exit_check_exception(marker, "hold_day_exit", symbol, e)
                     log.error(
@@ -520,22 +522,19 @@ def _check_hold_day_exits(
                         exc_info=True,
                     )
                     continue
-                if not math.isfinite(current_price) or current_price <= 0:
+                if current_price is None:
                     log.warning(f"Skipping {strategy} hold check for {symbol}: invalid current price {current_price}.")
                     continue
                 observed_prices[symbol] = current_price
                 peak_price = None
                 high_water_text = str(trade.get("high_water_price") or "").strip()
                 if high_water_text:
-                    try:
-                        high_water_price = float(high_water_text)
-                    except (ValueError, TypeError):
-                        high_water_price = 0.0
-                    if math.isfinite(high_water_price) and high_water_price > 0:
+                    high_water_price = finite_positive_float(high_water_text)
+                    if high_water_price is not None:
                         peak_price = max(high_water_price, current_price)
                 if peak_price is None:
                     peak_price = _estimate_peak_price_since_entry(symbol, asset_class, current_price, age_days)
-                should_exit, reason = should_exit_for_hold(
+                decision = evaluate_hold_exit(
                     strategy=strategy,
                     age_days=age_days,
                     entry_price=entry_price,
@@ -543,7 +542,7 @@ def _check_hold_day_exits(
                     peak_price=peak_price,
                     strategy_cfg=strategy_cfg,
                 )
-                if not should_exit:
+                if not decision.should_exit:
                     if age_days >= target_days:
                         log.info(
                             f"{strategy} hold extended for {symbol}: "
@@ -555,13 +554,13 @@ def _check_hold_day_exits(
                             f"age={age_days:.1f}d pnl={(current_price / entry_price - 1):+.2%}"
                         )
                     continue
-                log.info(f"{strategy} hold/profit exit for {symbol}: {reason}")
+                log.info(f"{strategy} hold/profit exit for {symbol}: {decision.reason}")
                 result = oe.exit_position(
                     symbol,
-                    reason=reason,
+                    reason=decision.reason,
                     asset_class=asset_class,
                     dry_run=dry_run,
-                    force_market=_hold_exit_uses_market_order(strategy, reason),
+                    force_market=decision.force_market,
                 )
                 _mark_unhealthy_exit_result(marker, result, "hold_day_exit")
                 continue

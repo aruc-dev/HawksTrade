@@ -339,6 +339,28 @@ class RunRiskCheckTests(unittest.TestCase):
         )
         self.assertIn("RSI reversion profit protection", reason)
 
+    def test_strategy_profit_protection_invalid_policy_logs_and_skips(self):
+        open_trade = {
+            "symbol": "AAPL",
+            "side": "buy",
+            "strategy": "momentum",
+            "high_water_price": "108",
+        }
+
+        with (
+            patch.dict(run_risk_check.CFG["strategies"]["momentum"], {"exit_policy": "typo"}),
+            self.assertLogs("run_risk_check", level="WARNING") as logs,
+        ):
+            should_exit, reason = run_risk_check._strategy_profit_protection_exit(
+                open_trade,
+                entry_price=100,
+                current_price=101,
+            )
+
+        self.assertFalse(should_exit)
+        self.assertEqual(reason, "")
+        self.assertIn("Skipping strategy profit protection", "\n".join(logs.output))
+
     def test_run_marks_error_when_exit_is_blocked_by_pending_order_check_failure(self):
         marker = FakeMarker()
         position = SimpleNamespace(symbol="AAPL", avg_entry_price="100", asset_class="us_equity")
