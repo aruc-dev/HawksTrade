@@ -40,6 +40,17 @@ class RunReportTests(unittest.TestCase):
             logger=run_report.log,
         )
 
+    def test_protection_lock_reporting_failure_does_not_abort_report(self):
+        with (
+            patch.object(run_report, "active_locks_for_reporting", side_effect=ValueError("bad lock json")),
+            self.assertLogs("run_report", level="WARNING") as logs,
+        ):
+            text = run_report._format_protection_locks()
+
+        self.assertIn("Protection lock reporting unavailable", text)
+        self.assertIn("bad lock json", text)
+        self.assertTrue(any("Protection lock reporting unavailable" in message for message in logs.output))
+
 
 if __name__ == "__main__":
     unittest.main()

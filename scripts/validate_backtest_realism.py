@@ -15,6 +15,7 @@ import argparse
 import json
 import math
 import sys
+from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -252,8 +253,8 @@ def compare_signal_sets(
 ) -> list[RealismFinding]:
     """Compare full-history signals with walk-forward replay signals."""
     check = "lookahead_parity"
-    baseline = {_signal_identity(signal): signal for signal in baseline_signals}
-    replay = {_signal_identity(signal): signal for signal in replay_signals}
+    baseline = _group_rows(baseline_signals, _signal_identity)
+    replay = _group_rows(replay_signals, _signal_identity)
     findings: list[RealismFinding] = []
 
     for key in sorted(set(baseline) - set(replay)):
@@ -263,32 +264,52 @@ def compare_signal_sets(
         findings.append(_finding(check, ERROR, "Walk-forward replay emitted an extra signal", context_key=key))
 
     for key in sorted(set(baseline) & set(replay)):
-        left = baseline[key]
-        right = replay[key]
-        for field in numeric_fields:
-            left_value = _coerce_float(left.get(field))
-            right_value = _coerce_float(right.get(field))
-            if left_value is None and right_value is None:
-                continue
-            if left_value is None or right_value is None:
-                findings.append(
-                    _finding(check, ERROR, "Signal numeric field presence changed", field=field, context_key=key)
+        left_rows = baseline[key]
+        right_rows = replay[key]
+        if len(left_rows) != len(right_rows):
+            findings.append(
+                _finding(
+                    check,
+                    ERROR,
+                    "Signal count changed between full-history and walk-forward views",
+                    context_key=key,
+                    baseline_count=len(left_rows),
+                    replay_count=len(right_rows),
                 )
-                continue
-            if abs(left_value - right_value) > tolerance:
-                findings.append(
-                    _finding(
-                        check,
-                        ERROR,
-                        "Signal numeric field changed between full-history and walk-forward views",
-                        field=field,
-                        baseline=left_value,
-                        replay=right_value,
-                        context_key=key,
+            )
+        for occurrence, (left, right) in enumerate(zip(left_rows, right_rows)):
+            context_key = (*key, occurrence)
+            for field in numeric_fields:
+                left_value = _coerce_float(left.get(field))
+                right_value = _coerce_float(right.get(field))
+                if left_value is None and right_value is None:
+                    continue
+                if left_value is None or right_value is None:
+                    findings.append(
+                        _finding(check, ERROR, "Signal numeric field presence changed", field=field, context_key=context_key)
                     )
-                )
+                    continue
+                if abs(left_value - right_value) > tolerance:
+                    findings.append(
+                        _finding(
+                            check,
+                            ERROR,
+                            "Signal numeric field changed between full-history and walk-forward views",
+                            field=field,
+                            baseline=left_value,
+                            replay=right_value,
+                            context_key=context_key,
+                        )
+                    )
 
     return findings
+
+
+def _group_rows(rows: Iterable[dict], identity_fn) -> dict[tuple, list[dict]]:
+    grouped: dict[tuple, list[dict]] = defaultdict(list)
+    for row in rows:
+        grouped[identity_fn(row)].append(row)
+    return dict(grouped)
 
 
 def check_warmup_stability(
@@ -388,14 +409,8 @@ def compare_trade_replay(
 ) -> list[RealismFinding]:
     """Compare broker/paper rows with simulated rows for replay acceptance."""
     check = "trade_replay"
-    expected = {
-        (str(row.get("symbol", "")), str(row.get("exit_date", row.get("timestamp", "")))): row
-        for row in expected_rows
-    }
-    simulated = {
-        (str(row.get("symbol", "")), str(row.get("exit_date", row.get("timestamp", "")))): row
-        for row in simulated_rows
-    }
+    expected = _group_rows(expected_rows, _trade_replay_identity)
+    simulated = _group_rows(simulated_rows, _trade_replay_identity)
     findings: list[RealismFinding] = []
 
     for key in sorted(set(expected) - set(simulated)):
@@ -404,38 +419,55 @@ def compare_trade_replay(
         findings.append(_finding(check, ERROR, "Replay emitted unexpected simulated trade", context_key=key))
 
     for key in sorted(set(expected) & set(simulated)):
-        left = expected[key]
-        right = simulated[key]
-        for field, aliases, tolerance_pct in (
-            ("exit_price", ("exit_price",), price_tolerance_pct),
-            ("pnl_pct", ("pnl_pct",), pnl_tolerance_pct),
-            ("qty", ("qty", "quantity", "filled_qty"), quantity_tolerance_pct),
-            ("pnl_dollars", ("pnl_dollars", "pnl", "realized_pnl"), pnl_dollars_tolerance_pct),
-            ("notional", ("notional", "exit_notional"), notional_tolerance_pct),
-        ):
-            left_value = _first_numeric_field(left, aliases)
-            right_value = _first_numeric_field(right, aliases)
-            if left_value is None and right_value is None:
-                continue
-            if left_value is None or right_value is None:
-                findings.append(_finding(check, ERROR, "Replay field presence changed", field=field, context_key=key))
-                continue
-            denominator = abs(left_value) if abs(left_value) > 1e-12 else 1.0
-            if abs(left_value - right_value) / denominator > tolerance_pct:
-                findings.append(
-                    _finding(
-                        check,
-                        ERROR,
-                        "Replay value exceeded tolerance",
-                        field=field,
-                        expected=left_value,
-                        simulated=right_value,
-                        tolerance_pct=tolerance_pct,
-                        context_key=key,
-                    )
+        left_rows = expected[key]
+        right_rows = simulated[key]
+        if len(left_rows) != len(right_rows):
+            findings.append(
+                _finding(
+                    check,
+                    ERROR,
+                    "Replay trade count changed for matching key",
+                    context_key=key,
+                    expected_count=len(left_rows),
+                    simulated_count=len(right_rows),
                 )
+            )
+        for occurrence, (left, right) in enumerate(zip(left_rows, right_rows)):
+            context_key = (*key, occurrence)
+            for field, aliases, tolerance_pct in (
+                ("exit_price", ("exit_price",), price_tolerance_pct),
+                ("pnl_pct", ("pnl_pct",), pnl_tolerance_pct),
+                ("qty", ("qty", "quantity", "filled_qty"), quantity_tolerance_pct),
+                ("pnl_dollars", ("pnl_dollars", "pnl", "realized_pnl"), pnl_dollars_tolerance_pct),
+                ("notional", ("notional", "exit_notional"), notional_tolerance_pct),
+            ):
+                left_value = _first_numeric_field(left, aliases)
+                right_value = _first_numeric_field(right, aliases)
+                if left_value is None and right_value is None:
+                    continue
+                if left_value is None or right_value is None:
+                    findings.append(_finding(check, ERROR, "Replay field presence changed", field=field, context_key=context_key))
+                    continue
+                denominator = abs(left_value) if abs(left_value) > 1e-12 else 1.0
+                if abs(left_value - right_value) / denominator > tolerance_pct:
+                    findings.append(
+                        _finding(
+                            check,
+                            ERROR,
+                            "Replay value exceeded tolerance",
+                            field=field,
+                            expected=left_value,
+                            simulated=right_value,
+                            tolerance_pct=tolerance_pct,
+                            context_key=context_key,
+                        )
+                    )
 
     return findings
+
+
+def _trade_replay_identity(row: dict) -> tuple[str, str]:
+    return (str(row.get("symbol", "")), str(row.get("exit_date", row.get("timestamp", ""))))
 
 
 def _first_numeric_field(row: dict, aliases: Iterable[str]) -> float | None:
@@ -504,7 +536,12 @@ def _bars_from_frame(frame: pd.DataFrame) -> list[SimpleNamespace]:
     return bars
 
 
-def _momentum_signal_set_from_history(history: pd.DataFrame, *, as_of: pd.Timestamp) -> list[dict]:
+def _momentum_signal_set_from_history(
+    history: pd.DataFrame,
+    *,
+    as_of: pd.Timestamp,
+    include_future: bool = False,
+) -> list[dict]:
     from strategies import momentum as momentum_module
 
     cutoff = pd.Timestamp(as_of)
@@ -512,7 +549,7 @@ def _momentum_signal_set_from_history(history: pd.DataFrame, *, as_of: pd.Timest
     def provider(symbols, timeframe="1Day", limit=None, **_kwargs):
         if timeframe != "1Day":
             return {}
-        limited = history.loc[history.index <= cutoff]
+        limited = history if include_future else history.loc[history.index <= cutoff]
         if limit is not None:
             limited = limited.tail(int(limit))
         return {str(symbol): _bars_from_frame(limited) for symbol in symbols}
@@ -623,7 +660,7 @@ def _self_test_strategy_lookahead() -> list[RealismFinding]:
     walk_forward_history = history.loc[history.index <= as_of]
 
     try:
-        full_history_signals = _momentum_signal_set_from_history(history, as_of=as_of)
+        full_history_signals = _momentum_signal_set_from_history(history, as_of=as_of, include_future=True)
         walk_forward_signals = _momentum_signal_set_from_history(walk_forward_history, as_of=as_of)
     except Exception as exc:
         return [_finding(check, ERROR, "Actual strategy lookahead smoke test failed to run", error=str(exc))]

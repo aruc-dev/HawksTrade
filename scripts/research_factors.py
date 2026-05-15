@@ -518,6 +518,7 @@ def run_research(args) -> dict:
         start=args.start,
         end=args.end,
     )
+    bars = {symbol: (bars or {}).get(symbol, []) for symbol in symbols}
     dataset, issues = build_factor_dataset(
         bars,
         start=args.start,

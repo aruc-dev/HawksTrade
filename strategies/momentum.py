@@ -87,6 +87,29 @@ def _parse_bar_timestamp(value):
     return ts
 
 
+def _filter_bars_as_of(bars, current_time):
+    cutoff = _parse_bar_timestamp(current_time)
+    if cutoff is None or bars is None:
+        return bars
+    filtered = []
+    for bar in bars:
+        timestamp = _parse_bar_timestamp(_bar_timestamp(bar))
+        if timestamp is None or timestamp <= cutoff:
+            filtered.append(bar)
+    return filtered
+
+
+def _filter_bars_data_as_of(strategy, bars_data, symbols, current_time):
+    if current_time is None or bars_data is None:
+        return bars_data
+    filtered = {}
+    for symbol in symbols:
+        bars = strategy._get_symbol_bars(bars_data, symbol)
+        if bars is not None:
+            filtered[symbol] = _filter_bars_as_of(bars, current_time)
+    return filtered
+
+
 def _as_et(value=None) -> datetime:
     if value is None:
         return datetime.now(ET)
@@ -230,9 +253,14 @@ class MomentumStrategy(BaseStrategy):
         except Exception as e:
             log.error(f"[Momentum] Failed to fetch bars: {e}")
             return []
+        current_time = kwargs.get("current_time")
+        bars_data = _filter_bars_data_as_of(self, bars_data, universe, current_time)
 
         # --- Phase 3: Market Breadth Tiered Regime Guard ---
         regime_bars = kwargs.get("regime_bars")
+        if regime_bars is not None:
+            regime_symbols = list(regime_bars.keys()) if isinstance(regime_bars, dict) else ["SPY", "QQQ"]
+            regime_bars = _filter_bars_data_as_of(self, regime_bars, regime_symbols, current_time)
         spy_bull = rm.market_regime_ok(
             bars_data=regime_bars,
             allow_warmup=bool(kwargs.get("allow_regime_warmup", False)),
@@ -283,6 +311,7 @@ class MomentumStrategy(BaseStrategy):
                 # Fallback fetch for SPY if not in regime_bars
                 raw_spy = ac.get_stock_bars(["SPY"], timeframe="1Day", limit=25)
                 s_bars = raw_spy.get("SPY")
+            s_bars = _filter_bars_as_of(s_bars, current_time)
 
             if s_bars and len(s_bars) >= 8:
                 s_closes = pd.Series([
@@ -310,7 +339,6 @@ class MomentumStrategy(BaseStrategy):
         volume_pace_ratio = float(SCFG.get("volume_pace_ratio", volume_spike_ratio))
         session_minutes = max(1.0, float(SCFG.get("session_minutes", 390)))
         volume_pace_timeframe = str(SCFG.get("volume_pace_timeframe", "1Min"))
-        current_time = kwargs.get("current_time")
         elapsed_minutes, in_regular_session = _regular_session_progress(current_time, session_minutes)
         intraday_bars_data = None
 
@@ -332,6 +360,7 @@ class MomentumStrategy(BaseStrategy):
         for symbol in universe:
             try:
                 bars = self._load_symbol_bars(bars_data, symbol)
+                bars = _filter_bars_as_of(bars, current_time)
                 if bars is None or len(bars) < 21: # Need 21 for avg volume
                     continue
 

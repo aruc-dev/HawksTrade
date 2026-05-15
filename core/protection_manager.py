@@ -171,6 +171,11 @@ def _cfg_float(value, default: float) -> float:
     return parsed
 
 
+def _cfg_signed_float(value, default: float) -> float:
+    parsed = _parse_float(value)
+    return default if parsed is None else parsed
+
+
 def _cfg_int(value, default: int) -> int:
     parsed = _parse_float(value)
     if parsed is None:
@@ -254,7 +259,7 @@ class ProtectionManager:
             strategy_stoploss_cooldown_days=_cfg_float(raw.get("strategy_stoploss_cooldown_days"), 3.0),
             low_profit_lookback_days=_cfg_float(raw.get("low_profit_lookback_days"), 20.0),
             low_profit_min_trades=_cfg_int(raw.get("low_profit_min_trades"), 5),
-            low_profit_threshold_pct=_cfg_float(raw.get("low_profit_threshold_pct"), 0.0),
+            low_profit_threshold_pct=_cfg_signed_float(raw.get("low_profit_threshold_pct"), 0.0),
             low_profit_cooldown_days=_cfg_float(raw.get("low_profit_cooldown_days"), 5.0),
             max_drawdown_lookback_days=_cfg_float(raw.get("max_drawdown_lookback_days"), 20.0),
             max_drawdown_pct=_cfg_float(raw.get("max_drawdown_pct"), 0.05),

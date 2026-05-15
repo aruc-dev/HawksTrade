@@ -285,6 +285,9 @@ def _exit_governor_block_result(
 def _evaluate_order_governor(order_intent: OrderIntent) -> GovernorDecision:
     if MODE == "backtest":
         return GovernorDecision.allow("Order governor skipped in backtest mode")
+    governor = OrderGovernor.from_config(CFG)
+    if not governor.enabled:
+        return GovernorDecision.allow("Order governor disabled")
     try:
         account_state = ac.get_account()
     except Exception as exc:
@@ -299,7 +302,7 @@ def _evaluate_order_governor(order_intent: OrderIntent) -> GovernorDecision:
             f"Could not fetch open broker orders for order governor: {exc}",
             code="broker_orders_lookup_failed",
         )
-    return OrderGovernor.from_config(CFG).evaluate(order_intent, account_state, broker_orders)
+    return governor.evaluate(order_intent, account_state, broker_orders)
 
 
 def _log_governor_decision(symbol: str, side: str, decision: GovernorDecision) -> None:

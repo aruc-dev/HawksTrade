@@ -28,7 +28,7 @@ import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -1592,7 +1592,9 @@ def build_health_report(
     window_start = now - timedelta(hours=lookback_hours)
     errors, warnings = _find_matching_error_lines(findings_by_file, since=window_start)
     price_failures = load_price_failure_state(price_failure_state_file)
-    active_protection_locks = active_locks_for_reporting(now)
+    active_protection_locks, protection_warning = _load_active_protection_locks(now)
+    if protection_warning is not None:
+        warnings.append(protection_warning)
 
     overall = _overall_status(alpaca_state, job_health, errors, warnings, price_failures)
 
@@ -1613,6 +1615,28 @@ def build_health_report(
         active_protection_locks=active_protection_locks,
         schedule_source=(schedule_source or "cron").lower(),
     )
+
+
+def _health_reference_utc(now: datetime) -> datetime:
+    if now.tzinfo is None:
+        local_tz = datetime.now().astimezone().tzinfo
+        now = now.replace(tzinfo=local_tz)
+    return now.astimezone(timezone.utc)
+
+
+def _load_active_protection_locks(now: datetime) -> tuple[list[dict], LogFinding | None]:
+    try:
+        return active_locks_for_reporting(_health_reference_utc(now)), None
+    except Exception as exc:
+        message = f"Protection lock reporting unavailable: {exc}"
+        return [], LogFinding(
+            timestamp=now,
+            level="WARNING",
+            logger="check_health_linux",
+            message=message,
+            source_file=Path("protection_locks.json"),
+            raw=message,
+        )
 
 
 def _overall_status(

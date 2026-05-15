@@ -48,7 +48,11 @@ CFG = get_config()
 
 
 def _format_protection_locks() -> str:
-    locks = active_locks_for_reporting()
+    try:
+        locks = active_locks_for_reporting()
+    except Exception as exc:
+        log.warning("Protection lock reporting unavailable: %s", exc, exc_info=True)
+        return f"Protection lock reporting unavailable: {exc}"
     if not locks:
         return ""
     lines = ["Active Protection Locks:"]

@@ -113,6 +113,20 @@ class LookaheadParityTests(unittest.TestCase):
 
         self.assertTrue(any(finding.check == "lookahead_parity" for finding in findings))
 
+    def test_duplicate_signal_identity_is_reported_as_drift(self):
+        signal = {
+            "date": "2026-01-05",
+            "strategy": "momentum",
+            "symbol": "AAPL",
+            "entry_price": 100.0,
+        }
+
+        findings = realism.compare_signal_sets([signal], [dict(signal), dict(signal)])
+
+        self.assertTrue(
+            any(finding.message == "Signal count changed between full-history and walk-forward views" for finding in findings)
+        )
+
 
 class WarmupStabilityTests(unittest.TestCase):
     def test_stable_warmup_values_pass(self):
@@ -243,6 +257,14 @@ class TradeReplayTests(unittest.TestCase):
 
         self.assertIn("qty", fields)
         self.assertIn("pnl_dollars", fields)
+
+    def test_trade_replay_detects_duplicate_key_count_drift(self):
+        expected = [{"symbol": "AAPL", "exit_date": "2026-01-05", "exit_price": 101.0, "pnl_pct": 0.01}]
+        simulated = [dict(expected[0]), dict(expected[0])]
+
+        findings = realism.compare_trade_replay(expected, simulated)
+
+        self.assertTrue(any(finding.message == "Replay trade count changed for matching key" for finding in findings))
 
 
 class AcceptanceScriptTests(unittest.TestCase):

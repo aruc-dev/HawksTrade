@@ -143,6 +143,14 @@ class ProtectionManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             manager.active_locks(now=self.now)
 
+    def test_negative_low_profit_threshold_config_is_preserved(self):
+        manager = ProtectionManager.from_config(
+            {"protections": {"enabled": True, "low_profit_threshold_pct": -0.01}},
+            lock_file=self.lock_file,
+        )
+
+        self.assertEqual(manager.config.low_profit_threshold_pct, -0.01)
+
     def test_health_report_dict_includes_active_protection_locks(self):
         lock = {
             "lock_type": "symbol_cooldown_after_exit",

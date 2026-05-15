@@ -324,6 +324,24 @@ class OrderExecutorTests(unittest.TestCase):
         self.assertEqual(result["governor_code"], "account_lookup_failed")
         place_limit_order.assert_not_called()
 
+    def test_enter_position_skips_governor_broker_lookups_when_disabled(self):
+        order = SimpleNamespace(id="entry-filled", status="filled", filled_qty="2", filled_avg_price="100")
+
+        with (
+            patch.dict(order_executor.CFG, {"order_governor": {"enabled": False}}),
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 2}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=2),
+            patch.object(order_executor.ac, "get_account", side_effect=AssertionError("account lookup should not run")),
+            patch.object(order_executor.ac, "get_open_orders", side_effect=AssertionError("order lookup should not run")),
+            patch.object(order_executor.ac, "place_limit_order", return_value=order) as place_limit_order,
+        ):
+            result = order_executor.enter_position("MSFT", "gap_up", dry_run=False)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "open")
+        place_limit_order.assert_called_once()
+
     def test_exit_position_reports_account_lookup_failure_as_exit_check_failure(self):
         position = SimpleNamespace(qty="2", avg_entry_price="100")
 
@@ -339,6 +357,24 @@ class OrderExecutorTests(unittest.TestCase):
         self.assertEqual(result["status"], "pending_exit_check_failed")
         self.assertEqual(result["governor_code"], "account_lookup_failed")
         place_limit_order.assert_not_called()
+
+    def test_exit_position_skips_governor_broker_lookups_when_disabled(self):
+        position = SimpleNamespace(qty="2", avg_entry_price="100")
+        order = SimpleNamespace(id="exit-1", status="filled", filled_qty="2")
+
+        with (
+            patch.dict(order_executor.CFG, {"order_governor": {"enabled": False}}),
+            patch.object(order_executor.ac, "get_position", return_value=position),
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=110),
+            patch.object(order_executor.ac, "get_account", side_effect=AssertionError("account lookup should not run")),
+            patch.object(order_executor.ac, "get_open_orders", side_effect=AssertionError("order lookup should not run")),
+            patch.object(order_executor.ac, "place_limit_order", return_value=order) as place_limit_order,
+        ):
+            result = order_executor.exit_position("AAPL", "risk exit", dry_run=False)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "closed")
+        place_limit_order.assert_called_once()
 
     def test_enter_position_logs_filled_buy_as_open_with_fill_details(self):
         order = SimpleNamespace(

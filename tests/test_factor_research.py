@@ -263,6 +263,31 @@ class FactorResearchTests(unittest.TestCase):
         )
         self.assertEqual(result["summary"]["generated_at"], "test-run")
 
+    def test_run_research_reports_requested_symbol_missing_from_fetch_result(self):
+        args = type("Args", (), {
+            "symbols": ["AAPL", "MSFT"],
+            "use_screener": False,
+            "max_symbols": None,
+            "days": 260,
+            "start": None,
+            "end": None,
+            "horizons": [1],
+            "generated_at": "test-run",
+            "output_dir": "/tmp/research",
+        })()
+
+        with (
+            patch.object(rf, "get_config", return_value={"stocks": {"scan_universe": []}}),
+            patch.object(rf.ac, "get_stock_bars", return_value={"AAPL": _bars(periods=80)}),
+            patch.object(rf, "write_research_outputs", return_value={}),
+        ):
+            result = rf.run_research(args)
+
+        self.assertIn(
+            {"symbol": "MSFT", "issue": "missing_bars"},
+            result["summary"]["data_quality"]["issues"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
