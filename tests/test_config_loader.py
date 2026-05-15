@@ -154,6 +154,9 @@ class TestGetConfig(unittest.TestCase):
         self.assertEqual(strategies["range_breakout"]["volume_multiplier"], 2.5)
         self.assertEqual(strategies["range_breakout"]["min_range_ratio"], 0.45)
         self.assertEqual(strategies["range_breakout"]["rsi_entry_max"], 82)
+        self.assertTrue(strategies["range_breakout"]["profit_trailing_enabled"])
+        self.assertEqual(strategies["range_breakout"]["trail_activation_pct"], 0.06)
+        self.assertEqual(strategies["range_breakout"]["trailing_stop_pct"], 0.04)
 
         validation = cfg["validation"]
         production_windows = {

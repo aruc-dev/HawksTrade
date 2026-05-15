@@ -14,7 +14,7 @@
 | RSI Reversion | Stocks | **Enabled** | `rsi_reversion.py` |
 | Gap-Up | Stocks | **Enabled** | `gap_up.py` |
 | MA Crossover | Crypto | **Enabled** | `ma_crossover.py` |
-| Range Breakout | Crypto | **Enabled** | `range_breakout.py` |
+| Range Breakout | Crypto | **Enabled** | `range_breakout.py`; high-water profit protection enabled |
 
 All strategies share a common global risk layer (8% max position size,
 3.5% stop-loss, 12% take-profit, max 10 open positions, 5% daily-loss halt)

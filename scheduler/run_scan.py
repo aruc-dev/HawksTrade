@@ -40,7 +40,7 @@ from core.run_markers import RunScope, run_scope
 from core.logging_config import runtime_log_handlers
 from core.portfolio import get_open_symbols, print_snapshot
 from scheduler.reconcile_trade_log import safe_reconcile
-from tracking.trade_log import get_open_trades, get_trade_age_days
+from tracking.trade_log import get_open_trades, get_trade_age_days, update_high_water_prices
 from strategies.momentum import MomentumStrategy
 from strategies.rsi_reversion import RSIReversionStrategy
 from strategies.gap_up import GapUpStrategy
@@ -90,6 +90,7 @@ HOLD_DAYS = {
     "rsi_reversion":  CFG["strategies"]["rsi_reversion"]["hold_days"],
     "ma_crossover":   CFG["strategies"]["ma_crossover"]["hold_days"],
 }
+PROFIT_PROTECTION_STRATEGIES = {"momentum", "range_breakout"}
 
 # ── Strategy Registry ─────────────────────────────────────────────────────────
 
@@ -423,6 +424,7 @@ def _check_hold_day_exits(
     regular market hours.
     """
     open_trades = get_open_trades()
+    observed_prices: dict[str, float] = {}
     for trade in open_trades:
         symbol = str(trade.get("symbol", "") or "")
         strategy = str(trade.get("strategy", "") or "")
@@ -443,7 +445,7 @@ def _check_hold_day_exits(
 
             target_days = HOLD_DAYS[strategy]
             age_days    = get_trade_age_days(symbol)
-            if strategy == "momentum":
+            if strategy in PROFIT_PROTECTION_STRATEGIES:
                 asset_class = trade.get("asset_class", "stock")
                 try:
                     entry_price = float(trade.get("entry_price") or 0)
@@ -452,7 +454,7 @@ def _check_hold_day_exits(
                     _mark_exit_check_exception(marker, "hold_day_exit", symbol, e)
                     continue
                 if entry_price <= 0:
-                    log.warning(f"Skipping momentum hold check for {symbol}: missing entry price.")
+                    log.warning(f"Skipping {strategy} hold check for {symbol}: missing entry price.")
                     continue
                 try:
                     current_price = _latest_price_for_trade(symbol, asset_class)
@@ -470,8 +472,9 @@ def _check_hold_day_exits(
                     )
                     continue
                 if current_price <= 0:
-                    log.warning(f"Skipping momentum hold check for {symbol}: invalid current price {current_price}.")
+                    log.warning(f"Skipping {strategy} hold check for {symbol}: invalid current price {current_price}.")
                     continue
+                observed_prices[symbol] = current_price
                 peak_price = None
                 high_water_text = str(trade.get("high_water_price") or "").strip()
                 if high_water_text:
@@ -494,16 +497,16 @@ def _check_hold_day_exits(
                 if not should_exit:
                     if age_days >= target_days:
                         log.info(
-                            f"Momentum hold extended for {symbol}: "
+                            f"{strategy} hold extended for {symbol}: "
                             f"age={age_days:.1f}d pnl={(current_price / entry_price - 1):+.2%}"
                         )
                     else:
                         log.debug(
-                            f"Momentum profit protection not triggered for {symbol}: "
+                            f"{strategy} profit protection not triggered for {symbol}: "
                             f"age={age_days:.1f}d pnl={(current_price / entry_price - 1):+.2%}"
                         )
                     continue
-                log.info(f"Momentum hold exit for {symbol}: {reason}")
+                log.info(f"{strategy} hold/profit exit for {symbol}: {reason}")
                 result = oe.exit_position(
                     symbol,
                     reason=reason,
@@ -534,6 +537,9 @@ def _check_hold_day_exits(
                 info.status_code or "",
                 exc_info=True,
             )
+
+    if observed_prices and not dry_run:
+        update_high_water_prices(observed_prices)
 
 
 def _check_strategy_exits(

@@ -277,6 +277,37 @@ class RunRiskCheckTests(unittest.TestCase):
         )
         self.assertIn("Momentum trailing stop", reason)
 
+    def test_risk_check_enforces_range_breakout_profit_protection(self):
+        position = SimpleNamespace(symbol="DOGEUSD", avg_entry_price="0.10", asset_class="crypto")
+        open_trade = {
+            "symbol": "DOGE/USD",
+            "side": "buy",
+            "strategy": "range_breakout",
+            "entry_price": "0.10",
+            "high_water_price": "0.108",
+            "asset_class": "crypto",
+        }
+
+        with (
+            patch.object(run_risk_check.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_risk_check, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_risk_check.ac, "get_all_positions", return_value=[position]),
+            patch.object(run_risk_check.ac, "get_crypto_latest_price", return_value=0.101),
+            patch.object(run_risk_check.rm, "should_exit_position", return_value=(False, "Hold")),
+            patch.object(run_risk_check.oe, "exit_position") as exit_position,
+        ):
+            run_risk_check.run(dry_run=True)
+
+        reason = exit_position.call_args.kwargs["reason"]
+        exit_position.assert_called_once_with(
+            "DOGE/USD",
+            reason=reason,
+            asset_class="crypto",
+            dry_run=True,
+            force_market=True,
+        )
+        self.assertIn("Range breakout profit protection", reason)
+
     def test_run_marks_error_when_exit_is_blocked_by_pending_order_check_failure(self):
         marker = FakeMarker()
         position = SimpleNamespace(symbol="AAPL", avg_entry_price="100", asset_class="us_equity")

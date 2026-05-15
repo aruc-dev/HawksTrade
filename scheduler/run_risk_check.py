@@ -82,22 +82,23 @@ def _finite_positive_float(value) -> float | None:
     return None
 
 
-def _momentum_profit_protection_exit(
+def _strategy_profit_protection_exit(
     trade: dict | None,
     entry_price: float,
     current_price: float,
 ) -> tuple[bool, str]:
-    """Return a momentum trailing-profit exit using the trade log high-water mark."""
+    """Return a strategy trailing-profit exit using the trade log high-water mark."""
     if not trade:
         return False, ""
-    if str(trade.get("strategy", "") or "").strip().lower() != "momentum":
+    strategy = str(trade.get("strategy", "") or "").strip().lower()
+    strategy_cfg = CFG.get("strategies", {}).get(strategy)
+    if not strategy_cfg:
         return False, ""
 
-    strategy_cfg = CFG.get("strategies", {}).get("momentum", {})
     high_water_price = _finite_positive_float(trade.get("high_water_price"))
     peak_price = max(high_water_price or current_price, current_price)
     return should_exit_for_hold(
-        strategy="momentum",
+        strategy=strategy,
         age_days=0.0,
         entry_price=entry_price,
         current_price=current_price,
@@ -581,7 +582,7 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
             custom_stop_price=custom_stop,
         )
         if not should_exit:
-            should_exit, reason = _momentum_profit_protection_exit(
+            should_exit, reason = _strategy_profit_protection_exit(
                 trade,
                 entry_price,
                 current_price,

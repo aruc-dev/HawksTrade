@@ -38,6 +38,33 @@ def update_high_water_price(position: dict, current_price: float) -> float:
     return high_water
 
 
+def _profit_trailing_exit(
+    *,
+    strategy: str,
+    entry_price: float,
+    current_price: float,
+    peak_price: float | None,
+    strategy_cfg: dict,
+) -> tuple[bool, str]:
+    peak = float(peak_price if peak_price is not None else current_price)
+    peak_gain_pct = (peak / float(entry_price)) - 1.0
+    drawdown_from_peak = (float(current_price) / peak) - 1.0 if peak > 0 else 0.0
+
+    activation_pct = float(strategy_cfg.get("trail_activation_pct", 0.06))
+    trailing_stop_pct = float(strategy_cfg.get("trailing_stop_pct", 0.04))
+    if peak_gain_pct < activation_pct or drawdown_from_peak > -trailing_stop_pct:
+        return False, ""
+
+    if strategy == "range_breakout":
+        prefix = "Range breakout profit protection"
+    else:
+        prefix = "Momentum trailing stop"
+    return (
+        True,
+        f"{prefix}: {drawdown_from_peak:+.2%} from peak after {peak_gain_pct:+.2%} peak gain",
+    )
+
+
 def should_exit_for_hold(
     *,
     strategy: str,
@@ -56,16 +83,33 @@ def should_exit_for_hold(
       - profit_trailing: trailing protection can exit before hold_days once it
         is armed; after hold_days, losers/flat trades exit and winners can run
         under the same trailing stop plus an optional max_hold_days cap.
+      - range_breakout: keeps fixed hold behavior, with optional high-water
+        profit protection before the hold cap.
     """
     hold_days = strategy_cfg.get("hold_days")
     if not hold_days:
         return False, ""
     hold_days = float(hold_days)
 
+    if strategy == "range_breakout":
+        if bool(strategy_cfg.get("profit_trailing_enabled", False)):
+            should_exit, reason = _profit_trailing_exit(
+                strategy=strategy,
+                entry_price=entry_price,
+                current_price=current_price,
+                peak_price=peak_price,
+                strategy_cfg=strategy_cfg,
+            )
+            if should_exit:
+                return should_exit, reason
+        if age_days < hold_days:
+            return False, ""
+        return True, f"Hold {int(age_days)}d"
+
     if strategy != "momentum":
         # Non-momentum strategies use a simple fixed-hold exit.
         # The exit_policy field is intentionally ignored for these strategies;
-        # only momentum has policy-aware (profit-trailing) exit logic.
+        # only explicitly handled strategies have policy-aware exit logic.
         if age_days < hold_days:
             return False, ""
         return True, f"Hold {int(age_days)}d"
@@ -78,17 +122,15 @@ def should_exit_for_hold(
             return False, ""
         return True, f"Hold {int(age_days)}d"
 
-    peak = float(peak_price if peak_price is not None else current_price)
-    peak_gain_pct = (peak / float(entry_price)) - 1.0
-    drawdown_from_peak = (float(current_price) / peak) - 1.0 if peak > 0 else 0.0
-
-    activation_pct = float(strategy_cfg.get("trail_activation_pct", 0.06))
-    trailing_stop_pct = float(strategy_cfg.get("trailing_stop_pct", 0.04))
-    if peak_gain_pct >= activation_pct and drawdown_from_peak <= -trailing_stop_pct:
-        return (
-            True,
-            f"Momentum trailing stop: {drawdown_from_peak:+.2%} from peak after {peak_gain_pct:+.2%} peak gain",
-        )
+    should_exit, reason = _profit_trailing_exit(
+        strategy=strategy,
+        entry_price=entry_price,
+        current_price=current_price,
+        peak_price=peak_price,
+        strategy_cfg=strategy_cfg,
+    )
+    if should_exit:
+        return should_exit, reason
 
     if age_days < hold_days:
         return False, ""

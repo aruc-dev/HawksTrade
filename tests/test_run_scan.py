@@ -708,6 +708,53 @@ class RunScanTests(unittest.TestCase):
         self.assertIn("Momentum trailing stop", exit_position.call_args.kwargs["reason"])
         self.assertTrue(exit_position.call_args.kwargs["force_market"])
 
+    def test_range_breakout_profit_protection_can_exit_before_hold_cap(self):
+        open_trade = {
+            "symbol": "DOGE/USD",
+            "strategy": "range_breakout",
+            "asset_class": "crypto",
+            "entry_price": "0.10",
+            "high_water_price": "0.108",
+        }
+
+        with (
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "get_trade_age_days", return_value=3),
+            patch.object(run_scan, "_latest_price_for_trade", return_value=0.101),
+            patch.object(run_scan, "_estimate_peak_price_since_entry") as estimate_peak,
+            patch.object(run_scan.oe, "exit_position") as exit_position,
+        ):
+            run_scan._check_hold_day_exits([], dry_run=True)
+
+        estimate_peak.assert_not_called()
+        exit_position.assert_called_once()
+        self.assertEqual(exit_position.call_args.args, ("DOGE/USD",))
+        self.assertIn("Range breakout profit protection", exit_position.call_args.kwargs["reason"])
+        self.assertTrue(exit_position.call_args.kwargs["force_market"])
+
+    def test_scan_updates_profit_protection_high_water_prices(self):
+        open_trade = {
+            "symbol": "DOGE/USD",
+            "strategy": "range_breakout",
+            "asset_class": "crypto",
+            "entry_price": "0.10",
+            "high_water_price": "0.101",
+        }
+
+        with (
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "get_trade_age_days", return_value=3),
+            patch.object(run_scan, "_latest_price_for_trade", return_value=0.105),
+            patch.object(run_scan, "_estimate_peak_price_since_entry") as estimate_peak,
+            patch.object(run_scan, "update_high_water_prices") as update_high_water,
+            patch.object(run_scan.oe, "exit_position") as exit_position,
+        ):
+            run_scan._check_hold_day_exits([], dry_run=False)
+
+        estimate_peak.assert_not_called()
+        exit_position.assert_not_called()
+        update_high_water.assert_called_once_with({"DOGE/USD": 0.105})
+
     def test_momentum_hold_price_fetch_failure_marks_error_and_continues(self):
         open_trades = [
             {
@@ -777,6 +824,8 @@ class RunScanTests(unittest.TestCase):
         with (
             patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
             patch.object(run_scan, "get_trade_age_days", return_value=15),
+            patch.object(run_scan, "_latest_price_for_trade", return_value=49000),
+            patch.object(run_scan, "_estimate_peak_price_since_entry", return_value=51000),
             patch.object(run_scan.oe, "exit_position") as exit_position,
         ):
             run_scan._check_hold_day_exits([], dry_run=True, market_open=False)

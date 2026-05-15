@@ -255,6 +255,9 @@ strategies:
     rsi_entry_max: 82            # Avoid buying severely overextended breakout closes
     rsi_exit_max: 82             # Profit-taking exhaustion exit after profit floor
     profit_floor_pct: 0.03       # RSI exhaustion exit only after at least 3% open profit
+    profit_trailing_enabled: true # Protect winners before the 14-day hold cap
+    trail_activation_pct: 0.06   # Enable trailing stop once peak gain reaches 6%
+    trailing_stop_pct: 0.04      # Exit if price falls 4% from post-entry peak
     breakdown_exit_pct: 0.02     # Exit failed breakout when close falls 2% below entry
     trend_exit_enabled: true     # Exit when completed close falls below trend EMA
     weight: 0.9
