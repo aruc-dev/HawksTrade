@@ -565,6 +565,61 @@ class RunScanTests(unittest.TestCase):
         self.assertEqual(marker.fields["error_type"], "PendingEntryOrderCheckFailed")
         enter_position.assert_not_called()
 
+    def test_protection_refresh_failure_blocks_entries_but_allows_exits(self):
+        class FakeProtectionManager:
+            enabled = True
+
+            def refresh_from_trade_log(self):
+                raise RuntimeError("lock file unavailable")
+
+            def evaluate_entry(self, symbol, strategy):
+                raise AssertionError("entries should be blocked before lock evaluation")
+
+        class FakeMomentum:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def scan(self, universe, **kwargs):
+                return [{"symbol": "MSFT", "action": "buy"}]
+
+            def should_exit(self, symbol, entry_price):
+                return True, "exit stale trade"
+
+        marker = FakeMarker()
+        open_trade = {
+            "symbol": "AAPL",
+            "side": "buy",
+            "strategy": "momentum",
+            "entry_price": "100",
+            "asset_class": "stock",
+        }
+
+        with (
+            patch.object(run_scan.ProtectionManager, "from_config", return_value=FakeProtectionManager()),
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(
+                run_scan.ac,
+                "get_stock_bars",
+                return_value={"SPY": [object()] * 252, "QQQ": [object()] * 51},
+            ),
+            patch.object(run_scan, "get_open_symbols", side_effect=[["AAPL"], ["AAPL"]]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "get_stock_universe", return_value=["MSFT"]),
+            patch.object(run_scan, "STOCK_STRATEGIES", [FakeMomentum()]),
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "print_snapshot"),
+            patch.object(run_scan.oe, "enter_position") as enter_position,
+            patch.object(run_scan.oe, "exit_position", return_value={"symbol": "AAPL", "status": "dry_run"}) as exit_position,
+        ):
+            run_scan.run(run_stocks=True, run_crypto=False, dry_run=True, marker=marker)
+
+        self.assertEqual(marker.status, "error")
+        self.assertEqual(marker.fields["stage"], "protection_refresh")
+        enter_position.assert_not_called()
+        exit_position.assert_called_once_with(
+            "AAPL", reason="exit stale trade", asset_class="stock", dry_run=True
+        )
+
     def test_planned_crypto_entries_count_against_crypto_cap(self):
         class FakeCrypto:
             name = "ma_crossover"

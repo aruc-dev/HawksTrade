@@ -34,6 +34,7 @@ from core import alpaca_client as ac
 from core.config_loader import get_config
 from core import order_executor as oe
 from core import risk_manager as rm
+from core.protection_manager import ProtectionManager
 from core.exit_policy import (
     evaluate_hold_exit,
     finite_positive_float,
@@ -355,6 +356,38 @@ def _mark_unhealthy_entry_result(marker: RunScope | None, result: dict | None, s
             failed_entry_symbol=result.get("symbol", ""),
             error=result.get("error", ""),
         )
+
+
+def _log_active_protection_locks(locks: list) -> None:
+    if not locks:
+        return
+    log.warning("Active protection locks: %s", len(locks))
+    for lock in locks:
+        log.warning(
+            "Protection lock active | type=%s scope=%s key=%s expires_at=%s reason=%s",
+            lock.lock_type,
+            lock.scope,
+            lock.key,
+            lock.expires_at.isoformat(),
+            lock.reason,
+        )
+
+
+def _protection_blocks_entry(manager: ProtectionManager, symbol: str, strategy: str) -> bool:
+    decision = manager.evaluate_entry(symbol, strategy)
+    if decision.allowed:
+        return False
+    lock = decision.lock
+    log.warning(
+        "Entry blocked by protection lock | symbol=%s strategy=%s lock_type=%s scope=%s key=%s reason=%s",
+        symbol,
+        strategy,
+        lock.lock_type if lock else "",
+        lock.scope if lock else "",
+        lock.key if lock else "",
+        decision.reason,
+    )
+    return True
 
 
 def _mark_exit_check_exception(marker: RunScope | None, stage: str, symbol: str, exc: Exception):
@@ -741,6 +774,27 @@ def run(
     if pending_entry_symbols:
         log.info(f"Pending entry orders counted as planned positions: {len(pending_entry_symbols)}")
 
+    protection_manager = ProtectionManager.from_config(CFG)
+    protection_entries_blocked = False
+    if protection_manager.enabled:
+        try:
+            active_locks = protection_manager.refresh_from_trade_log()
+        except Exception as e:
+            protection_entries_blocked = True
+            if marker is not None:
+                marker.mark_error(
+                    stage="protection_refresh",
+                    error_type=type(e).__name__,
+                    error=str(e),
+                )
+            log.error(
+                "Protection refresh failed; blocking new entries fail-closed while exit checks continue: %s",
+                e,
+                exc_info=True,
+            )
+        else:
+            _log_active_protection_locks(active_locks)
+
     # --- Pre-fetch regime bars to share across strategies (reduces API calls) ---
     stock_regime_bars = None
     crypto_regime_bars = None
@@ -789,6 +843,15 @@ def run(
                     if _planned_asset_class_cap_reached("stock", planned_asset_classes):
                         break
                     if sig["action"] == "buy":
+                        if protection_entries_blocked:
+                            log.warning(
+                                "Entry blocked because protection refresh failed | symbol=%s strategy=%s",
+                                sym,
+                                strategy.name,
+                            )
+                            continue
+                        if _protection_blocks_entry(protection_manager, sym, strategy.name):
+                            continue
                         result = oe.enter_position(
                             sym,
                             strategy=strategy.name,
@@ -831,6 +894,15 @@ def run(
                     if _planned_asset_class_cap_reached("crypto", planned_asset_classes):
                         break
                     if sig["action"] == "buy":
+                        if protection_entries_blocked:
+                            log.warning(
+                                "Entry blocked because protection refresh failed | symbol=%s strategy=%s",
+                                sym,
+                                strategy.name,
+                            )
+                            continue
+                        if _protection_blocks_entry(protection_manager, sym, strategy.name):
+                            continue
                         result = oe.enter_position(
                             sym,
                             strategy=strategy.name,

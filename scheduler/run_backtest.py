@@ -30,6 +30,7 @@ from core import alpaca_client as ac  # noqa: E402
 from core import risk_manager as rm  # noqa: E402
 from core import order_executor as oe  # noqa: E402
 from core.config_loader import get_config  # noqa: E402
+from core.protection_manager import ProtectionManager  # noqa: E402
 from core.exit_policy import (  # noqa: E402
     VALID_MOMENTUM_EXIT_POLICIES,
     normalize_momentum_exit_policy,
@@ -415,6 +416,23 @@ def _backtest_scan_universe(
             return None
         return screener.get_universe(as_of_date=current_date) if screener_enabled else cfg["stocks"]["scan_universe"]
     return cfg["crypto"]["scan_universe"]
+
+
+def _backtest_protection_rows(trades_log: list[dict]) -> list[dict]:
+    rows = []
+    for trade in trades_log:
+        exit_date = trade.get("exit_date")
+        timestamp = exit_date.isoformat() if isinstance(exit_date, datetime) else str(exit_date or "")
+        rows.append({
+            "side": "sell",
+            "status": "closed",
+            "symbol": trade.get("symbol", ""),
+            "strategy": trade.get("strategy", "unknown"),
+            "pnl_pct": trade.get("pnl_pct", ""),
+            "timestamp": timestamp,
+            "exit_reason": trade.get("exit_reason", ""),
+        })
+    return rows
 
 
 def _make_bar_fetcher(sim: "BacktestSimulator"):
@@ -969,6 +987,12 @@ def run_backtest(
     with contextlib.ExitStack() as stack:
         baseline_dir = tempfile.TemporaryDirectory()
         stack.callback(baseline_dir.cleanup)
+        protection_dir = tempfile.TemporaryDirectory()
+        stack.callback(protection_dir.cleanup)
+        protection_manager = ProtectionManager.from_config(
+            cfg,
+            lock_file=Path(protection_dir.name) / "protection_locks.json",
+        )
         stack.enter_context(patch(
             "core.risk_manager.DAILY_BASELINE_FILE",
             Path(baseline_dir.name) / "daily_loss_baseline.json",
@@ -1009,6 +1033,8 @@ def run_backtest(
 
             # Scan
             new_entry_symbols = set()
+            if protection_manager.enabled:
+                protection_manager.refresh_from_rows(_backtest_protection_rows(sim.trades_log), now=dt)
             for strat in strategies:
                 universe = _backtest_scan_universe(
                     strat,
@@ -1039,6 +1065,15 @@ def run_backtest(
                 for sig in signals:
                     if sig["symbol"] not in sim.positions:
                         asset_class = "crypto" if strat.asset_class == "crypto" else "stock"
+                        protection_decision = protection_manager.evaluate_entry(sig["symbol"], strat.name, now=dt)
+                        if not protection_decision.allowed:
+                            log.info(
+                                "Backtest entry blocked by protection lock: symbol=%s strategy=%s reason=%s",
+                                sig["symbol"],
+                                strat.name,
+                                protection_decision.reason,
+                            )
+                            continue
                         entry_price = sig.get("entry_price")
                         if entry_price and entry_price > 0:
                             sim.pending_entry_prices[sig["symbol"]] = float(entry_price)

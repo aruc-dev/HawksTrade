@@ -42,6 +42,7 @@ from tracking.performance import compute_summary, load_closed_trades
 from tracking.trade_log import get_open_trades
 from scheduler.reconcile_trade_log import safe_reconcile
 from core.config_loader import get_config
+from core.protection_manager import active_locks_for_reporting
 
 CFG = get_config()
 
@@ -218,6 +219,7 @@ class HealthReport:
     log_warnings: list[LogFinding]
     price_failures: list[PriceFailureState]
     html_output: Path
+    active_protection_locks: list[dict] = field(default_factory=list)
     schedule_source: str = "cron"
 
 
@@ -1590,6 +1592,7 @@ def build_health_report(
     window_start = now - timedelta(hours=lookback_hours)
     errors, warnings = _find_matching_error_lines(findings_by_file, since=window_start)
     price_failures = load_price_failure_state(price_failure_state_file)
+    active_protection_locks = active_locks_for_reporting(now)
 
     overall = _overall_status(alpaca_state, job_health, errors, warnings, price_failures)
 
@@ -1607,6 +1610,7 @@ def build_health_report(
         log_warnings=warnings,
         price_failures=price_failures,
         html_output=Path(html_output).expanduser().resolve(),
+        active_protection_locks=active_protection_locks,
         schedule_source=(schedule_source or "cron").lower(),
     )
 
@@ -1858,6 +1862,17 @@ def format_terminal_report(report: HealthReport, *, use_color: bool = False) -> 
                 )
         else:
             lines.append("No open positions detected.")
+    lines.append("")
+
+    lines.append("PROTECTION LOCKS")
+    if report.active_protection_locks:
+        for lock in report.active_protection_locks:
+            lines.append(
+                f"  - {lock.get('lock_type')} scope={lock.get('scope')} key={lock.get('key')} "
+                f"expires={lock.get('expires_at')} reason={lock.get('reason')}"
+            )
+    else:
+        lines.append("No active protection locks.")
     lines.append("")
 
     lines.append("PRICE FETCH HEALTH")
@@ -2462,6 +2477,7 @@ def health_report_to_dict(report: HealthReport) -> dict:
         },
         "job_health": [_job_health_to_dict(job) for job in report.job_health],
         "trade_summary": report.trade_summary,
+        "active_protection_locks": report.active_protection_locks,
         "price_failures": [_price_failure_to_dict(failure) for failure in report.price_failures],
         "log_errors": [_finding_to_dict(finding) for finding in report.log_errors],
         "log_warnings": [_finding_to_dict(finding) for finding in report.log_warnings],
