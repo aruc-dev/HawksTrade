@@ -499,6 +499,23 @@ class TestMomentumExitPolicy(unittest.TestCase):
                 self.assertFalse(should_exit)
                 self.assertEqual(reason, "")
 
+    def test_profit_trailing_uses_defaults_for_invalid_config_percentages(self):
+        cfg = self._cfg()
+        cfg["trail_activation_pct"] = ""
+        cfg["trailing_stop_pct"] = float("inf")
+
+        should_exit, reason = should_exit_for_hold(
+            strategy="momentum",
+            age_days=2,
+            entry_price=100,
+            current_price=101,
+            peak_price=108,
+            strategy_cfg=cfg,
+        )
+
+        self.assertTrue(should_exit)
+        self.assertIn("trailing stop", reason)
+
     def test_risk_only_baseline_ignores_hold_days(self):
         should_exit, _ = should_exit_for_hold(
             strategy="momentum",

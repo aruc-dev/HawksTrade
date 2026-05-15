@@ -33,6 +33,18 @@ def _finite_positive_float(value) -> float | None:
     return parsed
 
 
+def _finite_float_or_default(value, default: float, *, min_value: float = 0.0, allow_min: bool = True) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(parsed):
+        return default
+    if parsed < min_value or (parsed == min_value and not allow_min):
+        return default
+    return parsed
+
+
 def normalize_momentum_exit_policy(policy: str | None) -> str:
     """Return a known momentum exit policy name."""
     if not policy:
@@ -73,8 +85,17 @@ def _profit_trailing_exit(
     peak_gain_pct = (peak / entry) - 1.0
     drawdown_from_peak = (current / peak) - 1.0
 
-    activation_pct = float(strategy_cfg.get("trail_activation_pct", 0.06))
-    trailing_stop_pct = float(strategy_cfg.get("trailing_stop_pct", 0.04))
+    activation_pct = _finite_float_or_default(
+        strategy_cfg.get("trail_activation_pct", 0.06),
+        0.06,
+        min_value=0.0,
+    )
+    trailing_stop_pct = _finite_float_or_default(
+        strategy_cfg.get("trailing_stop_pct", 0.04),
+        0.04,
+        min_value=0.0,
+        allow_min=False,
+    )
     if peak_gain_pct < activation_pct or drawdown_from_peak > -trailing_stop_pct:
         return False, ""
 

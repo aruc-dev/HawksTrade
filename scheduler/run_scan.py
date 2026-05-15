@@ -100,8 +100,7 @@ def _configured_policy_aware_hold_strategies(cfg: dict) -> set[str]:
     return {
         name
         for name, strategy_cfg in cfg.get("strategies", {}).items()
-        if strategy_cfg.get("hold_days")
-        and (name == "momentum" or _strategy_uses_profit_protection(name, strategy_cfg))
+        if strategy_cfg.get("hold_days") and _strategy_uses_profit_protection(name, strategy_cfg)
     }
 
 
@@ -470,19 +469,32 @@ def _check_hold_day_exits(
 
             target_days = HOLD_DAYS[strategy]
             age_days    = get_trade_age_days(symbol)
-            if strategy in POLICY_AWARE_HOLD_STRATEGIES:
-                strategy_cfg = CFG["strategies"][strategy]
-                if (
-                    strategy == "momentum"
-                    and normalize_momentum_exit_policy(strategy_cfg.get("exit_policy")) == "risk_only_baseline"
-                ):
+            strategy_cfg = CFG["strategies"][strategy]
+            if strategy == "momentum":
+                momentum_policy = normalize_momentum_exit_policy(strategy_cfg.get("exit_policy"))
+                if momentum_policy == "risk_only_baseline":
                     log.debug(
                         "Momentum risk_only_baseline ignores hold_days for %s; "
                         "deferring to risk checks only.",
                         symbol,
                     )
                     continue
+                if momentum_policy == "fixed_hold":
+                    if age_days < target_days:
+                        continue
+                    reason = f"Hold {int(age_days)}d"
+                    log.info(f"momentum fixed-hold exit for {symbol}: {reason}")
+                    result = oe.exit_position(
+                        symbol,
+                        reason=reason,
+                        asset_class=asset_class,
+                        dry_run=dry_run,
+                        force_market=True,
+                    )
+                    _mark_unhealthy_exit_result(marker, result, "hold_day_exit")
+                    continue
 
+            if strategy in POLICY_AWARE_HOLD_STRATEGIES:
                 asset_class = trade.get("asset_class", "stock")
                 try:
                     entry_price = float(trade.get("entry_price") or 0)
@@ -490,11 +502,11 @@ def _check_hold_day_exits(
                     log.error(f"Invalid entry price for hold-day check {symbol}: {trade.get('entry_price')}")
                     _mark_exit_check_exception(marker, "hold_day_exit", symbol, e)
                     continue
-                if entry_price <= 0:
+                if not math.isfinite(entry_price) or entry_price <= 0:
                     log.warning(f"Skipping {strategy} hold check for {symbol}: missing entry price.")
                     continue
                 try:
-                    current_price = _latest_price_for_trade(symbol, asset_class)
+                    current_price = float(_latest_price_for_trade(symbol, asset_class))
                 except Exception as e:
                     info = _mark_exit_check_exception(marker, "hold_day_exit", symbol, e)
                     log.error(
@@ -508,7 +520,7 @@ def _check_hold_day_exits(
                         exc_info=True,
                     )
                     continue
-                if current_price <= 0:
+                if not math.isfinite(current_price) or current_price <= 0:
                     log.warning(f"Skipping {strategy} hold check for {symbol}: invalid current price {current_price}.")
                     continue
                 observed_prices[symbol] = current_price

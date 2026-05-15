@@ -44,6 +44,11 @@ class RunScanTests(unittest.TestCase):
 
         self.assertEqual(
             run_scan._configured_policy_aware_hold_strategies(cfg),
+            {"rsi_reversion", "new_strategy"},
+        )
+        cfg["strategies"]["momentum"]["exit_policy"] = "profit_trailing"
+        self.assertEqual(
+            run_scan._configured_policy_aware_hold_strategies(cfg),
             {"momentum", "rsi_reversion", "new_strategy"},
         )
 
@@ -748,6 +753,89 @@ class RunScanTests(unittest.TestCase):
         estimate_peak.assert_not_called()
         exit_position.assert_not_called()
         log_info.assert_not_called()
+
+    def test_momentum_fixed_hold_before_cap_skips_price_fetch(self):
+        open_trade = {
+            "symbol": "AAPL",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "entry_price": "100",
+        }
+
+        with (
+            patch.dict(run_scan.CFG["strategies"]["momentum"], {"exit_policy": "fixed_hold"}),
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "get_trade_age_days", return_value=2),
+            patch.object(run_scan, "_latest_price_for_trade") as latest_price,
+            patch.object(run_scan.oe, "exit_position") as exit_position,
+        ):
+            run_scan._check_hold_day_exits([], dry_run=True)
+
+        latest_price.assert_not_called()
+        exit_position.assert_not_called()
+
+    def test_momentum_fixed_hold_after_cap_exits_without_price_fetch(self):
+        open_trade = {
+            "symbol": "AAPL",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "entry_price": "100",
+        }
+
+        with (
+            patch.dict(run_scan.CFG["strategies"]["momentum"], {"exit_policy": "fixed_hold"}),
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "get_trade_age_days", return_value=4),
+            patch.object(run_scan, "_latest_price_for_trade") as latest_price,
+            patch.object(run_scan.oe, "exit_position") as exit_position,
+        ):
+            run_scan._check_hold_day_exits([], dry_run=True)
+
+        latest_price.assert_not_called()
+        exit_position.assert_called_once()
+        self.assertEqual(exit_position.call_args.kwargs["reason"], "Hold 4d")
+        self.assertTrue(exit_position.call_args.kwargs["force_market"])
+
+    def test_policy_aware_hold_rejects_nonfinite_prices(self):
+        open_trade = {
+            "symbol": "AAPL",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "entry_price": "NaN",
+        }
+
+        with (
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "get_trade_age_days", return_value=4),
+            patch.object(run_scan, "_latest_price_for_trade") as latest_price,
+            patch.object(run_scan, "_estimate_peak_price_since_entry") as estimate_peak,
+            patch.object(run_scan.oe, "exit_position") as exit_position,
+        ):
+            run_scan._check_hold_day_exits([], dry_run=True)
+
+        latest_price.assert_not_called()
+        estimate_peak.assert_not_called()
+        exit_position.assert_not_called()
+
+    def test_policy_aware_hold_rejects_nonfinite_current_price(self):
+        open_trade = {
+            "symbol": "AAPL",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "entry_price": "100",
+        }
+
+        with (
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "get_trade_age_days", return_value=4),
+            patch.object(run_scan, "_latest_price_for_trade", return_value=float("inf")),
+            patch.object(run_scan, "_estimate_peak_price_since_entry") as estimate_peak,
+            patch.object(run_scan.oe, "exit_position") as exit_position,
+        ):
+            run_scan._check_hold_day_exits([], dry_run=True)
+
+        estimate_peak.assert_not_called()
+        exit_position.assert_not_called()
 
     def test_range_breakout_profit_protection_can_exit_before_hold_cap(self):
         open_trade = {
