@@ -130,6 +130,13 @@ class TestGetConfig(unittest.TestCase):
             "stressed",
         )
         self.assertEqual(
+            cfg["validation"]["walkforward"]["profiles"]["master"]["blocking_levels"],
+            ["stressed"],
+        )
+        self.assertTrue(
+            cfg["validation"]["walkforward"]["profiles"]["master"]["oos_lock"]["scale_min_trades_to_window"]
+        )
+        self.assertEqual(
             cfg["validation"]["walkforward"]["profiles"]["quick"]["cost_levels"][0]["name"],
             "stressed",
         )

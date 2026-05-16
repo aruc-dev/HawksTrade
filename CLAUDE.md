@@ -327,7 +327,9 @@ Steps:
 
 ## 13a. Walk-Forward Stop-The-Line Policy
 
-The configured multi-regime gate is the capital-scaling gate. If a regenerated
+The configured multi-regime gate is the capital-scaling gate. The master profile
+uses `blocking_levels: [stressed]`; baseline and severe rows are diagnostic
+unless a future config explicitly makes them blocking. If a regenerated
 `walkforward_master` report falls below the configured pass-rate threshold at the
 stressed cost level, the agent must:
 
@@ -337,6 +339,8 @@ stressed cost level, the agent must:
 
 The locked OOS window is intentionally separate. Run `python3 scheduler/run_walkforward.py --profile master --oos-only`
 only when final validation is needed; do not tune against that held-out period.
+Its minimum trade-count gate is scaled from the 180-day master cadence to the
+shorter OOS window.
 
 ---
 

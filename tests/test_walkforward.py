@@ -60,12 +60,14 @@ def _profile_cfg():
             },
         },
         "pass_rate": {"baseline": 1.0, "stressed": 1.0},
+        "blocking_levels": ["stressed"],
         "oos_lock": {
             "label": "locked_oos_recent_60d",
             "end_date": "auto",
             "auto_offset_days": 2,
             "window_days": 60,
             "must_pass_at": "stressed",
+            "scale_min_trades_to_window": True,
         },
         "regression_issue": {"auto_file": False},
     }
@@ -261,6 +263,59 @@ class WalkForwardTests(unittest.TestCase):
         self.assertIn("OOS Walk-Forward Report", output)
         self.assertEqual(run_backtest.call_count, 1)
         self.assertEqual(run_backtest.call_args.kwargs["cost_model"]["slippage_bps"], 15.0)
+
+    def test_oos_scales_min_trades_to_shorter_window(self):
+        profile = _profile_cfg()
+        profile["thresholds"]["stressed"]["min_trades"] = 25
+        cfg = {
+            "validation": {
+                "cost_model": {"slippage_bps": 10, "fee_bps": 5, "min_fee_usd": 0},
+                "walkforward": {"enabled": True, "profiles": {"unit": profile}},
+            }
+        }
+
+        with (
+            patch("scheduler.run_walkforward.get_config", return_value=cfg),
+            patch("scheduler.run_walkforward.run_backtest", return_value={"stats": _stats(trades=8)}),
+        ):
+            exit_code, output = run_walkforward(
+                profile="unit",
+                oos_only=True,
+                today=datetime(2026, 5, 16, tzinfo=timezone.utc),
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("trades 8 < 25", output)
+
+    def test_profile_exit_code_uses_blocking_levels_only(self):
+        profile = _profile_cfg()
+        profile["thresholds"]["baseline"]["min_trades"] = 5
+        profile["thresholds"]["stressed"]["min_trades"] = 5
+        cfg = {
+            "validation": {
+                "cost_model": {"slippage_bps": 10, "fee_bps": 5, "min_fee_usd": 0},
+                "walkforward": {"enabled": True, "profiles": {"unit": profile}},
+            }
+        }
+        results = [
+            {"stats": _stats(trades=1)},
+            {"stats": _stats(trades=1)},
+            {"stats": _stats(trades=8)},
+            {"stats": _stats(trades=8)},
+        ]
+
+        with (
+            patch("scheduler.run_walkforward.get_config", return_value=cfg),
+            patch("scheduler.run_walkforward.run_backtest", side_effect=results),
+        ):
+            exit_code, output = run_walkforward(
+                profile="unit",
+                today=datetime(2026, 5, 16, tzinfo=timezone.utc),
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("| baseline | advisory | 0/2 | 0.0% | 100.0% | FAIL |", output)
+        self.assertIn("| stressed | blocking | 2/2 | 100.0% | 100.0% | PASS |", output)
 
 
 if __name__ == "__main__":

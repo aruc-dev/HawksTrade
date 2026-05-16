@@ -374,6 +374,7 @@ validation:
           baseline: 0.80
           stressed: 0.66
           severe: 0.50
+        blocking_levels: [stressed] # Baseline/severe are diagnostic; stressed is the capital-scaling gate.
         oos_lock:
           label: locked_oos_recent_60d
           regime: "Locked most-recent OOS validation window"
@@ -381,6 +382,7 @@ validation:
           end_date: auto
           auto_offset_days: 2
           must_pass_at: stressed
+          scale_min_trades_to_window: true # Scale 25 trades / 180d to the shorter 60d OOS window.
         regression_issue:
           auto_file: true
           title: "Walk-forward stressed pass rate below capital-scaling threshold"
@@ -405,6 +407,7 @@ validation:
           stressed: { min_return_pct: 0.00, max_drawdown_pct: 0.10, min_profit_factor: 1.00, min_trades: 25, min_daily_sharpe: 0.20 }
         pass_rate:
           stressed: 0.66
+        blocking_levels: [stressed]
         oos_lock:
           label: locked_oos_recent_60d
           regime: "Locked most-recent OOS validation window"
@@ -412,6 +415,7 @@ validation:
           end_date: auto
           auto_offset_days: 2
           must_pass_at: stressed
+          scale_min_trades_to_window: true
         regression_issue:
           auto_file: false
 

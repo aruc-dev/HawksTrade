@@ -4,6 +4,7 @@
 
 ### Added
 - Multi-regime walk-forward validation profiles and reports; capital does not scale unless `walkforward_master` passes at the configured stressed threshold.
+- Walk-forward `blocking_levels` and duration-scaled OOS minimum trade counts so diagnostic cost levels do not block the stressed capital gate.
 - Advisory pre-commit quick walk-forward check for staged strategy, risk, or validation config changes.
 - Live-mode runtime interlock for explicit operator acknowledgement before live trading imports can proceed.
 - Momentum ATR stop cap so wide ATR stops cannot silently exceed the configured maximum stop distance.

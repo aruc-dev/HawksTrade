@@ -100,7 +100,9 @@ Before any capital-scaling or strategy-enable decision, regenerate and review
 python3 scheduler/run_walkforward.py --profile master
 ```
 Capital must not scale unless the master walk-forward passes at the configured
-stressed cost threshold.
+stressed cost threshold. Baseline and severe rows are diagnostic unless the
+profile lists them under `blocking_levels`; the locked OOS window scales its
+minimum trade-count gate to its shorter duration.
 
 ---
 

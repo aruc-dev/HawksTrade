@@ -98,6 +98,11 @@ Aggregate pass criteria:
 - **Severe (50 bps):** ≥ 50% of windows pass.
 - **Locked OOS window:** must pass at stressed cost.
 
+The production command should return a failing exit code only when configured
+`blocking_levels` fail. In the initial master profile, `blocking_levels:
+[stressed]`, so baseline and severe remain visible diagnostics rather than
+capital-scaling blockers.
+
 These thresholds are deliberately less strict than the single-window production gate (which requires +10% return on the 12-month) because walk-forward includes bad regimes. A strategy that returns +20% in a bull and -5% in a bear has a positive average — that is the realistic forward expectation.
 
 ---

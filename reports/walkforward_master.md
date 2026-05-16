@@ -1,17 +1,18 @@
 # Master Walk-Forward Report - 2026-05-16
 
 - Profile: `master`
-- Generated: `20260516T204000Z` UTC
+- Generated: `20260516T214815Z` UTC
 - Reproduction command: `python3 scheduler/run_walkforward.py --profile master`
 - Binding capital-scaling level: `stressed`
+- Blocking report levels: `stressed`
 
 ## Summary
 
-| Cost Level | Windows Passed | Pass Rate | Required | Result |
-|---|---:|---:|---:|---|
-| baseline | 2/7 | 28.6% | 80.0% | FAIL |
-| stressed | 5/7 | 71.4% | 66.0% | PASS |
-| severe | 5/7 | 71.4% | 50.0% | PASS |
+| Cost Level | Gate | Windows Passed | Pass Rate | Required | Result |
+|---|---|---:|---:|---:|---|
+| baseline | advisory | 2/7 | 28.6% | 80.0% | FAIL |
+| stressed | blocking | 5/7 | 71.4% | 66.0% | PASS |
+| severe | advisory | 5/7 | 71.4% | 50.0% | PASS |
 
 ## Per-Window Detail
 
@@ -35,7 +36,7 @@
 | severe | covid_crash_2020 | COVID crash and V-recovery | 09/30/2020 | 180 | +7.20% | +15.13% | -1.87% | 2.34 | 34 | 55.9% | 2.57 | PASS |  |
 | severe | stimulus_bull_2021 | Stimulus-driven late-cycle bull | 12/31/2021 | 180 | +1.06% | +2.16% | -1.88% | 1.20 | 30 | 36.7% | 0.43 | PASS |  |
 | severe | tech_bear_2022 | Rate-hike technology bear market | 12/31/2022 | 180 | +0.85% | +1.74% | -4.29% | 1.13 | 29 | 31.0% | 0.25 | PASS |  |
-| severe | ai_reversal_2023 | SVB shock and AI-led reversal | 12/31/2023 | 180 | +2.88% | +5.93% | -1.61% | 1.86 | 31 | 45.2% | 1.35 | PASS |  |
+| severe | ai_reversal_2023 | SVB shock and AI-led reversal | 12/31/2023 | 180 | +2.53% | +5.19% | -1.64% | 1.76 | 30 | 43.3% | 1.20 | PASS |  |
 | severe | election_chop_2024 | Pre-election range-bound chop | 09/30/2024 | 180 | -1.39% | -2.79% | -3.48% | 0.78 | 33 | 36.4% | -0.56 | FAIL | annualized_return -2.79% < -2.00%; profit_factor 0.78 < 0.90 |
 | severe | current_regime_auto | Current regime excluding locked OOS | 03/17/2026 | 180 | +0.14% | +0.28% | -3.28% | 0.96 | 33 | 33.3% | 0.09 | PASS |  |
 
@@ -85,7 +86,7 @@
 - covid_crash_2020 / severe: 20 missing-history symbols (AAVE/USD, ABNB, ADA/USD, ARM, AVAX/USD, BITO, BTC/USD, COIN, DASH, DOGE/USD, DOT/USD, ETH/USD...)
 - stimulus_bull_2021 / severe: 5 missing-history symbols (ADA/USD, ARM, DOT/USD, IBIT, XRP/USD)
 - tech_bear_2022 / severe: 4 missing-history symbols (ADA/USD, ARM, DOT/USD, XRP/USD)
-- ai_reversal_2023 / severe: 2 missing-history symbols (ADA/USD, XRP/USD)
+- ai_reversal_2023 / severe: 3 missing-history symbols (ADA/USD, BTC/USD, XRP/USD)
 - election_chop_2024 / severe: 1 missing-history symbols (ADA/USD)
 
 Backtest semantics:
@@ -95,6 +96,6 @@ Backtest semantics:
 - Momentum volume-pace backtest uses a synthetic elapsed-session volume proxy from daily bars, not real minute bars; volume-pace fills are not intraday-validated. Symbols: AAPL, ABBV, ABNB, ADBE, AMAT, AMD, AMGN, AMZN.
 - Momentum volume-pace backtest uses a synthetic elapsed-session volume proxy from daily bars, not real minute bars; volume-pace fills are not intraday-validated. Symbols: AAPL, ABBV, ADBE, AMAT, AMD, AMGN, AMT, AMZN.
 
-Raw JSON artifacts: `reports/walkforward/master_20260516T204000Z`
+Raw JSON artifacts: `reports/walkforward/master_20260516T214815Z`
 
 Locked OOS note: the latest held-out period is intentionally excluded from the master run. Run `python3 scheduler/run_walkforward.py --profile master --oos-only` when ready for final validation.

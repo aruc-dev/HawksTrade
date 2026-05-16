@@ -19,7 +19,10 @@ walk-forward report:
 - Run the held-out OOS check only when needed: `python3 scheduler/run_walkforward.py --profile master --oos-only`
 
 Capital does not scale unless the master walk-forward passes at the configured
-stressed cost level in `config/config.yaml`.
+stressed cost level in `config/config.yaml`. Baseline and severe walk-forward
+rows are diagnostic unless they are listed under a profile's `blocking_levels`.
+The locked 60-day OOS check scales the minimum trade count from the 180-day
+master cadence.
 
 ---
 

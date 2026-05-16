@@ -13,7 +13,7 @@ import math
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -229,6 +229,50 @@ def _thresholds_for_level(profile_cfg: dict, level_name: str) -> WalkForwardThre
     )
 
 
+def _list_config_value(value) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, list):
+        return [str(part).strip() for part in value if str(part).strip()]
+    return [part.strip() for part in str(value).split(",") if part.strip()]
+
+
+def _blocking_levels(profile_cfg: dict, summary: dict | None = None) -> list[str]:
+    configured = _list_config_value(profile_cfg.get("blocking_levels"))
+    if configured:
+        return configured
+    binding_level = (profile_cfg.get("oos_lock") or {}).get("must_pass_at")
+    if binding_level:
+        return [str(binding_level)]
+    if summary:
+        return list(summary)
+    return []
+
+
+def _effective_thresholds_for_window(
+    profile_cfg: dict,
+    level_name: str,
+    window: dict,
+) -> WalkForwardThresholds:
+    thresholds = _thresholds_for_level(profile_cfg, level_name)
+    if not window.get("oos"):
+        return thresholds
+
+    oos_cfg = profile_cfg.get("oos_lock") or {}
+    if not oos_cfg.get("scale_min_trades_to_window", False):
+        return thresholds
+    if thresholds.min_trades <= 0:
+        return thresholds
+
+    reference_days = int(oos_cfg.get("min_trades_reference_days", profile_cfg.get("window_days", 0)) or 0)
+    window_days = int(window.get("window_days", 0) or 0)
+    if reference_days <= 0 or window_days <= 0:
+        raise ValueError("OOS min-trades scaling requires positive reference and window days")
+
+    scaled_min_trades = max(1, math.floor(thresholds.min_trades * window_days / reference_days))
+    return replace(thresholds, min_trades=scaled_min_trades)
+
+
 def _configured_profile_windows(
     profile_cfg: dict,
     *,
@@ -356,15 +400,17 @@ def _write_profile_artifacts(
     return target
 
 
-def _render_summary_table(summary: dict) -> list[str]:
+def _render_summary_table(summary: dict, *, blocking_levels: list[str]) -> list[str]:
     lines = [
-        "| Cost Level | Windows Passed | Pass Rate | Required | Result |",
-        "|---|---:|---:|---:|---|",
+        "| Cost Level | Gate | Windows Passed | Pass Rate | Required | Result |",
+        "|---|---|---:|---:|---:|---|",
     ]
+    blocking_set = set(blocking_levels)
     for level_name, record in summary.items():
         result = "PASS" if record["result"] else "FAIL"
+        gate = "blocking" if level_name in blocking_set else "advisory"
         lines.append(
-            f"| {level_name} | {record['passed']}/{record['total']} | "
+            f"| {level_name} | {gate} | {record['passed']}/{record['total']} | "
             f"{record['pass_rate']:.1%} | {record['required']:.1%} | {result} |"
         )
     return lines
@@ -388,6 +434,7 @@ def _render_profile_report(
     else:
         title = f"{profile_name.replace('_', ' ').title()} Walk-Forward Report"
     binding_level = (profile_cfg.get("oos_lock") or {}).get("must_pass_at", "stressed")
+    blocking_levels = _blocking_levels(profile_cfg, summary)
     command = f"python3 scheduler/run_walkforward.py --profile {profile_name}"
     if oos_only:
         command += " --oos-only"
@@ -399,11 +446,12 @@ def _render_profile_report(
         f"- Generated: `{run_id}` UTC",
         f"- Reproduction command: `{command}`",
         f"- Binding capital-scaling level: `{binding_level}`",
+        f"- Blocking report levels: `{', '.join(blocking_levels)}`",
         "",
         "## Summary",
         "",
     ]
-    lines.extend(_render_summary_table(summary))
+    lines.extend(_render_summary_table(summary, blocking_levels=blocking_levels))
     lines.extend([
         "",
         "## Per-Window Detail",
@@ -585,9 +633,9 @@ def _run_profile_walkforward(
     records: list[dict] = []
     for cost_level in cost_levels:
         level_name = cost_level["name"]
-        thresholds = _thresholds_for_level(profile_cfg, level_name)
         cost_model = _cost_model_for_level(base_cost_model, cost_level)
         for window in windows:
+            thresholds = _effective_thresholds_for_window(profile_cfg, level_name, window)
             result = run_backtest(
                 days=window["window_days"],
                 initial_fund=initial_fund,
@@ -657,7 +705,9 @@ def _run_profile_walkforward(
         target_report_path.parent.mkdir(parents=True, exist_ok=True)
         target_report_path.write_text(output, encoding="utf-8")
 
-    exit_code = 0 if all(level["result"] for level in summary.values()) else 1
+    blocking_levels = _blocking_levels(profile_cfg, summary)
+    blocking_results = [summary[level]["result"] for level in blocking_levels if level in summary]
+    exit_code = 0 if blocking_results and all(blocking_results) else 1
     return exit_code, output
 
 

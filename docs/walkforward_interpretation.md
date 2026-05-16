@@ -21,8 +21,10 @@ base.
 
 ## How To Read The Report
 
-- Summary pass rate is the first decision point. The stressed cost level is the
-  binding capital-scaling level.
+- Summary pass rate is the first decision point. The configured
+  `blocking_levels` control the command exit code; for the master profile,
+  stressed cost is the binding capital-scaling level. Baseline and severe remain
+  diagnostic unless they are explicitly added to `blocking_levels`.
 - Per-window detail shows whether failures are regime-specific or broad.
 - Per-strategy attribution shows which sleeve contributed to the window result.
 - Data caveats matter. Missing historical symbols shrink the tested universe and
@@ -59,6 +61,11 @@ python3 scheduler/run_walkforward.py --profile master --oos-only
 ```
 
 Do not tune strategy parameters against the locked OOS result.
+
+The OOS window is shorter than the 180-day master windows, so its minimum trade
+count is duration-normalized when `scale_min_trades_to_window` is enabled. The
+master profile therefore applies the stressed 25-trade/180-day cadence as an
+8-trade floor for the 60-day locked OOS window.
 
 ## Quarterly Refresh
 
