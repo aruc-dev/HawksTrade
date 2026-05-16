@@ -91,7 +91,8 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
 
 Before scaling live capital, run the cost-aware validation gate. It applies the
 configured slippage/fee assumptions, checks 12-month, 6-month, and crypto-sleeve
-windows, and reports watch-only warnings for weak recent crypto windows:
+windows, and reports watch-only warnings for weak recent crypto windows or
+low-sample trade counts:
 
 ```bash
 python3 scheduler/run_validation_gate.py --profile production

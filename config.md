@@ -579,6 +579,7 @@ stops, take-profits, or mode.
 
 ```yaml
 validation:
+  min_reliable_trades: 30
   cost_model:
     slippage_bps: 10.0
     fee_bps: 5.0
@@ -602,6 +603,11 @@ python3 scheduler/run_validation_gate.py --profile production --slippage-sensiti
 The sensitivity reruns use `validation.cost_model.sensitivity_levels_bps` and
 warn when a window falls below `sensitivity_soft_min_return_pct`; they do not
 turn a passing required gate into a failing exit code.
+
+Backtest records below `validation.min_reliable_trades` are annotated with a
+watch-only reliability warning. This does not override each gate's configured
+`min_trades` pass/fail rule; it flags small samples whose performance metrics
+should be treated as directional.
 
 The production profile validates the current costed production gate rather than
 the older core-only subset. It includes the expanded strategy set used in

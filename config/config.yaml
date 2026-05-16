@@ -323,6 +323,8 @@ strategies:
 # Non-trading guardrails used before scaling live capital or strategy sleeves.
 # These settings do not change order sizing or live/paper execution behavior.
 validation:
+  min_reliable_trades: 30        # Watch-only warning floor for interpreting backtest metrics.
+
   cost_model:
     slippage_bps: 10.0           # Backtest gate assumes 10 bps adverse fill per side
     fee_bps: 5.0                 # Backtest gate assumes 5 bps fees/commission per side
