@@ -170,6 +170,7 @@ strategies:
     # Phase 1: Volatility-adjusted risk management
     atr_period: 14               # ATR lookback for dynamic stop computation
     atr_multiplier: 1.2          # Stop = entry - atr_multiplier * ATR(14)
+    max_stop_loss_pct: 0.05      # Hard cap: Momentum ATR stop cannot be wider than 5% below entry
     risk_per_trade_pct: 0.01     # Risk 1% of total equity per trade (position sizing)
     # Phase 2: Sector-neutral ranking
     max_positions_per_sector: 1  # Max concurrent positions in any single GICS sector

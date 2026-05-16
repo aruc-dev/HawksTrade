@@ -449,6 +449,9 @@ class MomentumStrategy(BaseStrategy):
 
         # --- Phase 1: ATR-based risk sizing ---
         risk_pct = float(SCFG.get("risk_per_trade_pct", 0.01))
+        max_stop_loss_pct = SCFG.get("max_stop_loss_pct")
+        if max_stop_loss_pct in ("", None):
+            max_stop_loss_pct = None
         min_trade_value = float(CFG["trading"].get("min_trade_value_usd", 100))
         try:
             portfolio_equity = ac.get_portfolio_value()
@@ -469,6 +472,7 @@ class MomentumStrategy(BaseStrategy):
                 min_trade_value=min_trade_value,
                 logger=log,
                 prefix="[Momentum]",
+                max_stop_loss_pct=max_stop_loss_pct,
             )
             if sized is None:
                 continue

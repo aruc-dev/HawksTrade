@@ -316,6 +316,10 @@ momentum:
   min_momentum_pct: 0.08
   min_alpha_pct: 0.0
   min_breadth_coverage_pct: 0.65
+  atr_period: 14
+  atr_multiplier: 1.2
+  max_stop_loss_pct: 0.05
+  risk_per_trade_pct: 0.01
   volume_confirmation_mode: "pace"
   volume_pace_ratio: 1.5
   volume_pace_timeframe: "1Min"
@@ -325,7 +329,7 @@ momentum:
 
 Recommended: enabled.
 
-Momentum is the primary stock contributor. The moderate-growth profile uses `top_n: 2`, `min_momentum_pct: 0.08`, `volume_confirmation_mode: pace`, `volume_pace_ratio: 1.5`, and `min_breadth_coverage_pct: 0.65` to increase qualified opportunities while keeping yellow regimes capped at one position and sector concentration capped. If intraday bars are unavailable, pace mode falls back to the legacy `volume_spike_ratio: 2.0` full-day ratio.
+Momentum is the primary stock contributor. The moderate-growth profile uses `top_n: 2`, `min_momentum_pct: 0.08`, `volume_confirmation_mode: pace`, `volume_pace_ratio: 1.5`, and `min_breadth_coverage_pct: 0.65` to increase qualified opportunities while keeping yellow regimes capped at one position and sector concentration capped. Momentum emits ATR-risk sizing, but `max_stop_loss_pct: 0.05` caps the strategy stop so high-volatility entries cannot widen beyond 5% below entry. If intraday bars are unavailable, pace mode falls back to the legacy `volume_spike_ratio: 2.0` full-day ratio.
 
 ### RSI Reversion
 

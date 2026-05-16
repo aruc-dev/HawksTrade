@@ -129,6 +129,7 @@ class TestGetConfig(unittest.TestCase):
         self.assertEqual(strategies["momentum"]["volume_spike_ratio"], 2.0)
         self.assertEqual(strategies["momentum"]["min_breadth_coverage_pct"], 0.65)
         self.assertEqual(strategies["momentum"]["atr_multiplier"], 1.2)
+        self.assertEqual(strategies["momentum"]["max_stop_loss_pct"], 0.05)
         self.assertEqual(strategies["rsi_reversion"]["oversold_threshold"], 40)
         self.assertEqual(strategies["rsi_reversion"]["vix_multiplier"], 0.95)
         self.assertEqual(strategies["rsi_reversion"]["volume_spike_ratio"], 0.7)

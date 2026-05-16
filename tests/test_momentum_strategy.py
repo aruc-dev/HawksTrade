@@ -492,6 +492,38 @@ class MomentumStrategyTests(unittest.TestCase):
             self.assertIn("atr_risk_qty", sig)
             self.assertGreater(sig["atr_risk_qty"], 0)
 
+    def test_scan_caps_high_atr_stop_at_configured_max_loss_pct(self):
+        prices = [100.0] * 55 + [110.0, 115.0, 120.0, 120.0, 120.0]
+        bars = []
+        for index, price in enumerate(prices):
+            if index >= len(prices) - 20:
+                bars.append(_bar(price, high=price + 30.0, low=price - 30.0, volume=1000))
+            else:
+                bars.append(_bar(price, volume=1000))
+        bars[-1] = _bar(120.0, high=150.0, low=90.0, volume=3000)
+        bars_resp = {"AAPL": bars}
+        regime_bars = {"SPY": [_bar(100.0) for _ in range(60)]}
+
+        with (
+            patch("strategies.momentum.ac.get_stock_bars", return_value=bars_resp),
+            patch("strategies.momentum.rm.market_regime_ok", return_value=True),
+            patch("strategies.momentum.rm.market_breadth_pct", return_value=0.6),
+            patch("strategies.momentum.ac.get_portfolio_value", return_value=10000.0),
+            patch("strategies.momentum.get_sector", return_value="Tech"),
+        ):
+            with patch.dict("strategies.momentum.SCFG", {
+                "enabled": True,
+                "top_n": 1,
+                "min_momentum_pct": 0.01,
+                "min_breadth_coverage_pct": 0.0,
+                "volume_confirmation_mode": "daily",
+                "max_stop_loss_pct": 0.05,
+            }):
+                signals = MomentumStrategy().scan(["AAPL"], regime_bars=regime_bars)
+
+        self.assertEqual(len(signals), 1)
+        self.assertAlmostEqual(signals[0]["atr_stop_price"], 114.0, places=4)
+
     def test_scan_blocks_signals_when_portfolio_value_unavailable_for_atr_sizing(self):
         prices = list(range(90, 115))
         bars = [_bar(p, high=p * 1.02, low=p * 0.98, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=3000)]
@@ -584,8 +616,14 @@ class MomentumStrategyTests(unittest.TestCase):
             patch("strategies.momentum.get_sector", return_value="Tech"),
             patch("strategies.momentum.log.info") as log_info,
         ):
-            # top_n=5, enabled=True, momentum 0% -> need to set low threshold
-            with patch.dict("strategies.momentum.SCFG", {"risk_per_trade_pct": 0.01, "enabled": True, "min_momentum_pct": -1.0}):
+            # Disable the stop cap here so this test still isolates the
+            # low-notional behavior from raw ATR-risk sizing.
+            with patch.dict("strategies.momentum.SCFG", {
+                "risk_per_trade_pct": 0.01,
+                "enabled": True,
+                "min_momentum_pct": -1.0,
+                "max_stop_loss_pct": None,
+            }):
                 signals = MomentumStrategy().scan(["AAPL"])
 
         self.assertEqual(len(signals), 0)
