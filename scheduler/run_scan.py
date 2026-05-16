@@ -32,6 +32,7 @@ from typing import List
 
 from core import alpaca_client as ac
 from core.config_loader import get_config
+from core.correlation_guard import evaluate_crypto_correlation
 from core import order_executor as oe
 from core import risk_manager as rm
 from core.portfolio_construction import build_order_plan, build_portfolio_target
@@ -430,6 +431,21 @@ def _log_entry_risk_block(decision: RiskDecision) -> None:
         decision.code,
         decision.reason,
     )
+
+
+def _crypto_correlation_allows(symbol: str, planned_asset_classes: dict) -> bool:
+    planned_crypto_symbols = _planned_symbols_for_asset_class(planned_asset_classes, "crypto")
+    decision = evaluate_crypto_correlation(symbol, planned_crypto_symbols, cfg=CFG)
+    if decision.allowed:
+        return True
+    log.warning(
+        "Entry blocked by crypto correlation guard | symbol=%s code=%s reason=%s context=%s",
+        symbol,
+        decision.code,
+        decision.reason,
+        dict(decision.context or {}),
+    )
+    return False
 
 
 def _entry_order_plan_for_signal(
@@ -973,6 +989,8 @@ def run(
                         if stop_strategy:
                             break
                         if plan is None:
+                            continue
+                        if not _crypto_correlation_allows(plan.symbol, planned_asset_classes):
                             continue
                         result = oe.enter_position(
                             plan.symbol,

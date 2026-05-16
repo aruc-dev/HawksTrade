@@ -81,7 +81,28 @@ def threshold_failures(stats: dict, gate: dict) -> list[str]:
     return failures
 
 
-def evaluate_backtest_gate(gate: dict, cost_model: dict, initial_fund: float) -> dict:
+def reliability_warnings(stats: dict, min_reliable_trades: int) -> list[str]:
+    """Return watch-only warnings for statistically thin backtest samples."""
+    if min_reliable_trades <= 0:
+        return []
+    trades = int(stats.get("trades", 0))
+    if trades >= min_reliable_trades:
+        return []
+    return [
+        (
+            f"trades {trades} < reliability floor {min_reliable_trades}; "
+            "treat performance metrics as directional"
+        )
+    ]
+
+
+def evaluate_backtest_gate(
+    gate: dict,
+    cost_model: dict,
+    initial_fund: float,
+    *,
+    min_reliable_trades: int = 0,
+) -> dict:
     """Run one configured backtest gate and return a pass/fail record."""
     result = run_backtest(
         days=int(gate["days"]),
@@ -100,7 +121,58 @@ def evaluate_backtest_gate(gate: dict, cost_model: dict, initial_fund: float) ->
         "required": required,
         "passed": not failures,
         "failures": failures,
+        "warnings": reliability_warnings(stats, min_reliable_trades),
         "stats": stats,
+    }
+
+
+def _sensitivity_levels(cost_model: dict) -> list[float]:
+    levels = []
+    for value in _as_list(cost_model.get("sensitivity_levels_bps")):
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(parsed) and parsed >= 0:
+            levels.append(parsed)
+    return levels
+
+
+def evaluate_slippage_sensitivity_gate(
+    gate: dict,
+    cost_model: dict,
+    initial_fund: float,
+    slippage_bps: float,
+    *,
+    min_reliable_trades: int = 0,
+) -> dict:
+    """Run a watch-only production window at a stressed slippage level."""
+    stressed_cost_model = dict(cost_model)
+    stressed_cost_model["slippage_bps"] = slippage_bps
+    result = run_backtest(
+        days=int(gate["days"]),
+        initial_fund=initial_fund,
+        end_date=gate.get("end_date"),
+        use_screener=gate.get("screener"),
+        enabled_strategies=_as_list(gate.get("strategies")) or None,
+        cost_model=stressed_cost_model,
+        return_result=True,
+    )
+    stats = result["stats"]
+    failures: list[str] = []
+    soft_min_return = _float_value(cost_model.get("sensitivity_soft_min_return_pct"), math.nan)
+    if math.isfinite(soft_min_return) and stats["return_pct"] < soft_min_return:
+        failures.append(
+            f"return {_format_pct(stats['return_pct'])} < sensitivity floor {_format_pct(soft_min_return)}"
+        )
+    return {
+        "name": f"{gate['name']}_slippage_{slippage_bps:g}bps",
+        "required": False,
+        "passed": not failures,
+        "failures": failures,
+        "warnings": reliability_warnings(stats, min_reliable_trades),
+        "stats": stats,
+        "slippage_bps": slippage_bps,
     }
 
 
@@ -128,6 +200,14 @@ def _float_value(value, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _positive_int_value(value, default: int = 0) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
 
 
 def _profit_factor_from_returns(values: Iterable[float]) -> float:
@@ -226,6 +306,8 @@ def _render_backtest_record(record: dict) -> str:
     )
     if record["failures"]:
         line += " | " + "; ".join(record["failures"])
+    if record.get("warnings"):
+        line += " | watch: " + "; ".join(record["warnings"])
     return line
 
 
@@ -244,10 +326,16 @@ def _render_rsi_forward_record(record: dict) -> str:
     return line
 
 
-def run_validation_gate(profile: str = "production", initial_fund: float = 10000.0) -> tuple[int, str]:
+def run_validation_gate(
+    profile: str = "production",
+    initial_fund: float = 10000.0,
+    *,
+    slippage_sensitivity: bool = False,
+) -> tuple[int, str]:
     cfg = get_config()
     validation_cfg = cfg.get("validation", {})
     cost_model = validation_cfg.get("cost_model", {})
+    min_reliable_trades = _positive_int_value(validation_cfg.get("min_reliable_trades"), 0)
 
     records: list[dict] = []
     lines = [
@@ -263,17 +351,45 @@ def run_validation_gate(profile: str = "production", initial_fund: float = 10000
 
     if profile in {"production", "all"}:
         lines.append("Production gates:")
-        for gate in validation_cfg.get("production_gate", {}).get("windows", []):
-            record = evaluate_backtest_gate(gate, cost_model, initial_fund)
+        production_windows = validation_cfg.get("production_gate", {}).get("windows", [])
+        for gate in production_windows:
+            record = evaluate_backtest_gate(
+                gate,
+                cost_model,
+                initial_fund,
+                min_reliable_trades=min_reliable_trades,
+            )
             records.append(record)
             lines.append(_render_backtest_record(record))
         lines.append("")
+        if slippage_sensitivity:
+            lines.append("Production slippage sensitivity (watch-only):")
+            levels = _sensitivity_levels(cost_model)
+            if not levels:
+                lines.append("WARN No sensitivity_levels_bps configured.")
+            for gate in production_windows:
+                for slippage_bps in levels:
+                    record = evaluate_slippage_sensitivity_gate(
+                        gate,
+                        cost_model,
+                        initial_fund,
+                        slippage_bps,
+                        min_reliable_trades=min_reliable_trades,
+                    )
+                    records.append(record)
+                    lines.append(_render_backtest_record(record))
+            lines.append("")
 
     if profile in {"rsi", "all"}:
         rsi_cfg = validation_cfg.get("rsi_reversion_enablement", {})
         lines.append("RSI Reversion enablement gates:")
         for gate in rsi_cfg.get("backtest_windows", []):
-            record = evaluate_backtest_gate(gate, cost_model, initial_fund)
+            record = evaluate_backtest_gate(
+                gate,
+                cost_model,
+                initial_fund,
+                min_reliable_trades=min_reliable_trades,
+            )
             records.append(record)
             lines.append(_render_backtest_record(record))
         trade_log = BASE_DIR / cfg["reporting"]["trade_log_file"]
@@ -286,7 +402,12 @@ def run_validation_gate(profile: str = "production", initial_fund: float = 10000
         range_cfg = validation_cfg.get("range_breakout_enablement", {})
         lines.append("Range Breakout enablement gates:")
         for gate in range_cfg.get("backtest_windows", []):
-            record = evaluate_backtest_gate(gate, cost_model, initial_fund)
+            record = evaluate_backtest_gate(
+                gate,
+                cost_model,
+                initial_fund,
+                min_reliable_trades=min_reliable_trades,
+            )
             records.append(record)
             lines.append(_render_backtest_record(record))
         lines.append("")
@@ -295,18 +416,25 @@ def run_validation_gate(profile: str = "production", initial_fund: float = 10000
         gap_cfg = validation_cfg.get("gap_up_enablement", {})
         lines.append("Gap-Up enablement gates:")
         for gate in gap_cfg.get("backtest_windows", []):
-            record = evaluate_backtest_gate(gate, cost_model, initial_fund)
+            record = evaluate_backtest_gate(
+                gate,
+                cost_model,
+                initial_fund,
+                min_reliable_trades=min_reliable_trades,
+            )
             records.append(record)
             lines.append(_render_backtest_record(record))
         lines.append("")
 
     required_failures = [r for r in records if r["required"] and not r["passed"]]
     warnings = [r for r in records if not r["required"] and not r["passed"]]
+    warning_count = len(warnings) + sum(len(r.get("warnings", [])) for r in records)
     if required_failures:
-        lines.append(f"RESULT: FAIL ({len(required_failures)} required gate(s) failed)")
+        warn_text = f", {warning_count} watch warning(s)" if warning_count else ""
+        lines.append(f"RESULT: FAIL ({len(required_failures)} required gate(s) failed{warn_text})")
         exit_code = 1
     else:
-        warn_text = f", {len(warnings)} watch warning(s)" if warnings else ""
+        warn_text = f", {warning_count} watch warning(s)" if warning_count else ""
         lines.append(f"RESULT: PASS{warn_text}")
         exit_code = 0
 
@@ -322,8 +450,17 @@ def main() -> int:
         help="Gate profile to run",
     )
     parser.add_argument("--fund", type=float, default=10000.0)
+    parser.add_argument(
+        "--slippage-sensitivity",
+        action="store_true",
+        help="Add watch-only production-window reruns at configured slippage bps levels",
+    )
     args = parser.parse_args()
-    exit_code, output = run_validation_gate(profile=args.profile, initial_fund=args.fund)
+    exit_code, output = run_validation_gate(
+        profile=args.profile,
+        initial_fund=args.fund,
+        slippage_sensitivity=args.slippage_sensitivity,
+    )
     print(output)
     return exit_code
 

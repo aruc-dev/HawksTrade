@@ -42,7 +42,7 @@ HawksTrade includes a high-fidelity historical simulator. The current tail-risk-
 
 | Strategy | Market | Key Parameters | Approach |
 |----------|--------|----------------|----------|
-| **Momentum** | US Stocks | Top 2 by 5-day return in green regimes, min 8% momentum, 1.5x elapsed-session volume pace, 65% breadth coverage, 1.2x ATR stop extension, profit-aware exit | Captures high-conviction rallies with a moderate opportunity increase while yellow regimes remain capped at one signal. |
+| **Momentum** | US Stocks | Top 2 by 5-day return in green regimes, min 8% momentum, 1.5x elapsed-session volume pace, 65% breadth coverage, 1.2x ATR stop extension capped at 5%, profit-aware exit | Captures high-conviction rallies with a moderate opportunity increase while yellow regimes remain capped at one signal. |
 | **RSI Reversion** | US Stocks | Disabled by default; RSI < 40, %B < 20%, SMA-200 within +/-15%, 0.7x volume confirmation, 1-bar recovery, 5-day drawdown <= 10%, ATR/price <= 5%, 0.8x ATR stop capped at 6%, and profit protection when enabled | Mean reversion with crash, realised-volatility, tail-loss, and high-water trailing guards. |
 | **Gap-Up** | US Stocks | Enabled; true 5-15% opening gap, 1.3x opening-volume pace, 65% breadth guard, prior close above SMA-200, <=35% SMA-200 extension, top-1 ranked signal, 2-day hold, failed-gap exit | Opening momentum sleeve with completed-bar trend confirmation, minute-bar entry confirmation, and ATR-risk sizing. |
 | **EMA Crossover** | Crypto | 6/18 EMA, latest completed cross only, top-1 ranked signal, RSI 35-75, slope + volatility filters, 3-day drawdown guard, price/EMA confirmation, 2% daily-close max-loss exit, 16-day hold cap | Bullish EMA crossover with BTC regime gate and tighter same-scan concentration control. |
@@ -91,7 +91,8 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
 
 Before scaling live capital, run the cost-aware validation gate. It applies the
 configured slippage/fee assumptions, checks 12-month, 6-month, and crypto-sleeve
-windows, and reports watch-only warnings for weak recent crypto windows:
+windows, and reports watch-only warnings for weak recent crypto windows or
+low-sample trade counts:
 
 ```bash
 python3 scheduler/run_validation_gate.py --profile production
@@ -134,8 +135,11 @@ python3 scheduler/run_validation_gate.py --profile range
 - **Capital Protection**: SMA-based trend filters on all strategies.
 - **Strategy-Local Loss Defense**: Momentum and RSI use less-permissive ATR stop extensions on top of the global stop layer, RSI blocks high-ATR and unresolved waterfall entries and exits daily closes 6% below entry, Gap-Up exits failed continuations, and MA Crossover exits on a daily close at least 2% below entry.
 - **Position Limits**: Max 8% of portfolio per trade, cap of 10 concurrent positions.
+- **Crypto Concentration Guard**: New crypto entries are blocked when recent daily-return correlation is too high versus existing or same-scan planned crypto exposure.
 - **Daily Guardrail**: 5% daily loss limit (hard stop for the day), keyed to the `America/New_York` trading-session date so UTC cloud hosts do not reset the baseline at UTC midnight. The baseline is the first observed account value for that trading date and is persisted in `data/daily_loss_baseline.json`; it is not reconstructed from the prior close.
 - **Broker Resilience**: Alpaca timeouts, rate limits, and 5xx outages use bounded retry; auth failures, not-found responses, and broker rejections are classified for fail-closed logging.
+- **Broker Protective Stops**: Live mode syncs missing broker-side protective sells for open trade-log rows; equities use stop orders and crypto uses stop-limit orders.
+- **Strategy Live Readiness**: Live entries are blocked for any strategy with a configured paper-history gate until `data/trades.csv` shows the required closed paper exits and validation age.
 - **Entry Protections**: Protection locks are enabled for new entries after recent symbol cooldowns, stop-loss clusters, weak strategy performance, or realized drawdown; exits continue while entry locks are active.
 - **Price-Fetch Visibility**: Risk checks track consecutive latest-price failures per open position and surface repeated failures as `[NOK]` in the Linux health dashboard.
 - **Trade-Log Reconciliation**: Scheduled scans, risk checks, reports, and health checks reconcile `data/trades.csv` with broker positions when Alpaca is reachable.
@@ -149,6 +153,8 @@ python3 scheduler/run_validation_gate.py --profile range
 All settings are in `config/config.yaml`. See [config.md](config.md) for the available configuration options and the recommended backtest-backed profile. Toggle strategies, adjust risk, or switch between `paper` and `live` modes only when you intend to revalidate those changes.
 
 For machine-local configuration (e.g. switching to `live` on a specific host without touching the committed file), create `config/config.local.yaml`. When present it is deep-merged over `config/config.yaml`, so it only needs the keys you want to override. This file is gitignored and never committed.
+
+Live mode also requires the runtime acknowledgement `HAWKSTRADE_LIVE_ACK=I_UNDERSTAND_REAL_MONEY`. Without it, Alpaca runtime initialization fails closed before any live broker calls can run.
 
 ---
 

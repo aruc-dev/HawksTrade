@@ -42,6 +42,11 @@ trading:
   min_trade_value_usd: 100       # Minimum $ value per trade
   order_type: "limit"            # "market" or "limit"
   limit_slippage_pct: 0.001      # Limit price set 0.1% from current for fast fills
+  crypto_correlation_guard:
+    enabled: true                # Block new crypto entries that duplicate existing/planned exposure.
+    max_correlation: 0.85        # Maximum allowed positive daily-return correlation.
+    lookback_days: 30            # Daily bars used for the correlation estimate.
+    fail_closed: true            # If correlation data cannot be checked, skip the entry.
 
 # --- ORDER GOVERNOR ---
 # Broker-state safety gate evaluated immediately before order submission.
@@ -53,6 +58,15 @@ order_governor:
   max_daily_orders: 500
   max_notional_usd: null
   max_notional_pct: null
+
+# --- BROKER PROTECTIVE STOPS ---
+# Keeps broker-side protective sell orders aligned with open trade-log rows.
+# In paper mode the sync is log-only by default to avoid accidental test/dev
+# order placement. Set submit_in_paper true only for explicit paper-order tests.
+broker_stops:
+  enabled: true
+  submit_in_paper: false
+  crypto_stop_limit_offset_pct: 0.005
 
 # --- PROTECTIONS ---
 # Entry lock manager. Blocks new entries after recent symbol, strategy, or
@@ -170,6 +184,7 @@ strategies:
     # Phase 1: Volatility-adjusted risk management
     atr_period: 14               # ATR lookback for dynamic stop computation
     atr_multiplier: 1.2          # Stop = entry - atr_multiplier * ATR(14)
+    max_stop_loss_pct: 0.05      # Hard cap: Momentum ATR stop cannot be wider than 5% below entry
     risk_per_trade_pct: 0.01     # Risk 1% of total equity per trade (position sizing)
     # Phase 2: Sector-neutral ranking
     max_positions_per_sector: 1  # Max concurrent positions in any single GICS sector
@@ -273,6 +288,10 @@ strategies:
     enabled: true
     asset_class: crypto
     description: "Enter long on confirmed daily close breakout above the configured Donchian high with volume, trend, volatility, RSI, breakout-extension, and close-location guards. Exit failed breakouts early before the hold cap."
+    live_readiness:
+      enabled: true
+      min_closed_paper_trades: 25
+      min_paper_days: 90
     breakout_lookback_days: 20   # Close must break above the prior N-day high, excluding the current bar
     breakout_pct: 0.006          # Close must break 0.6% beyond the Donchian high
     min_breakout_extension_pct: 0.008 # Require at least 0.8% follow-through above breakout level
@@ -304,10 +323,14 @@ strategies:
 # Non-trading guardrails used before scaling live capital or strategy sleeves.
 # These settings do not change order sizing or live/paper execution behavior.
 validation:
+  min_reliable_trades: 30        # Watch-only warning floor for interpreting backtest metrics.
+
   cost_model:
     slippage_bps: 10.0           # Backtest gate assumes 10 bps adverse fill per side
     fee_bps: 5.0                 # Backtest gate assumes 5 bps fees/commission per side
     min_fee_usd: 0.0
+    sensitivity_levels_bps: [10.0, 20.0, 30.0] # Optional validation reruns for slippage stress checks
+    sensitivity_soft_min_return_pct: 0.08      # Watch-only return floor for slippage stress checks
 
   production_gate:
     windows:

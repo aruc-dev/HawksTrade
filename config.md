@@ -7,6 +7,11 @@
 
 This guide explains the available user-facing configuration sections and the currently recommended defaults. Do not switch `mode` to `live` or change risk parameters unless you explicitly intend to accept the added trading risk.
 
+`mode: live` is protected by a runtime interlock. Any process that initializes
+Alpaca in live mode must set `HAWKSTRADE_LIVE_ACK=I_UNDERSTAND_REAL_MONEY`;
+otherwise the runtime fails closed before broker calls are made. Keep this
+environment variable unset for paper trading and read-only development.
+
 ---
 
 ## Recommended Configuration
@@ -141,6 +146,56 @@ bursts, daily order-count breaches, and optional notional limits.
 
 Governor blocks are fail-closed. Operational lookup/history failures mark the scan
 unhealthy so they are visible in health checks instead of looking like a clean no-trade run.
+
+---
+
+## Crypto Correlation Guard
+
+```yaml
+trading:
+  crypto_correlation_guard:
+    enabled: true
+    max_correlation: 0.85
+    lookback_days: 30
+    fail_closed: true
+```
+
+The crypto correlation guard blocks new crypto entries when the candidate's
+recent daily returns are too positively correlated with existing or already
+planned crypto exposure in the same scan. It runs before order submission and
+uses the current scan's planned-position state, so two highly correlated crypto
+signals cannot both slip through one run.
+
+| Setting | Meaning | Current Default |
+|---|---|---:|
+| `enabled` | Enables the crypto concentration check. | `true` |
+| `max_correlation` | Blocks candidates at or above this positive return correlation. | 0.85 |
+| `lookback_days` | Daily return lookback used for the correlation estimate. | 30 |
+| `fail_closed` | Skip crypto entries when correlation data cannot be checked. | `true` |
+
+---
+
+## Broker Protective Stops
+
+```yaml
+broker_stops:
+  enabled: true
+  submit_in_paper: false
+  crypto_stop_limit_offset_pct: 0.005
+```
+
+Broker stop sync is a default-on protective-order manager for open trade-log
+rows. In live mode it places missing protective sell orders at the broker:
+stock positions use stop orders and crypto positions use stop-limit orders.
+Paper mode is log-only by default so local tests and dry runs cannot place
+unexpected paper orders; set `submit_in_paper: true` only for an explicit
+paper-order lifecycle validation.
+
+| Setting | Meaning | Current Default |
+|---|---|---:|
+| `enabled` | Enables protective stop synchronization. | `true` |
+| `submit_in_paper` | Allows paper-mode stop order submission instead of log-only sync. | `false` |
+| `crypto_stop_limit_offset_pct` | Sell stop-limit offset below crypto stop price. | 0.5% |
 
 ---
 
@@ -311,6 +366,10 @@ momentum:
   min_momentum_pct: 0.08
   min_alpha_pct: 0.0
   min_breadth_coverage_pct: 0.65
+  atr_period: 14
+  atr_multiplier: 1.2
+  max_stop_loss_pct: 0.05
+  risk_per_trade_pct: 0.01
   volume_confirmation_mode: "pace"
   volume_pace_ratio: 1.5
   volume_pace_timeframe: "1Min"
@@ -320,7 +379,7 @@ momentum:
 
 Recommended: enabled.
 
-Momentum is the primary stock contributor. The moderate-growth profile uses `top_n: 2`, `min_momentum_pct: 0.08`, `volume_confirmation_mode: pace`, `volume_pace_ratio: 1.5`, and `min_breadth_coverage_pct: 0.65` to increase qualified opportunities while keeping yellow regimes capped at one position and sector concentration capped. If intraday bars are unavailable, pace mode falls back to the legacy `volume_spike_ratio: 2.0` full-day ratio.
+Momentum is the primary stock contributor. The moderate-growth profile uses `top_n: 2`, `min_momentum_pct: 0.08`, `volume_confirmation_mode: pace`, `volume_pace_ratio: 1.5`, and `min_breadth_coverage_pct: 0.65` to increase qualified opportunities while keeping yellow regimes capped at one position and sector concentration capped. Momentum emits ATR-risk sizing, but `max_stop_loss_pct: 0.05` caps the strategy stop so high-volatility entries cannot widen beyond 5% below entry. If intraday bars are unavailable, pace mode falls back to the legacy `volume_spike_ratio: 2.0` full-day ratio.
 
 ### RSI Reversion
 
@@ -413,6 +472,10 @@ This strategy contributed positively in the latest recommended 12-month backtest
 range_breakout:
   enabled: true
   asset_class: crypto
+  live_readiness:
+    enabled: true
+    min_closed_paper_trades: 25
+    min_paper_days: 90
   breakout_lookback_days: 20
   breakout_pct: 0.006
   min_breakout_extension_pct: 0.008
@@ -443,6 +506,9 @@ The implementation uses confirmed daily 20-day Donchian high breakouts, ranked
 signal selection, ATR-risk sizing, breakout-extension and close-location quality
 guards, and explicit failed-breakout exits before the 14-day hold cap. Its
 12-month all-enabled contribution was positive, but sample size remains low.
+Live entries are therefore gated until the trade log shows 25 closed paper exits
+for `range_breakout` spanning at least 90 paper-validation days. Paper and
+backtest runs are not blocked by this runtime gate.
 
 ---
 
@@ -513,10 +579,13 @@ stops, take-profits, or mode.
 
 ```yaml
 validation:
+  min_reliable_trades: 30
   cost_model:
     slippage_bps: 10.0
     fee_bps: 5.0
     min_fee_usd: 0.0
+    sensitivity_levels_bps: [10.0, 20.0, 30.0]
+    sensitivity_soft_min_return_pct: 0.08
 ```
 
 Run the default production gate with:
@@ -524,6 +593,21 @@ Run the default production gate with:
 ```bash
 python3 scheduler/run_validation_gate.py --profile production
 ```
+
+Add watch-only slippage stress reruns for the production windows with:
+
+```bash
+python3 scheduler/run_validation_gate.py --profile production --slippage-sensitivity
+```
+
+The sensitivity reruns use `validation.cost_model.sensitivity_levels_bps` and
+warn when a window falls below `sensitivity_soft_min_return_pct`; they do not
+turn a passing required gate into a failing exit code.
+
+Backtest records below `validation.min_reliable_trades` are annotated with a
+watch-only reliability warning. This does not override each gate's configured
+`min_trades` pass/fail rule; it flags small samples whose performance metrics
+should be treated as directional.
 
 The production profile validates the current costed production gate rather than
 the older core-only subset. It includes the expanded strategy set used in
