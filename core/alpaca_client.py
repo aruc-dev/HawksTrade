@@ -20,7 +20,11 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import (
-    MarketOrderRequest, LimitOrderRequest, GetOrdersRequest
+    MarketOrderRequest,
+    LimitOrderRequest,
+    StopLimitOrderRequest,
+    StopOrderRequest,
+    GetOrdersRequest,
 )
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderStatus, QueryOrderStatus
 from alpaca.data.historical import StockHistoricalDataClient, CryptoHistoricalDataClient
@@ -369,6 +373,112 @@ def place_limit_order(symbol: str, qty: float, side: str, limit_price: float,
     log.info(
         f"Limit order submitted: {side} {qty} {symbol} @ {normalized_limit_price} "
         f"| strategy={strategy} | id={order_id} | client_order_id={client_order_id or ''}"
+    )
+    return order
+
+
+def place_stop_order(
+    symbol: str,
+    qty: float,
+    side: str,
+    stop_price: float,
+    time_in_force: str = "gtc",
+    strategy: str = "unknown",
+    asset_class: Optional[str] = None,
+    client_order_id: Optional[str] = None,
+):
+    """Place a stop order. Plain stop orders are intended for equities."""
+    side = side.lower()
+    if side not in {"buy", "sell"}:
+        raise ValueError("side must be 'buy' or 'sell'")
+    client = get_trading_client()
+    normalized_stop_price = normalize_limit_price(symbol, stop_price, asset_class=asset_class)
+    req = StopOrderRequest(
+        symbol=symbol,
+        qty=qty,
+        side=OrderSide.BUY if side == "buy" else OrderSide.SELL,
+        stop_price=normalized_stop_price,
+        time_in_force=normalize_time_in_force(
+            symbol,
+            qty,
+            time_in_force,
+            asset_class=asset_class,
+        ),
+        client_order_id=client_order_id,
+    )
+    try:
+        object.__setattr__(req, "strategy", strategy)
+    except Exception:
+        pass
+
+    order = _submit_order(
+        client,
+        req,
+        f"trading.submit_stop_order[{side}:{symbol}]",
+        client_order_id=client_order_id,
+    )
+    if hasattr(order, "__setitem__"): order["strategy"] = strategy
+    elif hasattr(order, "strategy"): order.strategy = strategy
+
+    order_id = order.id if hasattr(order, "id") else order.get("order_id")
+    log.info(
+        f"Stop order submitted: {side} {qty} {symbol} @ stop={normalized_stop_price} "
+        f"| strategy={strategy} | id={order_id} | client_order_id={client_order_id or ''}"
+    )
+    return order
+
+
+def place_stop_limit_order(
+    symbol: str,
+    qty: float,
+    side: str,
+    stop_price: float,
+    limit_price: float,
+    time_in_force: str = "gtc",
+    strategy: str = "unknown",
+    asset_class: Optional[str] = None,
+    client_order_id: Optional[str] = None,
+):
+    """Place a stop-limit order. Used for crypto protective sells."""
+    side = side.lower()
+    if side not in {"buy", "sell"}:
+        raise ValueError("side must be 'buy' or 'sell'")
+    client = get_trading_client()
+    normalized_stop_price = normalize_limit_price(symbol, stop_price, asset_class=asset_class)
+    normalized_limit_price = normalize_limit_price(symbol, limit_price, asset_class=asset_class)
+    req = StopLimitOrderRequest(
+        symbol=symbol,
+        qty=qty,
+        side=OrderSide.BUY if side == "buy" else OrderSide.SELL,
+        stop_price=normalized_stop_price,
+        limit_price=normalized_limit_price,
+        time_in_force=normalize_time_in_force(
+            symbol,
+            qty,
+            time_in_force,
+            asset_class=asset_class,
+        ),
+        client_order_id=client_order_id,
+    )
+    try:
+        object.__setattr__(req, "strategy", strategy)
+    except Exception:
+        pass
+
+    order = _submit_order(
+        client,
+        req,
+        f"trading.submit_stop_limit_order[{side}:{symbol}]",
+        client_order_id=client_order_id,
+    )
+    if hasattr(order, "__setitem__"): order["strategy"] = strategy
+    elif hasattr(order, "strategy"): order.strategy = strategy
+
+    order_id = order.id if hasattr(order, "id") else order.get("order_id")
+    log.info(
+        f"Stop-limit order submitted: {side} {qty} {symbol} @ stop={normalized_stop_price} "
+        f"limit={normalized_limit_price} | strategy={strategy} | id={order_id} "
+        f"| client_order_id={client_order_id or ''}"
     )
     return order
 

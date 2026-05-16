@@ -115,6 +115,8 @@ class TestGetConfig(unittest.TestCase):
 
         strategies = cfg["strategies"]
         self.assertTrue(cfg["protections"]["enabled"])
+        self.assertTrue(cfg["broker_stops"]["enabled"])
+        self.assertFalse(cfg["broker_stops"]["submit_in_paper"])
         self.assertTrue(strategies["momentum"]["enabled"])
         self.assertFalse(strategies["rsi_reversion"]["enabled"])
         self.assertTrue(strategies["ma_crossover"]["enabled"])

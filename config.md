@@ -149,6 +149,30 @@ unhealthy so they are visible in health checks instead of looking like a clean n
 
 ---
 
+## Broker Protective Stops
+
+```yaml
+broker_stops:
+  enabled: true
+  submit_in_paper: false
+  crypto_stop_limit_offset_pct: 0.005
+```
+
+Broker stop sync is a default-on protective-order manager for open trade-log
+rows. In live mode it places missing protective sell orders at the broker:
+stock positions use stop orders and crypto positions use stop-limit orders.
+Paper mode is log-only by default so local tests and dry runs cannot place
+unexpected paper orders; set `submit_in_paper: true` only for an explicit
+paper-order lifecycle validation.
+
+| Setting | Meaning | Current Default |
+|---|---|---:|
+| `enabled` | Enables protective stop synchronization. | `true` |
+| `submit_in_paper` | Allows paper-mode stop order submission instead of log-only sync. | `false` |
+| `crypto_stop_limit_offset_pct` | Sell stop-limit offset below crypto stop price. | 0.5% |
+
+---
+
 ## Protections
 
 ```yaml

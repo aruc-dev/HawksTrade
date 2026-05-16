@@ -78,6 +78,41 @@ class AlpacaClientTests(unittest.TestCase):
             )
         return fake_client.req
 
+    def _capture_stop_order(self, symbol, stop_price, asset_class=None, qty=1):
+        class FakeClient:
+            def submit_order(self, req):
+                self.req = req
+                return SimpleNamespace(id="order-1")
+
+        fake_client = FakeClient()
+        with patch.object(alpaca_client, "get_trading_client", return_value=fake_client):
+            alpaca_client.place_stop_order(
+                symbol,
+                qty,
+                "sell",
+                stop_price,
+                asset_class=asset_class,
+            )
+        return fake_client.req
+
+    def _capture_stop_limit_order(self, symbol, stop_price, limit_price, asset_class=None, qty=1):
+        class FakeClient:
+            def submit_order(self, req):
+                self.req = req
+                return SimpleNamespace(id="order-1")
+
+        fake_client = FakeClient()
+        with patch.object(alpaca_client, "get_trading_client", return_value=fake_client):
+            alpaca_client.place_stop_limit_order(
+                symbol,
+                qty,
+                "sell",
+                stop_price,
+                limit_price,
+                asset_class=asset_class,
+            )
+        return fake_client.req
+
     def test_market_order_rejects_invalid_side_before_client_init(self):
         with patch.object(alpaca_client, "get_trading_client") as get_client:
             with self.assertRaises(ValueError):
@@ -96,6 +131,22 @@ class AlpacaClientTests(unittest.TestCase):
         req = self._capture_market_order("AAPL", asset_class="stock")
 
         self.assertEqual(req.time_in_force, TimeInForce.DAY)
+
+    def test_stock_stop_order_uses_normalized_stop_price(self):
+        req = self._capture_stop_order("AAPL", 100.126, asset_class="stock")
+
+        self.assertEqual(req.stop_price, 100.13)
+
+    def test_crypto_stop_limit_order_preserves_crypto_precision(self):
+        req = self._capture_stop_limit_order(
+            "DOGE/USD",
+            0.0946102345,
+            0.0941234567,
+            asset_class="crypto",
+        )
+
+        self.assertEqual(req.stop_price, 0.094610235)
+        self.assertEqual(req.limit_price, 0.094123457)
 
     def test_crypto_market_order_defaults_to_supported_time_in_force(self):
         req = self._capture_market_order("DOGE/USD", asset_class="crypto")

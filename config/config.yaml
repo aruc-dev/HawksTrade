@@ -54,6 +54,15 @@ order_governor:
   max_notional_usd: null
   max_notional_pct: null
 
+# --- BROKER PROTECTIVE STOPS ---
+# Keeps broker-side protective sell orders aligned with open trade-log rows.
+# In paper mode the sync is log-only by default to avoid accidental test/dev
+# order placement. Set submit_in_paper true only for explicit paper-order tests.
+broker_stops:
+  enabled: true
+  submit_in_paper: false
+  crypto_stop_limit_offset_pct: 0.005
+
 # --- PROTECTIONS ---
 # Entry lock manager. Blocks new entries after recent symbol, strategy, or
 # portfolio-level weakness while allowing exits to continue.

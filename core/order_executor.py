@@ -521,6 +521,21 @@ def enter_position(
         log_trade(trade)
         if action_status == "open":
             log.info(f"ENTERED {symbol} | strategy={strategy} | qty={logged_qty} | price={entry_price}")
+            try:
+                from core.broker_stops import sync_broker_stops
+
+                sync_broker_stops(
+                    positions=[
+                        {
+                            "symbol": symbol,
+                            "qty": logged_qty,
+                            "asset_class": asset_class,
+                        }
+                    ],
+                    open_trades=[trade],
+                )
+            except Exception as exc:
+                log.warning("Broker protective stop sync failed after entry for %s: %s", symbol, exc)
         elif action_status == "partially_filled":
             log.warning(
                 f"Entry order partially filled for {symbol}; logged filled exposure only | "

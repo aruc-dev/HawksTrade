@@ -27,6 +27,7 @@ from core import alpaca_client as ac
 from core.config_loader import get_config
 from core import risk_manager as rm
 from core import order_executor as oe
+from core.broker_stops import sync_broker_stops
 from core.exit_policy import finite_positive_float, should_exit_for_hold
 from core.run_markers import RunScope, run_scope
 from core.logging_config import runtime_log_handlers
@@ -501,6 +502,14 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
             _prune_price_failures_for_positions([])
         _reconcile_trade_log_after_run(marker, dry_run, positions=[])
         return
+
+    stop_summary = sync_broker_stops(
+        dry_run=dry_run,
+        positions=positions,
+        open_trades=open_trades,
+    )
+    if stop_summary.get("failed"):
+        log.warning("Broker protective stop sync had failures: %s", stop_summary)
 
     _prune_price_failures_for_positions(positions)
 
