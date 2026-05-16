@@ -12,6 +12,7 @@
 - Crypto correlation guard to block highly correlated same-scan or existing crypto exposure.
 - Statistical reliability warnings for low-trade-count validation records.
 - Project version metadata in `core/version.py` and generated reports.
+- Broker interface contracts in `core/broker_interface.py`.
 
 ## [v1.0.0] - 2026-05-16
 
