@@ -150,6 +150,8 @@ All settings are in `config/config.yaml`. See [config.md](config.md) for the ava
 
 For machine-local configuration (e.g. switching to `live` on a specific host without touching the committed file), create `config/config.local.yaml`. When present it is deep-merged over `config/config.yaml`, so it only needs the keys you want to override. This file is gitignored and never committed.
 
+Live mode also requires the runtime acknowledgement `HAWKSTRADE_LIVE_ACK=I_UNDERSTAND_REAL_MONEY`. Without it, Alpaca runtime initialization fails closed before any live broker calls can run.
+
 ---
 
 ## Scheduling

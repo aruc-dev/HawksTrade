@@ -38,6 +38,7 @@ from core.alpaca_errors import (
     is_not_found_error,
 )
 from core.config_loader import get_config
+from core.live_mode_guard import require_live_mode_ack
 
 # ── Setup ───────────────────────────────────────────────────────────────────
 
@@ -48,6 +49,7 @@ CFG = get_config()
 MODE = CFG["mode"].strip().lower()  # "paper" or "live"
 if MODE not in {"paper", "live"}:
     raise ValueError("config mode must be 'paper' or 'live'")
+require_live_mode_ack(CFG)
 
 
 def _env_truthy(name: str) -> bool:

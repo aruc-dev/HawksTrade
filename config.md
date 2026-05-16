@@ -7,6 +7,11 @@
 
 This guide explains the available user-facing configuration sections and the currently recommended defaults. Do not switch `mode` to `live` or change risk parameters unless you explicitly intend to accept the added trading risk.
 
+`mode: live` is protected by a runtime interlock. Any process that initializes
+Alpaca in live mode must set `HAWKSTRADE_LIVE_ACK=I_UNDERSTAND_REAL_MONEY`;
+otherwise the runtime fails closed before broker calls are made. Keep this
+environment variable unset for paper trading and read-only development.
+
 ---
 
 ## Recommended Configuration
