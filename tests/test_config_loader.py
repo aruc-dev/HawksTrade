@@ -119,6 +119,8 @@ class TestGetConfig(unittest.TestCase):
         self.assertFalse(cfg["broker_stops"]["submit_in_paper"])
         self.assertEqual(cfg["validation"]["cost_model"]["sensitivity_levels_bps"], [10.0, 20.0, 30.0])
         self.assertEqual(cfg["validation"]["cost_model"]["sensitivity_soft_min_return_pct"], 0.08)
+        self.assertTrue(cfg["trading"]["crypto_correlation_guard"]["enabled"])
+        self.assertEqual(cfg["trading"]["crypto_correlation_guard"]["max_correlation"], 0.85)
         self.assertTrue(strategies["momentum"]["enabled"])
         self.assertFalse(strategies["rsi_reversion"]["enabled"])
         self.assertTrue(strategies["ma_crossover"]["enabled"])

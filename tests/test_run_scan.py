@@ -676,6 +676,63 @@ class RunScanTests(unittest.TestCase):
 
         enter_position.assert_called_once()
 
+    def test_crypto_correlation_guard_counts_same_scan_planned_entries(self):
+        class FakeCryptoStrategy:
+            name = "ma_crossover"
+            asset_class = "crypto"
+
+            def scan(self, universe, **kwargs):
+                return [
+                    {"symbol": "SOL/USD", "action": "buy"},
+                    {"symbol": "AVAX/USD", "action": "buy"},
+                ]
+
+        class AllowProtectionManager:
+            enabled = False
+
+            def evaluate_entry(self, symbol, strategy):
+                return SimpleNamespace(allowed=True)
+
+        decisions = [
+            SimpleNamespace(allowed=True),
+            SimpleNamespace(
+                allowed=False,
+                code="crypto_correlation_blocked",
+                reason="too correlated",
+                context={},
+            ),
+        ]
+
+        with (
+            patch.object(run_scan.ProtectionManager, "from_config", return_value=AllowProtectionManager()),
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(run_scan.ac, "get_crypto_bars", return_value={"BTC/USD": [object()] * 21}),
+            patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "CRYPTO_STRATEGIES", [FakeCryptoStrategy()]),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+            patch.object(run_scan, "evaluate_crypto_correlation", side_effect=decisions) as correlation,
+            patch.object(
+                run_scan.oe,
+                "enter_position",
+                return_value={"symbol": "SOL/USD", "status": "dry_run"},
+            ) as enter_position,
+        ):
+            run_scan.run(run_stocks=False, run_crypto=True, dry_run=True)
+
+        enter_position.assert_called_once_with(
+            "SOL/USD",
+            strategy="ma_crossover",
+            asset_class="crypto",
+            dry_run=True,
+            suggested_qty=None,
+            atr_stop_price=None,
+        )
+        self.assertEqual(correlation.call_count, 2)
+        self.assertEqual(correlation.call_args_list[0].args[1], [])
+        self.assertEqual(correlation.call_args_list[1].args[1], ["SOLUSD"])
+
     def test_pending_entry_lookup_failure_marks_scan_unhealthy_and_blocks_entries(self):
         marker = FakeMarker()
 

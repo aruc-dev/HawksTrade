@@ -149,6 +149,32 @@ unhealthy so they are visible in health checks instead of looking like a clean n
 
 ---
 
+## Crypto Correlation Guard
+
+```yaml
+trading:
+  crypto_correlation_guard:
+    enabled: true
+    max_correlation: 0.85
+    lookback_days: 30
+    fail_closed: true
+```
+
+The crypto correlation guard blocks new crypto entries when the candidate's
+recent daily returns are too positively correlated with existing or already
+planned crypto exposure in the same scan. It runs before order submission and
+uses the current scan's planned-position state, so two highly correlated crypto
+signals cannot both slip through one run.
+
+| Setting | Meaning | Current Default |
+|---|---|---:|
+| `enabled` | Enables the crypto concentration check. | `true` |
+| `max_correlation` | Blocks candidates at or above this positive return correlation. | 0.85 |
+| `lookback_days` | Daily return lookback used for the correlation estimate. | 30 |
+| `fail_closed` | Skip crypto entries when correlation data cannot be checked. | `true` |
+
+---
+
 ## Broker Protective Stops
 
 ```yaml

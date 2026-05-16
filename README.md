@@ -134,6 +134,7 @@ python3 scheduler/run_validation_gate.py --profile range
 - **Capital Protection**: SMA-based trend filters on all strategies.
 - **Strategy-Local Loss Defense**: Momentum and RSI use less-permissive ATR stop extensions on top of the global stop layer, RSI blocks high-ATR and unresolved waterfall entries and exits daily closes 6% below entry, Gap-Up exits failed continuations, and MA Crossover exits on a daily close at least 2% below entry.
 - **Position Limits**: Max 8% of portfolio per trade, cap of 10 concurrent positions.
+- **Crypto Concentration Guard**: New crypto entries are blocked when recent daily-return correlation is too high versus existing or same-scan planned crypto exposure.
 - **Daily Guardrail**: 5% daily loss limit (hard stop for the day), keyed to the `America/New_York` trading-session date so UTC cloud hosts do not reset the baseline at UTC midnight. The baseline is the first observed account value for that trading date and is persisted in `data/daily_loss_baseline.json`; it is not reconstructed from the prior close.
 - **Broker Resilience**: Alpaca timeouts, rate limits, and 5xx outages use bounded retry; auth failures, not-found responses, and broker rejections are classified for fail-closed logging.
 - **Broker Protective Stops**: Live mode syncs missing broker-side protective sells for open trade-log rows; equities use stop orders and crypto uses stop-limit orders.

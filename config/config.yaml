@@ -42,6 +42,11 @@ trading:
   min_trade_value_usd: 100       # Minimum $ value per trade
   order_type: "limit"            # "market" or "limit"
   limit_slippage_pct: 0.001      # Limit price set 0.1% from current for fast fills
+  crypto_correlation_guard:
+    enabled: true                # Block new crypto entries that duplicate existing/planned exposure.
+    max_correlation: 0.85        # Maximum allowed positive daily-return correlation.
+    lookback_days: 30            # Daily bars used for the correlation estimate.
+    fail_closed: true            # If correlation data cannot be checked, skip the entry.
 
 # --- ORDER GOVERNOR ---
 # Broker-state safety gate evaluated immediately before order submission.
