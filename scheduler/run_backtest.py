@@ -951,6 +951,7 @@ def run_backtest(
     config_overrides=None,
     cost_model=None,
     return_result=False,
+    write_quarterly_csv=True,
 ):
     cfg = get_config()
 
@@ -1232,12 +1233,12 @@ def run_backtest(
             for q in quarterly_data:
                 report += f"| {q['quarter']} | ${q['start_value']:,.2f} | ${q['end_value']:,.2f} | {q['return_pct']:+.2%} | {q['trades']} | {q['win_rate']:.1%} |\n"
             report += "\n"
-            # Save quarterly CSV
-            ts = datetime.now().strftime("%Y%m%d_%H%M")
-            q_csv_path = BASE_DIR / "data" / f"quarterly_{ts}.csv"
-            q_csv_path.parent.mkdir(parents=True, exist_ok=True)
-            pd.DataFrame(quarterly_data).to_csv(q_csv_path, index=False)
-            log.info(f"Quarterly report saved to {q_csv_path}")
+            if write_quarterly_csv:
+                ts = datetime.now().strftime("%Y%m%d_%H%M")
+                q_csv_path = BASE_DIR / "data" / f"quarterly_{ts}.csv"
+                q_csv_path.parent.mkdir(parents=True, exist_ok=True)
+                pd.DataFrame(quarterly_data).to_csv(q_csv_path, index=False)
+                log.info(f"Quarterly report saved to {q_csv_path}")
 
         if output_file:
             with open(output_file, "a") as f: f.write(report)

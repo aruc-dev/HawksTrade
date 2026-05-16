@@ -80,6 +80,17 @@ python3 scheduler/run_validation_gate.py --profile gap
 python3 scheduler/run_validation_gate.py --profile range
 ```
 
+Use rolling-window validation to check whether a profile is stable across
+multiple recent periods instead of only one anchored backtest:
+
+```bash
+python3 scheduler/run_walkforward.py --window-days 180 --step-days 90 --windows 4 \
+  --fund 10000 --screener --strategies momentum,gap_up,ma_crossover,range_breakout
+```
+
+The runner calls the backtest API directly and suppresses per-window quarterly
+CSV artifacts.
+
 ## Paper Order Lifecycle
 
 Only run this when explicitly requested. It creates and closes a simulated Alpaca paper
