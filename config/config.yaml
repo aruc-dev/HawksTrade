@@ -332,6 +332,89 @@ validation:
     sensitivity_levels_bps: [10.0, 20.0, 30.0] # Optional validation reruns for slippage stress checks
     sensitivity_soft_min_return_pct: 0.08      # Watch-only return floor for slippage stress checks
 
+  walkforward:
+    enabled: true
+    profiles:
+      master:
+        window_days: 180
+        screener: true
+        strategies: [momentum, gap_up, ma_crossover, range_breakout]
+        windows:
+          - end_date: "12/31/2019"
+            label: calm_bull_2019
+            regime: "Calm bull, low volatility"
+          - end_date: "09/30/2020"
+            label: covid_crash_2020
+            regime: "COVID crash and V-recovery"
+          - end_date: "12/31/2021"
+            label: stimulus_bull_2021
+            regime: "Stimulus-driven late-cycle bull"
+          - end_date: "12/31/2022"
+            label: tech_bear_2022
+            regime: "Rate-hike technology bear market"
+          - end_date: "12/31/2023"
+            label: ai_reversal_2023
+            regime: "SVB shock and AI-led reversal"
+          - end_date: "09/30/2024"
+            label: election_chop_2024
+            regime: "Pre-election range-bound chop"
+          - end_date: auto
+            auto_offset_days: 60
+            label: current_regime_auto
+            regime: "Current regime excluding locked OOS"
+        cost_levels:
+          - { name: baseline, slippage_bps: 7.5, fee_bps: 5.0, min_fee_usd: 0.0 }
+          - { name: stressed, slippage_bps: 15.0, fee_bps: 5.0, min_fee_usd: 0.0 }
+          - { name: severe, slippage_bps: 25.0, fee_bps: 5.0, min_fee_usd: 0.0 }
+        thresholds:
+          baseline: { min_return_pct: 0.04, max_drawdown_pct: 0.08, min_profit_factor: 1.20, min_trades: 25, min_daily_sharpe: 0.50 }
+          stressed: { min_return_pct: 0.00, max_drawdown_pct: 0.10, min_profit_factor: 1.00, min_trades: 25, min_daily_sharpe: 0.20 }
+          severe: { min_return_pct: -0.02, max_drawdown_pct: 0.12, min_profit_factor: 0.90, min_trades: 25 }
+        pass_rate:
+          baseline: 0.80
+          stressed: 0.66
+          severe: 0.50
+        oos_lock:
+          label: locked_oos_recent_60d
+          regime: "Locked most-recent OOS validation window"
+          window_days: 60
+          end_date: auto
+          auto_offset_days: 2
+          must_pass_at: stressed
+        regression_issue:
+          auto_file: true
+          title: "Walk-forward stressed pass rate below capital-scaling threshold"
+      quick:
+        window_days: 180
+        screener: true
+        strategies: [momentum, gap_up, ma_crossover, range_breakout]
+        windows:
+          - end_date: "09/30/2020"
+            label: covid_crash_2020
+            regime: "COVID crash and V-recovery"
+          - end_date: "12/31/2022"
+            label: tech_bear_2022
+            regime: "Rate-hike technology bear market"
+          - end_date: auto
+            auto_offset_days: 60
+            label: current_regime_auto
+            regime: "Current regime excluding locked OOS"
+        cost_levels:
+          - { name: stressed, slippage_bps: 15.0, fee_bps: 5.0, min_fee_usd: 0.0 }
+        thresholds:
+          stressed: { min_return_pct: 0.00, max_drawdown_pct: 0.10, min_profit_factor: 1.00, min_trades: 25, min_daily_sharpe: 0.20 }
+        pass_rate:
+          stressed: 0.66
+        oos_lock:
+          label: locked_oos_recent_60d
+          regime: "Locked most-recent OOS validation window"
+          window_days: 60
+          end_date: auto
+          auto_offset_days: 2
+          must_pass_at: stressed
+        regression_issue:
+          auto_file: false
+
   production_gate:
     windows:
       - name: default_12m_costed

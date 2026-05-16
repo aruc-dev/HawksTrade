@@ -214,9 +214,18 @@ python3 -m compileall core strategies scheduler tracking tests
 python3 scheduler/run_scan.py --dry-run
 python3 scheduler/run_risk_check.py --dry-run
 python3 scheduler/run_report.py
+python3 scheduler/run_walkforward.py --quick --no-write-report --no-artifacts
 ```
 
 Only run a real paper-order lifecycle test when the human explicitly asks for it.
+
+Before any capital-scaling or strategy-enable decision, regenerate and review
+`reports/walkforward_master.md` with:
+```bash
+python3 scheduler/run_walkforward.py --profile master
+```
+Capital must not scale unless the master walk-forward passes at the configured
+stressed cost threshold.
 
 ---
 

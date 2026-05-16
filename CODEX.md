@@ -94,6 +94,14 @@ cd /path/to/HawksTrade
 python3 scheduler/run_report.py --weekly
 ```
 
+Before any capital-scaling or strategy-enable decision, regenerate and review
+`reports/walkforward_master.md` with:
+```bash
+python3 scheduler/run_walkforward.py --profile master
+```
+Capital must not scale unless the master walk-forward passes at the configured
+stressed cost threshold.
+
 ---
 
 ## Decision Tree

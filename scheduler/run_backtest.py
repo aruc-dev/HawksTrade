@@ -585,6 +585,28 @@ def _compute_daily_sharpe(df_curve: pd.DataFrame) -> float:
     return float((returns.mean() / std) * math.sqrt(365))
 
 
+def _compute_strategy_attribution(df_trades: pd.DataFrame) -> dict:
+    """Return numeric per-strategy trade attribution for machine-readable reports."""
+    if df_trades.empty or "strategy" not in df_trades:
+        return {}
+
+    attribution: dict[str, dict] = {}
+    for strategy, group in df_trades.groupby("strategy"):
+        pnl = group["pnl"].astype(float)
+        pnl_pct = group["pnl_pct"].astype(float)
+        trades = int(len(group))
+        attribution[str(strategy)] = {
+            "trades": trades,
+            "win_rate": float((pnl > 0).mean()) if trades else 0.0,
+            "avg_pnl_pct": float(pnl_pct.mean()) if trades else 0.0,
+            "total_pnl": float(pnl.sum()),
+            "best_pnl_pct": float(pnl_pct.max()) if trades else 0.0,
+            "worst_pnl_pct": float(pnl_pct.min()) if trades else 0.0,
+            "profit_factor": _compute_profit_factor(group),
+        }
+    return attribution
+
+
 def _backtest_execution_notes(cfg: dict, sim: "BacktestSimulator" | None = None) -> list[str]:
     notes = []
     gap_up_enabled = cfg.get("strategies", {}).get("gap_up", {}).get("enabled", False)
@@ -1013,6 +1035,18 @@ def run_backtest(
     start_dt = end_dt - timedelta(days=days + 420)
     
     historical_data = fetch_all_data(symbols, start_dt, end_dt)
+    symbols_with_history = sorted(historical_data.keys())
+    missing_history_symbols = sorted(set(symbols) - set(symbols_with_history))
+    data_coverage = {
+        "requested_symbols": sorted(symbols),
+        "symbols_with_history": symbols_with_history,
+        "missing_history_symbols": missing_history_symbols,
+        "requested_count": len(symbols),
+        "with_history_count": len(symbols_with_history),
+        "missing_history_count": len(missing_history_symbols),
+        "start_date": start_dt.date().isoformat(),
+        "end_date": end_dt.date().isoformat(),
+    }
     sim = BacktestSimulator(initial_fund, cost_model=cost_model)
     sim.historical_data = historical_data
 
@@ -1183,6 +1217,7 @@ def run_backtest(
 
     if sim.trades_log:
         df = pd.DataFrame(sim.trades_log)
+        per_strategy = _compute_strategy_attribution(df)
         strat_perf = df.groupby("strategy").agg({"pnl": ["sum", "count"], "pnl_pct": ["mean", "max", "min"]})
         strat_wins = df[df["pnl"] > 0].groupby("strategy").size()
         strat_total = df.groupby("strategy").size()
@@ -1260,6 +1295,8 @@ def run_backtest(
                 "execution_notes": execution_notes,
             },
             "quarterly": quarterly_data,
+            "per_strategy": per_strategy,
+            "data_coverage": data_coverage,
         }
         return result if return_result else report
 
@@ -1286,6 +1323,8 @@ def run_backtest(
             "execution_notes": execution_notes,
         },
         "quarterly": [],
+        "per_strategy": {},
+        "data_coverage": data_coverage,
     }
     return result if return_result else result["report"]
 

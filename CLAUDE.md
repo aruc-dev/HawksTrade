@@ -195,6 +195,7 @@ The AI agent should run these scripts on this schedule:
 | `scheduler/run_report.py` | Performance & portfolio report | `--weekly` |
 | `scheduler/run_backtest.py` | Historical strategy simulation | `--days`, `--fund`, `--exit-policy`, `--screener`, `--no-screener`, `--strategies`, `--set` |
 | `scheduler/run_validation_gate.py` | Cost-aware production readiness gates | `--profile production`, `--profile rsi`, `--profile range`, `--profile gap`, `--profile all` |
+| `scheduler/run_walkforward.py` | Multi-regime walk-forward validation | `--profile master`, `--quick`, `--oos-only` |
 
 ---
 
@@ -214,6 +215,7 @@ Each can be individually enabled/disabled.
 Momentum backtests can compare `--exit-policy fixed_hold`, `--exit-policy profit_trailing`, and `--exit-policy risk_only_baseline`. Use `risk_only_baseline` only as a benchmark for the old no-hold-exit behavior, not as the default live policy.
 Use `--strategies momentum,rsi_reversion,gap_up,ma_crossover,range_breakout` and repeated `--set key.path=value` arguments for backtest-only all-strategy experiments without editing `config/config.yaml`.
 Run `python3 scheduler/run_validation_gate.py --profile production` before scaling live capital. Run `python3 scheduler/run_validation_gate.py --profile rsi` before scaling RSI Reversion allocation, `python3 scheduler/run_validation_gate.py --profile gap` before scaling Gap-Up, and `python3 scheduler/run_validation_gate.py --profile range` before scaling Range Breakout.
+Run `python3 scheduler/run_walkforward.py --profile master` before any capital-scaling decision. The master report must pass at the configured stressed cost level and be committed at `reports/walkforward_master.md`.
 
 ---
 
@@ -311,6 +313,8 @@ If you are Claude and you are reading this as part of a scheduled task:
 Only do this after:
 - [ ] At least 30 days of paper trading reviewed
 - [ ] Win rate > 50% and positive total P&L
+- [ ] Master walk-forward passed at the stressed cost level within the last 30 days
+- [ ] `reports/walkforward_master.md` was regenerated and committed from `python3 scheduler/run_walkforward.py --profile master`
 - [ ] Human owner has explicitly said "switch to live"
 
 Steps:
@@ -318,6 +322,21 @@ Steps:
 2. Ensure `ALPACA_LIVE_API_KEY` and `ALPACA_LIVE_SECRET_KEY` are in `config/.env` or `.env`
 3. Fund your Alpaca live account
 4. Run a manual test: `python3 scheduler/run_scan.py` and verify a real order appears in Alpaca dashboard
+
+---
+
+## 13a. Walk-Forward Stop-The-Line Policy
+
+The configured multi-regime gate is the capital-scaling gate. If a regenerated
+`walkforward_master` report falls below the configured pass-rate threshold at the
+stressed cost level, the agent must:
+
+1. Pause any "scale capital", "enable strategy", or new-entry expansion work.
+2. File a beads issue with the failing profile, pass rate, failing windows, and report path.
+3. Revert the change that caused the regression, or pause new entries until the human owner reviews the regression.
+
+The locked OOS window is intentionally separate. Run `python3 scheduler/run_walkforward.py --profile master --oos-only`
+only when final validation is needed; do not tune against that held-out period.
 
 ---
 
