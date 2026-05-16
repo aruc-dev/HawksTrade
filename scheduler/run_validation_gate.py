@@ -104,6 +104,53 @@ def evaluate_backtest_gate(gate: dict, cost_model: dict, initial_fund: float) ->
     }
 
 
+def _sensitivity_levels(cost_model: dict) -> list[float]:
+    levels = []
+    for value in _as_list(cost_model.get("sensitivity_levels_bps")):
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(parsed) and parsed >= 0:
+            levels.append(parsed)
+    return levels
+
+
+def evaluate_slippage_sensitivity_gate(
+    gate: dict,
+    cost_model: dict,
+    initial_fund: float,
+    slippage_bps: float,
+) -> dict:
+    """Run a watch-only production window at a stressed slippage level."""
+    stressed_cost_model = dict(cost_model)
+    stressed_cost_model["slippage_bps"] = slippage_bps
+    result = run_backtest(
+        days=int(gate["days"]),
+        initial_fund=initial_fund,
+        end_date=gate.get("end_date"),
+        use_screener=gate.get("screener"),
+        enabled_strategies=_as_list(gate.get("strategies")) or None,
+        cost_model=stressed_cost_model,
+        return_result=True,
+    )
+    stats = result["stats"]
+    failures: list[str] = []
+    soft_min_return = _float_value(cost_model.get("sensitivity_soft_min_return_pct"), math.nan)
+    if math.isfinite(soft_min_return) and stats["return_pct"] < soft_min_return:
+        failures.append(
+            f"return {_format_pct(stats['return_pct'])} < sensitivity floor {_format_pct(soft_min_return)}"
+        )
+    return {
+        "name": f"{gate['name']}_slippage_{slippage_bps:g}bps",
+        "required": False,
+        "passed": not failures,
+        "failures": failures,
+        "stats": stats,
+        "slippage_bps": slippage_bps,
+    }
+
+
 def _load_trade_rows(path: Path) -> list[dict]:
     if not path.exists():
         return []
@@ -244,7 +291,12 @@ def _render_rsi_forward_record(record: dict) -> str:
     return line
 
 
-def run_validation_gate(profile: str = "production", initial_fund: float = 10000.0) -> tuple[int, str]:
+def run_validation_gate(
+    profile: str = "production",
+    initial_fund: float = 10000.0,
+    *,
+    slippage_sensitivity: bool = False,
+) -> tuple[int, str]:
     cfg = get_config()
     validation_cfg = cfg.get("validation", {})
     cost_model = validation_cfg.get("cost_model", {})
@@ -263,11 +315,28 @@ def run_validation_gate(profile: str = "production", initial_fund: float = 10000
 
     if profile in {"production", "all"}:
         lines.append("Production gates:")
-        for gate in validation_cfg.get("production_gate", {}).get("windows", []):
+        production_windows = validation_cfg.get("production_gate", {}).get("windows", [])
+        for gate in production_windows:
             record = evaluate_backtest_gate(gate, cost_model, initial_fund)
             records.append(record)
             lines.append(_render_backtest_record(record))
         lines.append("")
+        if slippage_sensitivity:
+            lines.append("Production slippage sensitivity (watch-only):")
+            levels = _sensitivity_levels(cost_model)
+            if not levels:
+                lines.append("WARN No sensitivity_levels_bps configured.")
+            for gate in production_windows:
+                for slippage_bps in levels:
+                    record = evaluate_slippage_sensitivity_gate(
+                        gate,
+                        cost_model,
+                        initial_fund,
+                        slippage_bps,
+                    )
+                    records.append(record)
+                    lines.append(_render_backtest_record(record))
+            lines.append("")
 
     if profile in {"rsi", "all"}:
         rsi_cfg = validation_cfg.get("rsi_reversion_enablement", {})
@@ -322,8 +391,17 @@ def main() -> int:
         help="Gate profile to run",
     )
     parser.add_argument("--fund", type=float, default=10000.0)
+    parser.add_argument(
+        "--slippage-sensitivity",
+        action="store_true",
+        help="Add watch-only production-window reruns at configured slippage bps levels",
+    )
     args = parser.parse_args()
-    exit_code, output = run_validation_gate(profile=args.profile, initial_fund=args.fund)
+    exit_code, output = run_validation_gate(
+        profile=args.profile,
+        initial_fund=args.fund,
+        slippage_sensitivity=args.slippage_sensitivity,
+    )
     print(output)
     return exit_code
 

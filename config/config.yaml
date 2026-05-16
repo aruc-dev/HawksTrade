@@ -322,6 +322,8 @@ validation:
     slippage_bps: 10.0           # Backtest gate assumes 10 bps adverse fill per side
     fee_bps: 5.0                 # Backtest gate assumes 5 bps fees/commission per side
     min_fee_usd: 0.0
+    sensitivity_levels_bps: [10.0, 20.0, 30.0] # Optional validation reruns for slippage stress checks
+    sensitivity_soft_min_return_pct: 0.08      # Watch-only return floor for slippage stress checks
 
   production_gate:
     windows:

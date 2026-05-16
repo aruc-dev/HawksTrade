@@ -557,6 +557,8 @@ validation:
     slippage_bps: 10.0
     fee_bps: 5.0
     min_fee_usd: 0.0
+    sensitivity_levels_bps: [10.0, 20.0, 30.0]
+    sensitivity_soft_min_return_pct: 0.08
 ```
 
 Run the default production gate with:
@@ -564,6 +566,16 @@ Run the default production gate with:
 ```bash
 python3 scheduler/run_validation_gate.py --profile production
 ```
+
+Add watch-only slippage stress reruns for the production windows with:
+
+```bash
+python3 scheduler/run_validation_gate.py --profile production --slippage-sensitivity
+```
+
+The sensitivity reruns use `validation.cost_model.sensitivity_levels_bps` and
+warn when a window falls below `sensitivity_soft_min_return_pct`; they do not
+turn a passing required gate into a failing exit code.
 
 The production profile validates the current costed production gate rather than
 the older core-only subset. It includes the expanded strategy set used in
