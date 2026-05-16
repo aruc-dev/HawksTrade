@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from core.version import __version__
 from scheduler import run_report
 
 
@@ -19,11 +20,14 @@ class RunReportTests(unittest.TestCase):
                 patch.object(run_report, "save_performance_snapshot"),
             ):
                 run_report.run_daily_report()
+            report_files = list(Path(tmp).glob("daily_*.txt"))
+            report_text = report_files[0].read_text()
 
         safe_reconcile.assert_called_once_with(
             context="run_report.daily_pre_summary",
             logger=run_report.log,
         )
+        self.assertIn(f"Version: {__version__}", report_text)
 
     def test_weekly_report_reconciles_before_summary(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -34,11 +38,14 @@ class RunReportTests(unittest.TestCase):
                 patch.object(run_report, "format_report", return_value="report"),
             ):
                 run_report.run_weekly_report()
+            report_files = list(Path(tmp).glob("weekly_*.txt"))
+            report_text = report_files[0].read_text()
 
         safe_reconcile.assert_called_once_with(
             context="run_report.weekly_pre_summary",
             logger=run_report.log,
         )
+        self.assertIn(f"Version: {__version__}", report_text)
 
     def test_protection_lock_reporting_failure_does_not_abort_report(self):
         with (

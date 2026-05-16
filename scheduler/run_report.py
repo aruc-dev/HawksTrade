@@ -24,6 +24,7 @@ from core.logging_config import runtime_log_handlers
 from core.portfolio import get_snapshot, print_snapshot
 from core.protection_manager import active_locks_for_reporting
 from core.run_markers import run_scope
+from core.version import __version__
 from scheduler.reconcile_trade_log import safe_reconcile
 from tracking.performance import compute_summary, format_report, save_performance_snapshot
 
@@ -85,6 +86,7 @@ def run_daily_report():
     report_path = REPORTS_DIR / f"daily_{ts}.txt"
     with open(report_path, "w") as f:
         f.write(f"HawksTrade Daily Report — {ts}\n")
+        f.write(f"Version: {__version__}\n")
         f.write(f"Mode: {CFG['mode'].upper()}\n\n")
         if snap:
             f.write(f"Portfolio Value : ${snap['portfolio_value']:,.2f}\n")
@@ -123,6 +125,7 @@ def run_weekly_report():
     report_path = REPORTS_DIR / f"weekly_{ts}.txt"
     with open(report_path, "w") as f:
         f.write(f"HawksTrade Weekly Report — {ts}\n")
+        f.write(f"Version: {__version__}\n")
         f.write(f"Mode: {CFG['mode'].upper()}\n\n")
         if protection_text:
             f.write(protection_text)
