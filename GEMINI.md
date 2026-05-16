@@ -43,6 +43,19 @@ any trading-related script. If this file and `AGENTS.md` disagree, follow
 
 ---
 
+## Human Learning and PR Review Workflows
+
+- When the human says **"Learning for you"**, persist the instruction that
+  follows into the relevant agent-facing Markdown files, including `AGENTS.md`
+  and this file when Gemini behavior is affected. Do not only acknowledge it in
+  chat.
+- When the human provides a pull request link prefixed with **"PR:"**, inspect
+  the PR review comments and unresolved review threads. If comments are valid
+  and actionable, fix them, run validation, push the branch, and resolve the
+  addressed GitHub review threads.
+
+---
+
 ## Identity Check
 
 Before proceeding, confirm you can answer YES to all of the following:

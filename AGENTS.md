@@ -49,6 +49,19 @@ version for agents that need quick, structured instructions.
 
 ---
 
+## Human Learning and PR Review Workflows
+
+- When the human says **"Learning for you"**, treat the instruction that follows
+  as persistent operating guidance. Update the relevant agent-facing Markdown
+  files, such as `AGENTS.md`, `CODEX.md`, `CLAUDE.md`, and `GEMINI.md`, so future
+  sessions can reference it. Do not only acknowledge it in chat.
+- When the human provides a pull request link prefixed with **"PR:"**, inspect
+  the PR review comments and unresolved review threads. If comments are valid
+  and actionable, fix them, run the required validation, push the changes, and
+  resolve the addressed GitHub review threads.
+
+---
+
 ## Identity Check
 
 Before proceeding, confirm you can answer YES to all of the following:

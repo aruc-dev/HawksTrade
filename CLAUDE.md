@@ -47,6 +47,19 @@ Work is **NOT COMPLETE** until these steps are finished and `git push` succeeds:
 
 ---
 
+## Human Learning and PR Review Workflows
+
+- When the human says **"Learning for you"**, treat the instruction that follows
+  as persistent operating guidance. Update the relevant agent-facing Markdown
+  files, such as `AGENTS.md`, `CODEX.md`, `CLAUDE.md`, and `GEMINI.md`, so future
+  sessions can reference it. Do not only acknowledge it in chat.
+- When the human provides a pull request link prefixed with **"PR:"**, inspect
+  the PR review comments and unresolved review threads. If comments are valid
+  and actionable, fix them, run the required validation, push the changes, and
+  resolve the addressed GitHub review threads.
+
+---
+
 ## 1. What Is HawksTrade?
 
 HawksTrade is an automated trading bot for US stocks and major cryptocurrencies.
