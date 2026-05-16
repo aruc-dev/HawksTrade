@@ -446,6 +446,10 @@ This strategy contributed positively in the latest recommended 12-month backtest
 range_breakout:
   enabled: true
   asset_class: crypto
+  live_readiness:
+    enabled: true
+    min_closed_paper_trades: 25
+    min_paper_days: 90
   breakout_lookback_days: 20
   breakout_pct: 0.006
   min_breakout_extension_pct: 0.008
@@ -476,6 +480,9 @@ The implementation uses confirmed daily 20-day Donchian high breakouts, ranked
 signal selection, ATR-risk sizing, breakout-extension and close-location quality
 guards, and explicit failed-breakout exits before the 14-day hold cap. Its
 12-month all-enabled contribution was positive, but sample size remains low.
+Live entries are therefore gated until the trade log shows 25 closed paper exits
+for `range_breakout` spanning at least 90 paper-validation days. Paper and
+backtest runs are not blocked by this runtime gate.
 
 ---
 

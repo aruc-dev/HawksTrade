@@ -21,6 +21,7 @@ from core.order_governor import GovernorDecision, OrderGovernor, OrderIntent
 from core import risk_manager as rm
 from core.config_loader import get_config
 from core.portfolio_construction import construct_entry_size
+from core.strategy_readiness import ReadinessDecision, evaluate_strategy_live_readiness
 from tracking import order_intents
 from tracking.trade_log import log_trade, mark_trade_closed, get_trade_age_days
 
@@ -233,6 +234,29 @@ def _entry_governor_block_result(
     return result
 
 
+def _entry_readiness_block_result(
+    symbol: str,
+    strategy: str,
+    asset_class: str,
+    decision: ReadinessDecision,
+) -> dict:
+    return {
+        "timestamp": _utc_now().isoformat(),
+        "mode": MODE,
+        "symbol": symbol,
+        "strategy": strategy,
+        "asset_class": asset_class,
+        "side": "buy",
+        "qty": "",
+        "entry_price": "",
+        "order_id": "",
+        "status": "strategy_readiness_blocked",
+        "readiness_code": decision.code,
+        "error_type": "StrategyReadinessBlocked",
+        "error": decision.reason,
+    }
+
+
 def _exit_governor_block_result(
     *,
     symbol: str,
@@ -402,6 +426,17 @@ def enter_position(
         live risk check can use it as the effective stop price.
     """
     try:
+        readiness = evaluate_strategy_live_readiness(strategy, mode=MODE, cfg=CFG)
+        if not readiness.allowed:
+            log.warning(
+                "Strategy live readiness blocked %s entry for %s: %s context=%s",
+                strategy,
+                symbol,
+                readiness.reason,
+                dict(readiness.context or {}),
+            )
+            return _entry_readiness_block_result(symbol, strategy, asset_class, readiness)
+
         # Get latest price
         if asset_class == "crypto":
             price = ac.get_crypto_latest_price(symbol)

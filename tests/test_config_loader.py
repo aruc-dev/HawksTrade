@@ -122,6 +122,8 @@ class TestGetConfig(unittest.TestCase):
         self.assertTrue(strategies["ma_crossover"]["enabled"])
         self.assertTrue(strategies["range_breakout"]["enabled"])
         self.assertTrue(strategies["gap_up"]["enabled"])
+        self.assertEqual(strategies["range_breakout"]["live_readiness"]["min_closed_paper_trades"], 25)
+        self.assertEqual(strategies["range_breakout"]["live_readiness"]["min_paper_days"], 90)
         self.assertEqual(strategies["momentum"]["top_n"], 2)
         self.assertEqual(strategies["momentum"]["min_momentum_pct"], 0.08)
         self.assertEqual(strategies["momentum"]["volume_confirmation_mode"], "pace")

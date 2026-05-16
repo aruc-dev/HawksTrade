@@ -290,6 +290,38 @@ class OrderExecutorTests(unittest.TestCase):
         self.assertEqual(rows[0]["qty"], "2")
         self.assertFalse(any(row["symbol"] == "MSFT" for row in trade_log.get_open_trades()))
 
+    def test_enter_position_blocks_live_strategy_when_readiness_gate_fails_before_price_fetch(self):
+        with (
+            patch.object(order_executor, "MODE", "live"),
+            patch.dict(
+                order_executor.CFG,
+                {
+                    "strategies": {
+                        "range_breakout": {
+                            "live_readiness": {
+                                "enabled": True,
+                                "min_closed_paper_trades": 1,
+                                "min_paper_days": 0,
+                            },
+                        },
+                    },
+                },
+                clear=False,
+            ),
+            patch.object(
+                order_executor.ac,
+                "get_crypto_latest_price",
+                side_effect=AssertionError("price lookup should not run"),
+            ),
+            patch.object(order_executor.ac, "place_limit_order") as place_limit_order,
+        ):
+            result = order_executor.enter_position("BTC/USD", "range_breakout", asset_class="crypto")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "strategy_readiness_blocked")
+        self.assertEqual(result["readiness_code"], "strategy_live_readiness_blocked")
+        place_limit_order.assert_not_called()
+
     def test_enter_position_blocks_duplicate_pending_entry_before_submit(self):
         pending_order = SimpleNamespace(id="pending-buy", symbol="MSFT", side="buy", status="new")
 

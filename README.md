@@ -137,6 +137,7 @@ python3 scheduler/run_validation_gate.py --profile range
 - **Daily Guardrail**: 5% daily loss limit (hard stop for the day), keyed to the `America/New_York` trading-session date so UTC cloud hosts do not reset the baseline at UTC midnight. The baseline is the first observed account value for that trading date and is persisted in `data/daily_loss_baseline.json`; it is not reconstructed from the prior close.
 - **Broker Resilience**: Alpaca timeouts, rate limits, and 5xx outages use bounded retry; auth failures, not-found responses, and broker rejections are classified for fail-closed logging.
 - **Broker Protective Stops**: Live mode syncs missing broker-side protective sells for open trade-log rows; equities use stop orders and crypto uses stop-limit orders.
+- **Strategy Live Readiness**: Live entries are blocked for any strategy with a configured paper-history gate until `data/trades.csv` shows the required closed paper exits and validation age.
 - **Entry Protections**: Protection locks are enabled for new entries after recent symbol cooldowns, stop-loss clusters, weak strategy performance, or realized drawdown; exits continue while entry locks are active.
 - **Price-Fetch Visibility**: Risk checks track consecutive latest-price failures per open position and surface repeated failures as `[NOK]` in the Linux health dashboard.
 - **Trade-Log Reconciliation**: Scheduled scans, risk checks, reports, and health checks reconcile `data/trades.csv` with broker positions when Alpaca is reachable.

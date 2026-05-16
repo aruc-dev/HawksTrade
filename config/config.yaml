@@ -283,6 +283,10 @@ strategies:
     enabled: true
     asset_class: crypto
     description: "Enter long on confirmed daily close breakout above the configured Donchian high with volume, trend, volatility, RSI, breakout-extension, and close-location guards. Exit failed breakouts early before the hold cap."
+    live_readiness:
+      enabled: true
+      min_closed_paper_trades: 25
+      min_paper_days: 90
     breakout_lookback_days: 20   # Close must break above the prior N-day high, excluding the current bar
     breakout_pct: 0.006          # Close must break 0.6% beyond the Donchian high
     min_breakout_extension_pct: 0.008 # Require at least 0.8% follow-through above breakout level
