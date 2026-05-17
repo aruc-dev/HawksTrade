@@ -30,7 +30,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener
 
 ## Backtesting & Performance
 
-HawksTrade includes a high-fidelity historical simulator. The current tail-risk-hardened default strategy set achieved **+20.70% annual return** in the 12-month backtest through 2026-04-30 on $10,000 starting capital, with the configured 8% max-position risk cap enforced.
+HawksTrade includes a high-fidelity historical simulator. The current guarded default strategy set produced a **+5.85% 12-month costed point return** through the OOS lockup boundary on $10,000 starting capital, with the configured 8% max-position risk cap enforced. Production validation remains blocking until bootstrap confidence gates improve.
 
 - **Backtest Summary**: [backtests.md](backtests.md)
 - **Configuration Guide**: [config.md](config.md)
@@ -43,7 +43,7 @@ HawksTrade includes a high-fidelity historical simulator. The current tail-risk-
 | Strategy | Market | Key Parameters | Approach |
 |----------|--------|----------------|----------|
 | **Momentum** | US Stocks | Top 2 sector-diversified names by 5-day alpha momentum in green regimes, 4% momentum floor, optional ATR-scaled momentum gate, 1.5x elapsed-session volume pace, 65% breadth coverage, 1.2x ATR stop extension capped at 5%, profit-aware exit | Captures high-conviction rallies with a lower recent-window threshold while keeping concurrent momentum exposure capped and yellow regimes limited to one signal. |
-| **RSI Reversion** | US Stocks | Disabled by default; RSI < 40, %B < 20%, SMA-200 within +/-15%, 0.7x volume confirmation, 1-bar recovery, 5-day drawdown <= 10%, ATR/price <= 5%, 0.8x ATR stop capped at 6%, and profit protection when enabled | Mean reversion with crash, realised-volatility, tail-loss, and high-water trailing guards. |
+| **RSI Reversion** | US Stocks | Enabled only in bear/chop regimes; RSI < 40, %B < 20%, SMA-200 within +/-15%, 0.7x volume confirmation, 1-bar recovery, 5-day drawdown <= 10%, ATR/price <= 5%, 0.8x ATR stop capped at 6%, and profit protection | Mean reversion with crash, realised-volatility, tail-loss, and high-water trailing guards. |
 | **Gap-Up** | US Stocks | Enabled; true 5-15% opening gap, 1.3x opening-volume pace, 65% breadth guard, prior close above SMA-200, <=35% SMA-200 extension, top-1 ranked signal, 2-day hold, failed-gap exit | Opening momentum sleeve with completed-bar trend confirmation, minute-bar entry confirmation, and ATR-risk sizing. |
 | **EMA Crossover** | Crypto | 6/18 EMA, latest completed cross only, top-1 ranked signal, RSI 35-75, slope + volatility filters, 3-day drawdown guard, price/EMA confirmation, 2% daily-close max-loss exit, 16-day hold cap | Bullish EMA crossover with BTC regime gate and tighter same-scan concentration control. |
 | **Range Breakout** | Crypto | Enabled; 20-day high close breakout, 2.5x volume, rising EMA-50, RSI, 0.8%-8% breakout-extension, upper-10% close guard, and profit protection | Ranked Donchian-style breakout sleeve with failed-breakout, trend-loss, and high-water trailing exits. |
@@ -111,7 +111,7 @@ The research harness writes `factor_dataset.csv`, `factor_summary.json`, and
 `factor_summary.md`. Treat those outputs as evidence for a separate strategy
 change; do not tune production defaults from the harness alone.
 
-RSI Reversion is disabled in the active default profile. Use its dedicated gate as an ongoing monitoring check before enabling it or scaling its capital allocation:
+RSI Reversion is enabled in the active default profile only as a conditional bear/chop sleeve. Use its dedicated gate as an ongoing monitoring check before scaling its capital allocation:
 
 ```bash
 python3 scheduler/run_validation_gate.py --profile rsi
