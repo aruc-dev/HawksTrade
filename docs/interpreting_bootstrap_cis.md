@@ -24,5 +24,9 @@ Validation gates read bootstrap bounds when they are present:
 - Sharpe must pass using the lower confidence bound
 - drawdown must pass using the adverse confidence bound
 
+Validation output may show a positive point estimate and still fail. In that
+case, read the `gate_bounds` or `Gate` columns; those are the conservative
+confidence-bound values used for the decision.
+
 Wide intervals mean the trade sample is too thin. The right response is more
 out-of-sample evidence, not parameter tuning to tighten the interval.

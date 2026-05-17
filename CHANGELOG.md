@@ -8,6 +8,7 @@
 - `screener/pit_universe.py` and `data/universe/sp500_constituents.csv` so screener backtests default to point-in-time stock membership instead of the deprecated forward-biased `EXTENDED_POOL`.
 - `core/sample_size_governor.py` with live/paper/backtest risk multipliers, position caps, trade-log `risk_tier` audit fields, and report visibility.
 - Bootstrap trade-resample and daily block-bootstrap confidence intervals in backtest reports, with production and walk-forward gates using bootstrap bounds when present.
+- Phase 1 gate diagnostics that show point estimates separately from bootstrap-bound validation metrics.
 - `analysis/spa_test.py`, `scheduler/run_spa_analysis.py`, and backtest grid-return generation for multiple-testing correction before allocation increases.
 - Multi-regime walk-forward validation profiles and reports; capital does not scale unless `walkforward_master` passes at the configured stressed threshold.
 - Walk-forward `blocking_levels` and duration-scaled OOS minimum trade counts so diagnostic cost levels do not block the stressed capital gate.

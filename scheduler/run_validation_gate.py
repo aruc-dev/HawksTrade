@@ -83,6 +83,11 @@ def threshold_failures(stats: dict, gate: dict) -> list[str]:
     return failures
 
 
+def _has_bootstrap_bounds(stats: dict) -> bool:
+    bootstrap = stats.get("bootstrap") or {}
+    return bool((bootstrap.get("trade") or {}) or (bootstrap.get("block") or {}))
+
+
 def reliability_warnings(stats: dict, min_reliable_trades: int) -> list[str]:
     """Return watch-only warnings for statistically thin backtest samples."""
     if min_reliable_trades <= 0:
@@ -154,6 +159,7 @@ def evaluate_backtest_gate(
             raise
         return _oos_blocked_record(gate, oos_message)
     stats = result["stats"]
+    bounds = gate_bounds(stats)
     failures = threshold_failures(stats, gate)
     required = bool(gate.get("required", True))
     return {
@@ -163,6 +169,8 @@ def evaluate_backtest_gate(
         "failures": failures,
         "warnings": reliability_warnings(stats, min_reliable_trades),
         "stats": stats,
+        "gate_stats": bounds,
+        "uses_bootstrap_bounds": _has_bootstrap_bounds(stats),
     }
 
 
@@ -224,6 +232,8 @@ def evaluate_slippage_sensitivity_gate(
         "failures": failures,
         "warnings": reliability_warnings(stats, min_reliable_trades),
         "stats": stats,
+        "gate_stats": bounds,
+        "uses_bootstrap_bounds": _has_bootstrap_bounds(stats),
         "slippage_bps": slippage_bps,
     }
 
@@ -368,6 +378,15 @@ def _render_backtest_record(record: dict) -> str:
         line += " | " + "; ".join(record["failures"])
     if record.get("warnings"):
         line += " | watch: " + "; ".join(record["warnings"])
+    if record.get("uses_bootstrap_bounds"):
+        gate_stats = record.get("gate_stats") or {}
+        line += (
+            " | gate_bounds: "
+            f"return={_format_pct(float(gate_stats.get('return_pct', stats['return_pct'])))}, "
+            f"drawdown={_format_pct(float(gate_stats.get('max_drawdown', stats['max_drawdown'])))}, "
+            f"pf={_format_ratio(float(gate_stats.get('profit_factor', stats['profit_factor'])))}, "
+            f"sharpe={float(gate_stats.get('daily_sharpe', stats['daily_sharpe'])):.2f}"
+        )
     return line
 
 
@@ -411,6 +430,7 @@ def run_validation_gate(
 
     if profile in {"production", "all"}:
         lines.append("Production gates:")
+        lines.append("Gate bounds use bootstrap confidence bounds when present; point estimates are shown first.")
         production_windows = validation_cfg.get("production_gate", {}).get("windows", [])
         for gate in production_windows:
             record = evaluate_backtest_gate(
@@ -443,6 +463,7 @@ def run_validation_gate(
     if profile in {"rsi", "all"}:
         rsi_cfg = validation_cfg.get("rsi_reversion_enablement", {})
         lines.append("RSI Reversion enablement gates:")
+        lines.append("Gate bounds use bootstrap confidence bounds when present; point estimates are shown first.")
         for gate in rsi_cfg.get("backtest_windows", []):
             record = evaluate_backtest_gate(
                 gate,
@@ -461,6 +482,7 @@ def run_validation_gate(
     if profile in {"range", "all"}:
         range_cfg = validation_cfg.get("range_breakout_enablement", {})
         lines.append("Range Breakout enablement gates:")
+        lines.append("Gate bounds use bootstrap confidence bounds when present; point estimates are shown first.")
         for gate in range_cfg.get("backtest_windows", []):
             record = evaluate_backtest_gate(
                 gate,
@@ -475,6 +497,7 @@ def run_validation_gate(
     if profile in {"gap", "all"}:
         gap_cfg = validation_cfg.get("gap_up_enablement", {})
         lines.append("Gap-Up enablement gates:")
+        lines.append("Gate bounds use bootstrap confidence bounds when present; point estimates are shown first.")
         for gate in gap_cfg.get("backtest_windows", []):
             record = evaluate_backtest_gate(
                 gate,

@@ -120,6 +120,10 @@ def _annualized_return(return_pct: float, window_days: int) -> float:
 def window_failures(stats: dict, thresholds: WalkForwardThresholds) -> list[str]:
     failures: list[str] = []
     bounds = gate_bounds(stats)
+    stats["gate_return_pct"] = bounds["return_pct"]
+    stats["gate_max_drawdown"] = bounds["max_drawdown"]
+    stats["gate_profit_factor"] = bounds["profit_factor"]
+    stats["gate_daily_sharpe"] = bounds["daily_sharpe"]
     if bounds["return_pct"] < thresholds.min_return_pct:
         failures.append(
             f"return {_format_pct(bounds['return_pct'])} < {_format_pct(thresholds.min_return_pct)}"
@@ -154,6 +158,10 @@ def profile_window_failures(
     stats["annualized_return_pct"] = annualized
     bounds = gate_bounds(stats)
     bound_return = _annualized_return(float(bounds["return_pct"]), window_days)
+    stats["gate_return_pct"] = bounds["return_pct"]
+    stats["gate_max_drawdown"] = bounds["max_drawdown"]
+    stats["gate_profit_factor"] = bounds["profit_factor"]
+    stats["gate_daily_sharpe"] = bounds["daily_sharpe"]
     stats["annualized_return_gate_pct"] = bound_return
     failures: list[str] = []
     if bound_return < thresholds.min_return_pct:
@@ -556,8 +564,10 @@ def _render_profile_report(
         "",
         "## Per-Window Detail",
         "",
-        "| Cost | Window | Regime | End Date | Days | Return | Annualized | Max DD | PF | Trades | Win | Sharpe | Result | Notes |",
-        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|",
+        "Point estimates are shown first. Gate columns show the bootstrap-bound metrics used for pass/fail decisions when confidence intervals are present.",
+        "",
+        "| Cost | Window | Regime | End Date | Days | Return | Annualized | Max DD | PF | Trades | Win | Sharpe | Gate Ann. | Gate DD | Gate PF | Gate Sharpe | Result | Notes |",
+        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|",
     ])
 
     for record in records:
@@ -572,7 +582,12 @@ def _render_profile_report(
             f"{_format_pct(stats['annualized_return_pct'])} | "
             f"{_format_pct(stats['max_drawdown'])} | "
             f"{_format_ratio(stats['profit_factor'])} | {stats['trades']} | "
-            f"{stats['win_rate']:.1%} | {stats['daily_sharpe']:.2f} | {result} | {notes} |"
+            f"{stats['win_rate']:.1%} | {stats['daily_sharpe']:.2f} | "
+            f"{_format_pct(stats.get('annualized_return_gate_pct', stats['annualized_return_pct']))} | "
+            f"{_format_pct(stats.get('gate_max_drawdown', stats['max_drawdown']))} | "
+            f"{_format_ratio(stats.get('gate_profit_factor', stats['profit_factor']))} | "
+            f"{stats.get('gate_daily_sharpe', stats['daily_sharpe']):.2f} | "
+            f"{result} | {notes} |"
         )
 
     attribution_level = binding_level if any(

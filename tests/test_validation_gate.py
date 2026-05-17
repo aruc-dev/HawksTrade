@@ -107,6 +107,44 @@ class ValidationGateTests(unittest.TestCase):
         self.assertTrue(record["passed"])
         self.assertIn("reliability floor 30", record["warnings"][0])
 
+    def test_backtest_gate_exposes_bootstrap_gate_bounds(self):
+        gate = {
+            "name": "default_12m_costed",
+            "days": 365,
+            "min_return_pct": 0.0,
+            "min_profit_factor": 1.0,
+            "min_daily_sharpe": 0.0,
+        }
+        result_payload = {
+            "stats": {
+                "return_pct": 0.08,
+                "max_drawdown": -0.01,
+                "profit_factor": 2.0,
+                "daily_sharpe": 1.2,
+                "trades": 50,
+                "win_rate": 0.6,
+                "bootstrap": {
+                    "block": {
+                        "return_pct": {"p05": -0.02},
+                        "max_drawdown": {"p05": -0.04},
+                        "daily_sharpe": {"p05": -0.5},
+                    },
+                    "trade": {
+                        "profit_factor": {"p05": 0.8},
+                    },
+                },
+            },
+        }
+
+        with patch("scheduler.run_validation_gate.run_backtest", return_value=result_payload):
+            record = evaluate_backtest_gate(gate, {}, 10000)
+
+        self.assertFalse(record["passed"])
+        self.assertTrue(record["uses_bootstrap_bounds"])
+        self.assertEqual(record["gate_stats"]["return_pct"], -0.02)
+        self.assertEqual(record["gate_stats"]["profit_factor"], 0.8)
+        self.assertTrue(any("profit_factor 0.80 < 1.00" in failure for failure in record["failures"]))
+
     def test_non_required_backtest_gate_skips_locked_oos_window(self):
         gate = {"name": "crypto_recent_30d_watch", "days": 30, "required": False}
         error = ValueError(
@@ -318,6 +356,7 @@ class ValidationGateTests(unittest.TestCase):
             )
 
         self.assertEqual(exit_code, 0)
+        self.assertIn("Gate bounds use bootstrap confidence bounds", output)
         self.assertIn("Production slippage sensitivity", output)
         gate.assert_called_once()
         self.assertEqual(sensitivity.call_count, 2)
