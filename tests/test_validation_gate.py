@@ -304,6 +304,47 @@ class ValidationGateTests(unittest.TestCase):
         self.assertIn("Range Breakout enablement gates:", output)
         gate.assert_called_once()
 
+    def test_ma_profile_runs_configured_backtest_gates(self):
+        cfg = {
+            "validation": {
+                "cost_model": {},
+                "ma_crossover_enablement": {
+                    "backtest_windows": [
+                        {
+                            "name": "ma_crossover_12m_costed",
+                            "days": 365,
+                            "strategies": ["ma_crossover"],
+                            "required": True,
+                        }
+                    ]
+                },
+            },
+        }
+        record = {
+            "name": "ma_crossover_12m_costed",
+            "required": True,
+            "passed": True,
+            "failures": [],
+            "stats": {
+                "return_pct": 0.04,
+                "max_drawdown": -0.01,
+                "trades": 22,
+                "win_rate": 0.50,
+                "profit_factor": 1.8,
+                "daily_sharpe": 1.2,
+            },
+        }
+
+        with (
+            patch("scheduler.run_validation_gate.get_config", return_value=cfg),
+            patch("scheduler.run_validation_gate.evaluate_backtest_gate", return_value=record) as gate,
+        ):
+            exit_code, output = run_validation_gate(profile="ma")
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("MA Crossover enablement gates:", output)
+        gate.assert_called_once()
+
     def test_production_profile_adds_slippage_sensitivity_only_when_requested(self):
         cfg = {
             "validation": {

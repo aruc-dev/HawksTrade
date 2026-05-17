@@ -13,8 +13,8 @@
 | Momentum | Stocks | **Enabled** | `momentum.py` |
 | RSI Reversion | Stocks | **Disabled by default** | `rsi_reversion.py` |
 | Gap-Up | Stocks | **Enabled** | `gap_up.py` |
-| MA Crossover | Crypto | **Enabled** | `ma_crossover.py` |
-| Range Breakout | Crypto | **Enabled** | `range_breakout.py`; high-water profit protection enabled |
+| MA Crossover | Crypto | **Enabled** | `ma_crossover.py`; live entries require paper-readiness evidence |
+| Range Breakout | Crypto | **Enabled** | `range_breakout.py`; high-water profit protection enabled; live entries require paper-readiness evidence |
 
 All strategies share a common global risk layer (8% max position size,
 3.5% stop-loss, 12% take-profit, max 10 open positions, 5% daily-loss halt)
@@ -262,6 +262,13 @@ before scaling capital allocated to this sleeve.
 | `vol_filter_period` | 10 |
 
 **Regime filter:** BTC/USD > 20-day EMA (crypto bull regime required).
+
+**Live readiness:** Live entries are blocked until the trade log shows at least
+25 closed paper exits and 90 calendar days of paper validation for this sleeve.
+Paper mode remains available for evidence collection.
+
+**Monitoring gate:** Run `python3 scheduler/run_validation_gate.py --profile ma`
+before scaling capital allocated to this sleeve.
 
 ---
 

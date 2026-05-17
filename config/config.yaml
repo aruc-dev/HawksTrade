@@ -263,6 +263,10 @@ strategies:
     enabled: true
     asset_class: crypto
     description: "Enter when 6-EMA crosses above 18-EMA with slope, shallow drawdown guard, price/EMA confirmation, volatility, volume, and RSI filters. Exit on daily close max-loss, bearish cross, RSI target, or 16-day hold cap. Uses 2xATR stop extension and 1%-risk position sizing."
+    live_readiness:
+      enabled: true
+      min_closed_paper_trades: 25
+      min_paper_days: 90
     fast_ema: 6
     slow_ema: 18
     timeframe: "1Day"            # "1Hour" | "4Hour" | "1Day"
@@ -513,6 +517,28 @@ validation:
         days: 30
         screener: false
         strategies: [range_breakout]
+        required: false
+        min_return_pct: 0.0
+        max_drawdown_pct: 0.015
+        min_trades: 1
+
+  ma_crossover_enablement:
+    backtest_windows:
+      - name: ma_crossover_12m_costed
+        days: 365
+        end_date: "04/29/2026"
+        screener: false
+        strategies: [ma_crossover]
+        required: true
+        min_return_pct: 0.03
+        max_drawdown_pct: 0.02
+        min_profit_factor: 1.50
+        min_trades: 20
+        min_win_rate: 0.45
+      - name: ma_crossover_recent_30d_watch
+        days: 30
+        screener: false
+        strategies: [ma_crossover]
         required: false
         min_return_pct: 0.0
         max_drawdown_pct: 0.015

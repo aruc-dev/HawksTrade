@@ -496,6 +496,21 @@ def run_validation_gate(
             lines.append(_render_backtest_record(record))
         lines.append("")
 
+    if profile in {"ma", "all"}:
+        ma_cfg = validation_cfg.get("ma_crossover_enablement", {})
+        lines.append("MA Crossover enablement gates:")
+        lines.append("Gate bounds use bootstrap confidence bounds when present; point estimates are shown first.")
+        for gate in ma_cfg.get("backtest_windows", []):
+            record = evaluate_backtest_gate(
+                gate,
+                cost_model,
+                initial_fund,
+                min_reliable_trades=min_reliable_trades,
+            )
+            records.append(record)
+            lines.append(_render_backtest_record(record))
+        lines.append("")
+
     if profile in {"gap", "all"}:
         gap_cfg = validation_cfg.get("gap_up_enablement", {})
         lines.append("Gap-Up enablement gates:")
@@ -530,7 +545,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--profile",
-        choices=["production", "rsi", "range", "gap", "all"],
+        choices=["production", "rsi", "range", "ma", "gap", "all"],
         default="production",
         help="Gate profile to run",
     )

@@ -154,6 +154,8 @@ class TestGetConfig(unittest.TestCase):
         self.assertTrue(strategies["ma_crossover"]["enabled"])
         self.assertTrue(strategies["range_breakout"]["enabled"])
         self.assertTrue(strategies["gap_up"]["enabled"])
+        self.assertEqual(strategies["ma_crossover"]["live_readiness"]["min_closed_paper_trades"], 25)
+        self.assertEqual(strategies["ma_crossover"]["live_readiness"]["min_paper_days"], 90)
         self.assertEqual(strategies["range_breakout"]["live_readiness"]["min_closed_paper_trades"], 25)
         self.assertEqual(strategies["range_breakout"]["live_readiness"]["min_paper_days"], 90)
         self.assertEqual(strategies["momentum"]["top_n"], 2)
@@ -231,3 +233,12 @@ class TestGetConfig(unittest.TestCase):
         self.assertEqual(gap_windows["gap_up_12m_costed"]["min_profit_factor"], 1.95)
         self.assertTrue(gap_windows["gap_up_recent_30d_watch"]["screener"])
         self.assertEqual(gap_windows["gap_up_recent_30d_watch"]["min_profit_factor"], 1.0)
+
+        ma_windows = {
+            window["name"]: window
+            for window in validation["ma_crossover_enablement"]["backtest_windows"]
+        }
+        self.assertEqual(ma_windows["ma_crossover_12m_costed"]["end_date"], "04/29/2026")
+        self.assertFalse(ma_windows["ma_crossover_12m_costed"]["screener"])
+        self.assertEqual(ma_windows["ma_crossover_12m_costed"]["min_profit_factor"], 1.50)
+        self.assertFalse(ma_windows["ma_crossover_recent_30d_watch"]["screener"])
