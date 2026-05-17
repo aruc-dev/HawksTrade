@@ -152,6 +152,7 @@ def evaluate_backtest_gate(
             enabled_strategies=_as_list(gate.get("strategies")) or None,
             cost_model=cost_model,
             return_result=True,
+            write_quarterly_csv=False,
         )
     except ValueError as exc:
         oos_message = _oos_lockup_message(exc)
@@ -207,6 +208,7 @@ def evaluate_slippage_sensitivity_gate(
             enabled_strategies=_as_list(gate.get("strategies")) or None,
             cost_model=stressed_cost_model,
             return_result=True,
+            write_quarterly_csv=False,
         )
     except ValueError as exc:
         oos_message = _oos_lockup_message(exc)

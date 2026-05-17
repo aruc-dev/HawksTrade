@@ -28,6 +28,7 @@ from scheduler.run_backtest import (
     _compute_max_drawdown,
     _compute_profit_factor,
     _compute_quarterly_performance,
+    _quarterly_csv_path,
     _consume_oos_unlock_token_once,
     _patch_runtime_risk_config,
     _run_backtest_risk_exits,
@@ -783,6 +784,12 @@ class TestQuarterlyReporting(unittest.TestCase):
         df_curve = pd.DataFrame([{"date": datetime(2025, 1, 1, tzinfo=timezone.utc), "value": 10000}])
         quarters = _compute_quarterly_performance(sim, df_curve)
         self.assertEqual(quarters, [])
+
+    def test_quarterly_csv_path_accepts_custom_relative_dir(self):
+        path = _quarterly_csv_path("20260517_1200", "data/release_validation")
+
+        self.assertEqual(path.name, "quarterly_20260517_1200.csv")
+        self.assertTrue(str(path).endswith("data/release_validation/quarterly_20260517_1200.csv"))
 
 
 class TestBacktestExperimentControls(unittest.TestCase):

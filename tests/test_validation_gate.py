@@ -81,6 +81,7 @@ class ValidationGateTests(unittest.TestCase):
         self.assertFalse(record["passed"])
         self.assertIn("sensitivity floor", record["failures"][0])
         self.assertEqual(run_backtest.call_args.kwargs["cost_model"]["slippage_bps"], 30.0)
+        self.assertFalse(run_backtest.call_args.kwargs["write_quarterly_csv"])
 
     def test_slippage_sensitivity_gate_adds_reliability_warning(self):
         gate = {"name": "default_12m_costed", "days": 365}
@@ -136,10 +137,11 @@ class ValidationGateTests(unittest.TestCase):
             },
         }
 
-        with patch("scheduler.run_validation_gate.run_backtest", return_value=result_payload):
+        with patch("scheduler.run_validation_gate.run_backtest", return_value=result_payload) as run_backtest:
             record = evaluate_backtest_gate(gate, {}, 10000)
 
         self.assertFalse(record["passed"])
+        self.assertFalse(run_backtest.call_args.kwargs["write_quarterly_csv"])
         self.assertTrue(record["uses_bootstrap_bounds"])
         self.assertEqual(record["gate_stats"]["return_pct"], -0.02)
         self.assertEqual(record["gate_stats"]["profit_factor"], 0.8)

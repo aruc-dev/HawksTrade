@@ -84,6 +84,7 @@ def build_release_validation_plan(args: argparse.Namespace) -> list[ValidationGa
         str(args.backtest_days),
         "--fund",
         str(args.fund),
+        "--no-quarterly-output",
     ]
     backtest_end_date = _resolved_backtest_end_date(args.backtest_end_date)
     if backtest_end_date:

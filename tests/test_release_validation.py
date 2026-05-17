@@ -49,6 +49,7 @@ class ReleaseValidationPlanTests(unittest.TestCase):
                 "30",
                 "--fund",
                 "10000.0",
+                "--no-quarterly-output",
                 "--end-date",
                 "02/14/2026",
             ),

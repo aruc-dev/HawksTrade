@@ -1082,6 +1082,7 @@ def run_backtest(
     legacy_pool=False,
     return_result=False,
     write_quarterly_csv=True,
+    quarterly_output_dir=None,
 ):
     cfg = get_config()
 
@@ -1456,8 +1457,7 @@ def run_backtest(
             report += "\n"
             if write_quarterly_csv:
                 ts = datetime.now().strftime("%Y%m%d_%H%M")
-                q_csv_path = BASE_DIR / "data" / f"quarterly_{ts}.csv"
-                q_csv_path.parent.mkdir(parents=True, exist_ok=True)
+                q_csv_path = _quarterly_csv_path(ts, quarterly_output_dir)
                 pd.DataFrame(quarterly_data).to_csv(q_csv_path, index=False)
                 log.info(f"Quarterly report saved to {q_csv_path}")
 
@@ -1541,6 +1541,14 @@ def run_backtest(
         "daily_returns": _daily_returns_payload(df_curve),
     }
     return result if return_result else result["report"]
+
+
+def _quarterly_csv_path(timestamp: str, output_dir=None) -> Path:
+    output_base = BASE_DIR / "data" if output_dir is None else Path(output_dir)
+    if not output_base.is_absolute():
+        output_base = BASE_DIR / output_base
+    output_base.mkdir(parents=True, exist_ok=True)
+    return output_base / f"quarterly_{timestamp}.csv"
 
 
 def _compute_quarterly_performance(sim, df_curve):
@@ -1711,6 +1719,18 @@ if __name__ == "__main__":
     parser.add_argument("--grid-output", type=str, help="Output CSV path for --grid")
     parser.add_argument("--grid-max-variants", type=int, help="Limit grid variants for smoke tests")
     parser.add_argument(
+        "--no-quarterly-output",
+        dest="write_quarterly_csv",
+        action="store_false",
+        help="Suppress timestamped data/quarterly_*.csv output for CI/release validation runs.",
+    )
+    parser.add_argument(
+        "--quarterly-output-dir",
+        type=str,
+        help="Directory for quarterly CSV output; defaults to data/.",
+    )
+    parser.set_defaults(write_quarterly_csv=True)
+    parser.add_argument(
         "--oos-validation",
         action="store_true",
         help="Run the current locked OOS window and mark it validated after the report is written.",
@@ -1760,4 +1780,6 @@ if __name__ == "__main__":
         oos_validation=args.oos_validation,
         oos_unlock_token=args.oos_unlock_token,
         legacy_pool=args.legacy_pool,
+        write_quarterly_csv=args.write_quarterly_csv,
+        quarterly_output_dir=args.quarterly_output_dir,
     ))
