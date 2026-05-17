@@ -1,0 +1,12 @@
+{
+  "current_lockup": {
+    "created_at": "2026-02-15T00:00:00+00:00",
+    "end_date": "2026-05-15",
+    "last_validation_at": null,
+    "last_validation_outcome": null,
+    "start_date": "2026-02-15",
+    "unlock_token": "oos-2026-02-15-2026-05-15",
+    "unlock_token_used_at": null
+  },
+  "history": []
+}

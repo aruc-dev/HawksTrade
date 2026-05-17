@@ -201,8 +201,16 @@ python3 scheduler/run_walkforward.py --profile master
 Use locked OOS only for final capital-scaling validation:
 ```bash
 python3 scheduler/run_walkforward.py --profile master --oos-only --no-write-report --no-artifacts
+python3 scheduler/run_backtest.py --oos-validation --output reports/oos_validation_<date>.md
 ```
-Do not tune against OOS.
+Do not tune against OOS. The active 90-day lockup in `data/oos_lockup.json` is
+excluded from normal backtests; `--oos-validation` is a single-use final
+validation workflow and must not be repeated after strategy tuning.
+
+Before scaling any strategy allocation, confirm:
+- the strategy is not bypassing `validation.sample_size_scaling` risk tiers
+- bootstrap confidence intervals pass using lower-bound planning metrics
+- the latest SPA/multiple-testing report for that strategy shows `p < 0.20`
 
 For scripts, docs, dashboards, health checks, logging, tests, beads metadata, or
 other changes that do not affect profit, trades, strategies, strategy config,

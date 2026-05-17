@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from scheduler.run_validation_gate import (
+    evaluate_backtest_gate,
     evaluate_slippage_sensitivity_gate,
     evaluate_rsi_forward_gate,
     reliability_warnings,
@@ -105,6 +106,50 @@ class ValidationGateTests(unittest.TestCase):
 
         self.assertTrue(record["passed"])
         self.assertIn("reliability floor 30", record["warnings"][0])
+
+    def test_non_required_backtest_gate_skips_locked_oos_window(self):
+        gate = {"name": "crypto_recent_30d_watch", "days": 30, "required": False}
+        error = ValueError(
+            "Backtest window falls entirely inside the locked OOS range "
+            "2026-02-15..2026-05-15; use --oos-validation for the one-shot validation workflow."
+        )
+
+        with patch("scheduler.run_validation_gate.run_backtest", side_effect=error):
+            record = evaluate_backtest_gate(gate, {}, 10000)
+
+        self.assertTrue(record["passed"])
+        self.assertTrue(record["skipped"])
+        self.assertFalse(record["failures"])
+        self.assertIn("OOS lockup skipped", record["warnings"][0])
+
+    def test_required_backtest_gate_fails_locked_oos_window(self):
+        gate = {"name": "required_recent", "days": 30, "required": True}
+        error = ValueError(
+            "Backtest window falls entirely inside the locked OOS range "
+            "2026-02-15..2026-05-15; use --oos-validation for the one-shot validation workflow."
+        )
+
+        with patch("scheduler.run_validation_gate.run_backtest", side_effect=error):
+            record = evaluate_backtest_gate(gate, {}, 10000)
+
+        self.assertFalse(record["passed"])
+        self.assertTrue(record["skipped"])
+        self.assertIn("locked OOS range", record["failures"][0])
+
+    def test_slippage_sensitivity_skips_locked_oos_window(self):
+        gate = {"name": "crypto_recent_30d_watch", "days": 30, "required": False}
+        error = ValueError(
+            "Backtest window falls entirely inside the locked OOS range "
+            "2026-02-15..2026-05-15; use --oos-validation for the one-shot validation workflow."
+        )
+
+        with patch("scheduler.run_validation_gate.run_backtest", side_effect=error):
+            record = evaluate_slippage_sensitivity_gate(gate, {}, 10000, 30.0)
+
+        self.assertEqual(record["name"], "crypto_recent_30d_watch_slippage_30bps")
+        self.assertTrue(record["passed"])
+        self.assertTrue(record["skipped"])
+        self.assertIn("OOS lockup skipped", record["warnings"][0])
 
     def test_rsi_forward_gate_requires_paper_history(self):
         criteria = {

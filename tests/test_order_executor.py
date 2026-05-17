@@ -280,14 +280,16 @@ class OrderExecutorTests(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertEqual(result["status"], "submitted")
-        self.assertEqual(result["qty"], 2)
+        self.assertEqual(result["qty"], 0.5)
+        self.assertEqual(result["risk_tier"], "exploration:0")
         self.assertTrue(any("Entry order submitted for MSFT" in message for message in logs.output))
         self.assertFalse(any("WARNING:core.order_executor:Entry order submitted for MSFT" in message for message in logs.output))
 
         rows = [row for row in trade_log.read_trade_rows() if row["symbol"] == "MSFT"]
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["status"], "submitted")
-        self.assertEqual(rows[0]["qty"], "2")
+        self.assertEqual(rows[0]["qty"], "0.5")
+        self.assertEqual(rows[0]["risk_tier"], "exploration:0")
         self.assertFalse(any(row["symbol"] == "MSFT" for row in trade_log.get_open_trades()))
 
     def test_enter_position_blocks_live_strategy_when_readiness_gate_fails_before_price_fetch(self):
@@ -486,7 +488,7 @@ class OrderExecutorTests(unittest.TestCase):
         order = SimpleNamespace(
             id="entry-partial",
             status="partially_filled",
-            filled_qty="0.75",
+            filled_qty="0.25",
             filled_avg_price="100.5",
         )
 
@@ -500,12 +502,14 @@ class OrderExecutorTests(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertEqual(result["status"], "partially_filled")
-        self.assertEqual(result["qty"], 0.75)
+        self.assertEqual(result["qty"], 0.25)
+        self.assertEqual(result["risk_tier"], "exploration:0")
 
         rows = [row for row in trade_log.get_open_trades() if row["symbol"] == "MSFT"]
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["status"], "partially_filled")
-        self.assertEqual(rows[0]["qty"], "0.75")
+        self.assertEqual(rows[0]["qty"], "0.25")
+        self.assertEqual(rows[0]["risk_tier"], "exploration:0")
 
     def test_enter_position_reuses_client_order_id_after_submit_failure(self):
         seen_client_ids = []

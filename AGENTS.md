@@ -253,6 +253,13 @@ Capital must not scale unless the master walk-forward passes at the configured
 stressed cost threshold. Baseline and severe rows are diagnostic unless the
 profile lists them under `blocking_levels`; the locked OOS window scales its
 minimum trade-count gate to its shorter duration.
+The active 90-day OOS lockup in `data/oos_lockup.json` is excluded from normal
+backtests. Run `python3 scheduler/run_backtest.py --oos-validation --output
+reports/oos_validation_<date>.md` only for the single-use final validation; do
+not tune against the locked window afterward.
+Before scaling any strategy allocation, also confirm sample-size risk tiers are
+not bypassed, bootstrap CI lower bounds pass the relevant gates, and the latest
+SPA/multiple-testing report for that strategy has `p < 0.20`.
 
 ---
 
@@ -310,6 +317,14 @@ For major strategy releases or material strategy/config changes, also run:
 ```bash
 python3 scheduler/run_walkforward.py --profile master
 ```
+
+Use locked OOS only for final capital-scaling validation:
+```bash
+python3 scheduler/run_backtest.py --oos-validation --output reports/oos_validation_<date>.md
+```
+Do not tune against OOS.
+Do not bypass `validation.sample_size_scaling`; allocation increases also
+require passing bootstrap CI bounds and current SPA evidence (`p < 0.20`).
 
 For scripts, docs, dashboards, health checks, logging, tests, beads metadata, or
 other changes that do not affect profit, trades, strategies, strategy config,

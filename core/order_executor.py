@@ -21,9 +21,10 @@ from core.order_governor import GovernorDecision, OrderGovernor, OrderIntent
 from core import risk_manager as rm
 from core.config_loader import get_config
 from core.portfolio_construction import construct_entry_size
+from core.sample_size_governor import effective_risk_for, scale_quantity
 from core.strategy_readiness import ReadinessDecision, evaluate_strategy_live_readiness
 from tracking import order_intents
-from tracking.trade_log import log_trade, mark_trade_closed, get_trade_age_days
+from tracking.trade_log import log_trade, mark_trade_closed, get_trade_age_days, get_closed_trades
 
 # ── Setup ───────────────────────────────────────────────────────────────────
 
@@ -363,6 +364,13 @@ def _effective_entry_stop_loss(entry_price: float, atr_stop_price: float | None)
     return custom_stop if custom_stop < global_sl else global_sl
 
 
+def _closed_trades_for_strategy(strategy: str) -> list[dict]:
+    try:
+        return get_closed_trades(strategy=strategy)
+    except TypeError:
+        return [row for row in get_closed_trades() if row.get("strategy") == strategy]
+
+
 def _exit_failure_result(
     symbol: str,
     strategy: str,
@@ -461,12 +469,34 @@ def enter_position(
             kelly_sizer=rm.kelly_position_size,
             capper=rm.cap_position_qty,
         )
-        capped_qty = sizing.capped_qty
+        tier = effective_risk_for(
+            strategy,
+            CFG,
+            closed_trades=len(_closed_trades_for_strategy(strategy)),
+        )
+        base_position_cap_pct = float(CFG.get("trading", {}).get("max_position_pct", 0.08) or 0.08)
+        capped_qty = scale_quantity(
+            sizing.capped_qty,
+            tier,
+            base_position_cap_pct=base_position_cap_pct,
+            base_cap_qty=check["qty"],
+        )
         if capped_qty <= 0:
             log.info(f"Entry blocked for {symbol}: capped quantity is zero.")
             return None
         if sizing.capped:
             log.info(f"Entry size capped for {symbol}: requested={sizing.requested_qty} capped={capped_qty}")
+        if tier.risk_multiplier < 1.0 or tier.position_cap_pct < base_position_cap_pct or tier.override:
+            log.info(
+                "Sample-size risk tier for %s/%s: tier=%s closed_trades=%s "
+                "risk_multiplier=%.2f position_cap=%.2f%%",
+                strategy,
+                symbol,
+                tier.name,
+                tier.closed_trades,
+                tier.risk_multiplier,
+                tier.position_cap_pct * 100,
+            )
         qty = capped_qty
         order_type = "market" if ORDER_TYPE == "market" else "limit"
         limit_px = price * (1 + SLIPPAGE) if order_type == "limit" else None
@@ -550,6 +580,7 @@ def enter_position(
             "stop_loss":        sl,
             "take_profit":      tp,
             "high_water_price": entry_price,
+            "risk_tier":        tier.audit_label,
             "order_id":         order_id,
             "status":           action_status,
         }

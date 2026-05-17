@@ -24,6 +24,11 @@ rows are diagnostic unless they are listed under a profile's `blocking_levels`.
 The locked 60-day OOS check scales the minimum trade count from the 180-day
 master cadence.
 
+Phase 1 statistical reports now also require point-in-time universe membership,
+bootstrap confidence intervals with lower-bound gate metrics, sample-size risk
+tier visibility, and SPA-style multiple-testing evidence before allocation
+increases.
+
 ---
 
 ## Recommended Default Result

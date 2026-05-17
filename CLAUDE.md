@@ -122,9 +122,12 @@ Use locked OOS only for final capital-scaling validation:
 
 ```bash
 python3 scheduler/run_walkforward.py --profile master --oos-only --no-write-report --no-artifacts
+python3 scheduler/run_backtest.py --oos-validation --output reports/oos_validation_<date>.md
 ```
 
-Do not tune against OOS.
+Do not tune against OOS. The active 90-day lockup in `data/oos_lockup.json` is
+excluded from normal backtests; `--oos-validation` is a single-use final
+validation workflow and must not be repeated after strategy tuning.
 
 For scripts, docs, dashboards, health checks, logging, tests, beads metadata, or
 other changes that do not affect profit, trades, strategies, strategy config,
@@ -246,6 +249,13 @@ Momentum backtests can compare `--exit-policy fixed_hold`, `--exit-policy profit
 Use `--strategies momentum,rsi_reversion,gap_up,ma_crossover,range_breakout` and repeated `--set key.path=value` arguments for backtest-only all-strategy experiments without editing `config/config.yaml`.
 Run `python3 scheduler/run_validation_gate.py --profile production` before scaling live capital. Run `python3 scheduler/run_validation_gate.py --profile rsi` before scaling RSI Reversion allocation, `python3 scheduler/run_validation_gate.py --profile gap` before scaling Gap-Up, and `python3 scheduler/run_validation_gate.py --profile range` before scaling Range Breakout.
 Run `python3 scheduler/run_walkforward.py --profile master` before any capital-scaling decision. The master report must pass at the configured stressed cost level and be committed at `reports/walkforward_master.md`.
+Do not edit live `risk_per_trade_pct` or `trading.max_position_pct` to bypass
+sample-size discipline. Strategies below 30 closed trades are automatically
+capped by `validation.sample_size_scaling`; temporary exceptions must use an
+expiring override with a human-readable reason.
+Before scaling live allocation for any strategy, the latest SPA/multiple-testing
+report for that strategy must show `p < 0.20` against the configured parameter
+grid in `analysis/spa_test.py`.
 
 ---
 
@@ -371,6 +381,10 @@ The locked OOS window is intentionally separate. Run `python3 scheduler/run_walk
 only when final validation is needed; do not tune against that held-out period.
 Its minimum trade-count gate is scaled from the 180-day master cadence to the
 shorter OOS window.
+Run `python3 scheduler/run_backtest.py --oos-validation --output reports/oos_validation_<date>.md`
+only for the one-shot locked-window validation. The current OOS lockup must have
+a passing result within the last 30 days before any capital-scaling or
+strategy-enable decision.
 
 ---
 

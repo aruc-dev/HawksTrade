@@ -118,6 +118,13 @@ class TestGetConfig(unittest.TestCase):
         self.assertTrue(cfg["broker_stops"]["enabled"])
         self.assertFalse(cfg["broker_stops"]["submit_in_paper"])
         self.assertEqual(cfg["validation"]["min_reliable_trades"], 30)
+        self.assertTrue(cfg["validation"]["sample_size_scaling"]["enabled"])
+        self.assertEqual(
+            cfg["validation"]["sample_size_scaling"]["tiers"][0],
+            {"name": "exploration", "min_trades": 0, "risk_multiplier": 0.25, "position_cap_pct": 0.02},
+        )
+        self.assertTrue(cfg["validation"]["bootstrap"]["enabled"])
+        self.assertEqual(cfg["validation"]["bootstrap"]["n_iter"], 10000)
         self.assertEqual(cfg["validation"]["cost_model"]["sensitivity_levels_bps"], [10.0, 20.0, 30.0])
         self.assertEqual(cfg["validation"]["cost_model"]["sensitivity_soft_min_return_pct"], 0.08)
         self.assertTrue(cfg["validation"]["walkforward"]["enabled"])

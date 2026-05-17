@@ -19,6 +19,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
 from core.config_loader import get_config  # noqa: E402
+from analysis.bootstrap import gate_bounds  # noqa: E402
 from scheduler.run_backtest import run_backtest  # noqa: E402
 
 
@@ -43,29 +44,30 @@ def _format_ratio(value: float) -> str:
 def threshold_failures(stats: dict, gate: dict) -> list[str]:
     """Return human-readable threshold failures for a backtest gate."""
     failures: list[str] = []
+    bounds = gate_bounds(stats)
 
     min_return = gate.get("min_return_pct")
-    if min_return is not None and stats["return_pct"] < float(min_return):
+    if min_return is not None and bounds["return_pct"] < float(min_return):
         failures.append(
-            f"return {_format_pct(stats['return_pct'])} < required {_format_pct(float(min_return))}"
+            f"return {_format_pct(bounds['return_pct'])} < required {_format_pct(float(min_return))}"
         )
 
     max_drawdown = gate.get("max_drawdown_pct")
-    if max_drawdown is not None and stats["max_drawdown"] < -float(max_drawdown):
+    if max_drawdown is not None and bounds["max_drawdown"] < -float(max_drawdown):
         failures.append(
-            f"drawdown {_format_pct(stats['max_drawdown'])} exceeds -{float(max_drawdown):.2%}"
+            f"drawdown {_format_pct(bounds['max_drawdown'])} exceeds -{float(max_drawdown):.2%}"
         )
 
     min_profit_factor = gate.get("min_profit_factor")
-    if min_profit_factor is not None and stats["profit_factor"] < float(min_profit_factor):
+    if min_profit_factor is not None and bounds["profit_factor"] < float(min_profit_factor):
         failures.append(
-            f"profit_factor {_format_ratio(stats['profit_factor'])} < {float(min_profit_factor):.2f}"
+            f"profit_factor {_format_ratio(bounds['profit_factor'])} < {float(min_profit_factor):.2f}"
         )
 
     min_sharpe = gate.get("min_daily_sharpe")
-    if min_sharpe is not None and stats["daily_sharpe"] < float(min_sharpe):
+    if min_sharpe is not None and bounds["daily_sharpe"] < float(min_sharpe):
         failures.append(
-            f"daily_sharpe {stats['daily_sharpe']:.2f} < {float(min_sharpe):.2f}"
+            f"daily_sharpe {bounds['daily_sharpe']:.2f} < {float(min_sharpe):.2f}"
         )
 
     min_trades = gate.get("min_trades")
@@ -96,6 +98,38 @@ def reliability_warnings(stats: dict, min_reliable_trades: int) -> list[str]:
     ]
 
 
+def _empty_backtest_stats() -> dict:
+    return {
+        "return_pct": 0.0,
+        "max_drawdown": 0.0,
+        "trades": 0,
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "daily_sharpe": 0.0,
+    }
+
+
+def _oos_lockup_message(error: ValueError) -> str | None:
+    message = str(error)
+    if "locked OOS range" not in message:
+        return None
+    return message
+
+
+def _oos_blocked_record(gate: dict, message: str, *, name_suffix: str = "") -> dict:
+    required = bool(gate.get("required", True))
+    warning = f"OOS lockup skipped this non-required window: {message}"
+    return {
+        "name": f"{gate['name']}{name_suffix}",
+        "required": required,
+        "passed": not required,
+        "skipped": True,
+        "failures": [message] if required else [],
+        "warnings": [] if required else [warning],
+        "stats": _empty_backtest_stats(),
+    }
+
+
 def evaluate_backtest_gate(
     gate: dict,
     cost_model: dict,
@@ -104,15 +138,21 @@ def evaluate_backtest_gate(
     min_reliable_trades: int = 0,
 ) -> dict:
     """Run one configured backtest gate and return a pass/fail record."""
-    result = run_backtest(
-        days=int(gate["days"]),
-        initial_fund=initial_fund,
-        end_date=gate.get("end_date"),
-        use_screener=gate.get("screener"),
-        enabled_strategies=_as_list(gate.get("strategies")) or None,
-        cost_model=cost_model,
-        return_result=True,
-    )
+    try:
+        result = run_backtest(
+            days=int(gate["days"]),
+            initial_fund=initial_fund,
+            end_date=gate.get("end_date"),
+            use_screener=gate.get("screener"),
+            enabled_strategies=_as_list(gate.get("strategies")) or None,
+            cost_model=cost_model,
+            return_result=True,
+        )
+    except ValueError as exc:
+        oos_message = _oos_lockup_message(exc)
+        if oos_message is None:
+            raise
+        return _oos_blocked_record(gate, oos_message)
     stats = result["stats"]
     failures = threshold_failures(stats, gate)
     required = bool(gate.get("required", True))
@@ -149,24 +189,36 @@ def evaluate_slippage_sensitivity_gate(
     """Run a watch-only production window at a stressed slippage level."""
     stressed_cost_model = dict(cost_model)
     stressed_cost_model["slippage_bps"] = slippage_bps
-    result = run_backtest(
-        days=int(gate["days"]),
-        initial_fund=initial_fund,
-        end_date=gate.get("end_date"),
-        use_screener=gate.get("screener"),
-        enabled_strategies=_as_list(gate.get("strategies")) or None,
-        cost_model=stressed_cost_model,
-        return_result=True,
-    )
+    name_suffix = f"_slippage_{slippage_bps:g}bps"
+    try:
+        result = run_backtest(
+            days=int(gate["days"]),
+            initial_fund=initial_fund,
+            end_date=gate.get("end_date"),
+            use_screener=gate.get("screener"),
+            enabled_strategies=_as_list(gate.get("strategies")) or None,
+            cost_model=stressed_cost_model,
+            return_result=True,
+        )
+    except ValueError as exc:
+        oos_message = _oos_lockup_message(exc)
+        if oos_message is None:
+            raise
+        return _oos_blocked_record(
+            {**gate, "required": False},
+            oos_message,
+            name_suffix=name_suffix,
+        )
     stats = result["stats"]
     failures: list[str] = []
     soft_min_return = _float_value(cost_model.get("sensitivity_soft_min_return_pct"), math.nan)
-    if math.isfinite(soft_min_return) and stats["return_pct"] < soft_min_return:
+    bounds = gate_bounds(stats)
+    if math.isfinite(soft_min_return) and bounds["return_pct"] < soft_min_return:
         failures.append(
-            f"return {_format_pct(stats['return_pct'])} < sensitivity floor {_format_pct(soft_min_return)}"
+            f"return {_format_pct(bounds['return_pct'])} < sensitivity floor {_format_pct(soft_min_return)}"
         )
     return {
-        "name": f"{gate['name']}_slippage_{slippage_bps:g}bps",
+        "name": f"{gate['name']}{name_suffix}",
         "required": False,
         "passed": not failures,
         "failures": failures,
@@ -298,6 +350,14 @@ def evaluate_rsi_forward_gate(rows: list[dict], criteria: dict) -> dict:
 def _render_backtest_record(record: dict) -> str:
     stats = record["stats"]
     status = "PASS" if record["passed"] else ("FAIL" if record["required"] else "WARN")
+    if record.get("skipped"):
+        status = "FAIL" if record["required"] else "SKIP"
+        line = f"{status:4} {record['name']}: skipped"
+        if record["failures"]:
+            line += " | " + "; ".join(record["failures"])
+        if record.get("warnings"):
+            line += " | watch: " + "; ".join(record["warnings"])
+        return line
     line = (
         f"{status:4} {record['name']}: return={_format_pct(stats['return_pct'])}, "
         f"drawdown={_format_pct(stats['max_drawdown'])}, trades={stats['trades']}, "

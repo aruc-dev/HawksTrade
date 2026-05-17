@@ -24,8 +24,10 @@ from core.logging_config import runtime_log_handlers
 from core.portfolio import get_snapshot, print_snapshot
 from core.protection_manager import active_locks_for_reporting
 from core.run_markers import run_scope
+from core.sample_size_governor import format_tier_report
 from core.version import __version__
 from scheduler.reconcile_trade_log import safe_reconcile
+from tracking.trade_log import get_closed_trades
 from tracking.performance import compute_summary, format_report, save_performance_snapshot
 
 BASE_DIR    = Path(__file__).resolve().parent.parent
@@ -65,6 +67,14 @@ def _format_protection_locks() -> str:
     return "\n".join(lines)
 
 
+def _format_sample_size_tiers() -> str:
+    try:
+        return format_tier_report(CFG, get_closed_trades())
+    except Exception as exc:
+        log.warning("Sample-size tier reporting unavailable: %s", exc, exc_info=True)
+        return f"Sample-size tier reporting unavailable: {exc}"
+
+
 def run_daily_report():
     log.info("=== DAILY REPORT ===")
     ts = _utc_now().strftime("%Y-%m-%d")
@@ -81,6 +91,9 @@ def run_daily_report():
     protection_text = _format_protection_locks()
     if protection_text:
         log.warning("\n%s", protection_text)
+    sample_size_text = _format_sample_size_tiers()
+    if sample_size_text:
+        log.info("\n%s", sample_size_text)
 
     # Save report to file
     report_path = REPORTS_DIR / f"daily_{ts}.txt"
@@ -103,6 +116,9 @@ def run_daily_report():
         if protection_text:
             f.write(protection_text)
             f.write("\n\n")
+        if sample_size_text:
+            f.write(sample_size_text)
+            f.write("\n\n")
         f.write(report_text)
         f.write("\n")
 
@@ -121,6 +137,9 @@ def run_weekly_report():
     protection_text = _format_protection_locks()
     if protection_text:
         log.warning("\n%s", protection_text)
+    sample_size_text = _format_sample_size_tiers()
+    if sample_size_text:
+        log.info("\n%s", sample_size_text)
 
     report_path = REPORTS_DIR / f"weekly_{ts}.txt"
     with open(report_path, "w") as f:
@@ -129,6 +148,9 @@ def run_weekly_report():
         f.write(f"Mode: {CFG['mode'].upper()}\n\n")
         if protection_text:
             f.write(protection_text)
+            f.write("\n\n")
+        if sample_size_text:
+            f.write(sample_size_text)
             f.write("\n\n")
         f.write(report_text)
         f.write("\n")

@@ -16,14 +16,14 @@ and `CLAUDE.md`.
 
 ## Phase 1 - Statistical Hardening
 
-- [ ] **1.1 Implement OOS lockup enforcement.** Source:
+- [x] **1.1 Implement OOS lockup enforcement.** Source:
   `docs/phase1_statistical_hardening_plan.md`, `Item P1-6 - Out-of-Sample Lockup`.
   Create `data/oos_lockup.json`, add `core/data_lockup.py`, make backtests
   exclude the locked window by default, add `run_backtest.py --oos-validation`,
   add a pre-commit leakage check, document the unlock policy in
   `docs/oos_lockup_policy.md`, and update agent/operator docs.
 
-- [ ] **1.2 Replace forward-biased stock universe with a point-in-time
+- [x] **1.2 Replace forward-biased stock universe with a point-in-time
   universe.** Source: `docs/phase1_statistical_hardening_plan.md`,
   `Item P1-2 - Fix Universe Selection Bias`. Produce `docs/universe_audit.md`,
   add historical universe data under `data/universe/`, implement
@@ -32,7 +32,7 @@ and `CLAUDE.md`.
   `reports/universe_bias_audit.md`, and document the headline delta as prior
   survivorship bias.
 
-- [ ] **1.3 Enforce sample-size risk discipline in code.** Source:
+- [x] **1.3 Enforce sample-size risk discipline in code.** Source:
   `docs/phase1_statistical_hardening_plan.md`,
   `Item P1-3 - Code-Enforced Sample-Size Discipline`. Add configurable risk
   tiers, implement `core/sample_size_governor.py`, apply risk and position-cap
@@ -40,7 +40,7 @@ and `CLAUDE.md`.
   support audited expiring overrides, and cover tier boundaries, graduation, and
   override behavior in tests.
 
-- [ ] **1.4 Add bootstrap and Monte Carlo confidence intervals to backtests and
+- [x] **1.4 Add bootstrap and Monte Carlo confidence intervals to backtests and
   gates.** Source: `docs/phase1_statistical_hardening_plan.md`,
   `Item P1-4 - Bootstrap / Monte Carlo Confidence Intervals`. Implement
   `analysis/bootstrap.py` with trade resampling and block bootstrap, add CI
@@ -48,7 +48,7 @@ and `CLAUDE.md`.
   instead of point estimates, publish `reports/bootstrap_default_12m.md`, and
   document interpretation in `docs/interpreting_bootstrap_cis.md`.
 
-- [ ] **1.5 Add multiple-testing correction with Hansen SPA / White's Reality
+- [x] **1.5 Add multiple-testing correction with Hansen SPA / White's Reality
   Check.** Source: `docs/phase1_statistical_hardening_plan.md`,
   `Item P1-5 - Multiple-Testing Correction`. Define the strategy search-space
   catalog, implement `analysis/spa_test.py` using a vetted SPA implementation,
@@ -56,7 +56,7 @@ and `CLAUDE.md`.
   `reports/multiple_testing_correction.md`, and update the pre-scaling workflow
   so allocation increases require current SPA evidence.
 
-- [ ] **1.6 Complete Phase 1 closeout.** Source:
+- [x] **1.6 Complete Phase 1 closeout.** Source:
   `docs/phase1_statistical_hardening_plan.md`, `Acceptance Criteria for the
   Whole Phase`, `Phase 1 Cross-Cutting Concerns`, and `What "Done" Looks Like`.
   Verify PIT universe default, enforced sample-size caps, bootstrap CIs in
