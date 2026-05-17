@@ -199,7 +199,7 @@ class TestGetConfig(unittest.TestCase):
         self.assertEqual(strategies["ma_crossover"]["max_signals"], 1)
         self.assertEqual(strategies["range_breakout"]["breakout_pct"], 0.006)
         self.assertEqual(strategies["range_breakout"]["min_breakout_extension_pct"], 0.008)
-        self.assertEqual(strategies["range_breakout"]["min_close_location"], 0.70)
+        self.assertEqual(strategies["range_breakout"]["min_close_location"], 0.80)
         self.assertEqual(strategies["range_breakout"]["volume_multiplier"], 2.5)
         self.assertEqual(strategies["range_breakout"]["min_range_ratio"], 0.45)
         self.assertEqual(strategies["range_breakout"]["rsi_entry_max"], 82)

@@ -288,7 +288,7 @@ before scaling capital allocated to this sleeve.
 4. Today's range ≥ 45% of the 10-day average range — market is not compressed.
 5. Close is at least 0.8% and no more than 8% beyond the breakout level — requires
    real follow-through without chasing stale vertical moves.
-6. Close is in the upper 30% of the day's range — avoids weak breakout closes.
+6. Close is in the upper 20% of the day's range — avoids weak breakout closes.
 7. RSI(14) ≤ 82 — avoids severely overextended breakout closes.
 
 **Sizing:** Each signal carries a 2 × ATR(14) stop and ATR-risk quantity targeting
@@ -315,7 +315,7 @@ Stop-loss and take-profit from the global risk manager apply throughout.
 | `breakout_pct` | 0.6% above prior 20-day high |
 | `min_breakout_extension_pct` | 0.8% above breakout level |
 | `max_breakout_extension_pct` | 8% above breakout level |
-| `min_close_location` | 70% of daily range |
+| `min_close_location` | 80% of daily range |
 | `volume_multiplier` | 2.5× |
 | `volume_avg_period` | 20 |
 | `trend_ema_period` | 50 |
