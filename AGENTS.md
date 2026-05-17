@@ -206,7 +206,7 @@ Did any script fail?
 
 ## Validation Before Push / Deployment
 
-Run these checks before publishing code changes:
+Run these baseline checks before publishing code changes:
 ```bash
 python3 -m unittest discover -v
 python3 -W error::DeprecationWarning -m unittest discover
@@ -214,8 +214,33 @@ python3 -m compileall core strategies scheduler tracking tests
 python3 scheduler/run_scan.py --dry-run
 python3 scheduler/run_risk_check.py --dry-run
 python3 scheduler/run_report.py
+```
+
+For profit/trade-affecting changes, add the strategy validation ladder. This
+includes changes to `strategies/`, entry/exit logic, risk/protection/order
+sizing, trading config, strategy config, crypto/stock universes, validation
+thresholds, or anything expected to alter signals, trades, P&L, drawdown, or
+position count:
+```bash
+python3 scheduler/run_backtest.py --days 30 --fund 10000
+python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/29/2026 --screener --slippage-bps 10 --fee-bps 5 --min-fee 0
+python3 scheduler/run_validation_gate.py --profile production
 python3 scheduler/run_walkforward.py --quick --no-write-report --no-artifacts
 ```
+
+For major strategy releases or material strategy/config changes, also run:
+```bash
+python3 scheduler/run_walkforward.py --profile master
+```
+
+Use `--profile master --oos-only` only for final capital-scaling validation.
+Do not tune against the locked OOS window.
+
+For scripts, docs, dashboards, health checks, logging, tests, beads metadata, or
+other changes that do not affect profit, trades, strategies, strategy config,
+risk, position sizing, or validation thresholds, skip quick/master
+walk-forward and long backtest gates. Run unit tests and any focused tests for
+the touched script/module; run compileall when Python files changed.
 
 Only run a real paper-order lifecycle test when the human explicitly asks for it.
 
@@ -235,12 +260,13 @@ minimum trade-count gate to its shorter duration.
 
 You MUST adhere to these standards for every change:
 1. **Unit Testing**: Implement or update unit tests in the `tests/` directory for ALL logic changes.
-2. **Validation**: After EVERY change, run unit tests AND a 1-month backtest to confirm nothing is broken:
+2. **Validation**: For every code change, run unit tests before committing:
    ```bash
    python3 -m unittest discover -v
-   python3 scheduler/run_backtest.py --days 30 --fund 10000
    ```
-   Both must pass before committing. If either fails, fix the issue first.
+   Add the 1-month backtest and wider strategy gates only when the change can
+   affect profit, trades, strategies, strategy config, risk, position sizing, or
+   validation thresholds. If any required check fails, fix the issue first.
 3. **Documentation**: Update `README.md`, strategy tables, or backtest reports immediately if your changes affect system behavior or performance.
 
 ---
@@ -262,7 +288,7 @@ ackages in `requirements.txt`
 
 ## Validation Before Push / Deployment
 
-Run these checks before publishing code changes:
+Run these baseline checks before publishing code changes:
 ```bash
 python3 -m unittest discover -v
 python3 -W error::DeprecationWarning -m unittest discover
@@ -272,6 +298,25 @@ python3 scheduler/run_risk_check.py --dry-run
 python3 scheduler/run_report.py
 ```
 
+For profit/trade-affecting changes, add:
+```bash
+python3 scheduler/run_backtest.py --days 30 --fund 10000
+python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/29/2026 --screener --slippage-bps 10 --fee-bps 5 --min-fee 0
+python3 scheduler/run_validation_gate.py --profile production
+python3 scheduler/run_walkforward.py --quick --no-write-report --no-artifacts
+```
+
+For major strategy releases or material strategy/config changes, also run:
+```bash
+python3 scheduler/run_walkforward.py --profile master
+```
+
+For scripts, docs, dashboards, health checks, logging, tests, beads metadata, or
+other changes that do not affect profit, trades, strategies, strategy config,
+risk, position sizing, or validation thresholds, skip quick/master
+walk-forward and long backtest gates. Run unit tests and focused tests for the
+touched area instead; run compileall when Python files changed.
+
 Only run a real paper-order lifecycle test when the human explicitly asks for it.
 
 ---
@@ -280,12 +325,13 @@ Only run a real paper-order lifecycle test when the human explicitly asks for it
 
 You MUST adhere to these standards for every change:
 1. **Unit Testing**: Implement or update unit tests in the `tests/` directory for ALL logic changes.
-2. **Validation**: After EVERY change, run unit tests AND a 1-month backtest to confirm nothing is broken:
+2. **Validation**: For every code change, run unit tests before committing:
    ```bash
    python3 -m unittest discover -v
-   python3 scheduler/run_backtest.py --days 30 --fund 10000
    ```
-   Both must pass before committing. If either fails, fix the issue first.
+   Add the 1-month backtest and wider strategy gates only when the change can
+   affect profit, trades, strategies, strategy config, risk, position sizing, or
+   validation thresholds. If any required check fails, fix the issue first.
 3. **Documentation**: Update `README.md`, strategy tables, or backtest reports immediately if your changes affect system behavior or performance.
 
 ---

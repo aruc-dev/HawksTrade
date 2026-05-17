@@ -163,7 +163,7 @@ Did any script fail?
 
 ## Validation Before Push / Deployment
 
-Run these checks before publishing code changes:
+Run these baseline checks before publishing code changes:
 ```bash
 python3 -m unittest discover -v
 python3 -W error::DeprecationWarning -m unittest discover
@@ -175,13 +175,42 @@ python3 scheduler/run_report.py
 
 Only run a real paper-order lifecycle test when the human explicitly asks for it.
 
-After every code change, run both checks before committing:
+For every code change, run unit tests before committing:
 ```bash
 python3 -m unittest discover -v
-python3 scheduler/run_backtest.py --days 30 --fund 10000
 ```
 
-If either fails, fix the issue before proceeding.
+For profit/trade-affecting changes, also run:
+```bash
+python3 scheduler/run_backtest.py --days 30 --fund 10000
+python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/29/2026 --screener --slippage-bps 10 --fee-bps 5 --min-fee 0
+python3 scheduler/run_validation_gate.py --profile production
+python3 scheduler/run_walkforward.py --quick --no-write-report --no-artifacts
+```
+
+Profit/trade-affecting changes include `strategies/`, entry/exit logic,
+risk/protection/order sizing, trading config, strategy config, crypto/stock
+universes, validation thresholds, or anything expected to alter signals, trades,
+P&L, drawdown, or position count.
+
+For major strategy releases or material strategy/config changes, also run:
+```bash
+python3 scheduler/run_walkforward.py --profile master
+```
+
+Use locked OOS only for final capital-scaling validation:
+```bash
+python3 scheduler/run_walkforward.py --profile master --oos-only --no-write-report --no-artifacts
+```
+Do not tune against OOS.
+
+For scripts, docs, dashboards, health checks, logging, tests, beads metadata, or
+other changes that do not affect profit, trades, strategies, strategy config,
+risk, position sizing, or validation thresholds, skip quick/master
+walk-forward and long backtest gates. Run unit tests and focused tests for the
+touched area instead; run compileall when Python files changed.
+
+If any required check fails, fix the issue before proceeding.
 
 ---
 
