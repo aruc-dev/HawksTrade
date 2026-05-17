@@ -480,6 +480,7 @@ def _backtest_protection_rows(trades_log: list[dict]) -> list[dict]:
             "symbol": trade.get("symbol", ""),
             "strategy": trade.get("strategy", "unknown"),
             "pnl_pct": trade.get("pnl_pct", ""),
+            "portfolio_pnl_pct": trade.get("portfolio_pnl_pct", ""),
             "timestamp": timestamp,
             "exit_reason": trade.get("exit_reason", ""),
         })
@@ -862,6 +863,7 @@ class BacktestSimulator:
         strategy = getattr(req, "strategy", "unknown")
 
         if side == "buy":
+            entry_portfolio_value = self.get_portfolio_value()
             notional = qty * price
             fee = self._fee_for_notional(notional)
             cost = notional + fee
@@ -871,9 +873,17 @@ class BacktestSimulator:
                 old_pos = self.positions[symbol]
                 total_qty = old_pos["qty"] + qty
                 avg_price = (old_pos["qty"] * old_pos["entry_price"] + notional) / total_qty
+                old_basis = old_pos["qty"] * old_pos["entry_price"] + old_pos.get("entry_fee", 0.0)
+                new_basis = notional + fee
+                total_basis = old_basis + new_basis
+                old_entry_value = old_pos.get("entry_portfolio_value", entry_portfolio_value)
                 self.positions[symbol]["qty"] = total_qty
                 self.positions[symbol]["entry_price"] = avg_price
                 self.positions[symbol]["entry_fee"] = old_pos.get("entry_fee", 0.0) + fee
+                if total_basis > 0:
+                    self.positions[symbol]["entry_portfolio_value"] = (
+                        (old_entry_value * old_basis) + (entry_portfolio_value * new_basis)
+                    ) / total_basis
                 self.positions[symbol]["high_water_price"] = max(
                     old_pos.get("high_water_price", old_pos["entry_price"]),
                     price,
@@ -887,6 +897,7 @@ class BacktestSimulator:
                     "asset_class": "stock" if "/" not in symbol else "crypto", 
                     "strategy": strategy,
                     "entry_fee": fee,
+                    "entry_portfolio_value": entry_portfolio_value,
                 }
         else:
             if symbol not in self.positions: return MagicMock(id="failed")
@@ -900,10 +911,13 @@ class BacktestSimulator:
             pnl = (price - pos["entry_price"]) * sell_qty - entry_fee_share - fee
             cost_basis = (pos["entry_price"] * sell_qty) + entry_fee_share
             pnl_pct = pnl / cost_basis if cost_basis > 0 else 0.0
+            entry_portfolio_value = float(pos.get("entry_portfolio_value") or 0.0)
+            portfolio_pnl_pct = pnl / entry_portfolio_value if entry_portfolio_value > 0 else 0.0
             self.trades_log.append({
                 "symbol": symbol, "entry_date": pos["entry_date"], "exit_date": self.current_date,
                 "entry_price": pos["entry_price"], "exit_price": price, "qty": sell_qty,
-                "pnl": pnl, "pnl_pct": pnl_pct, "strategy": pos.get("strategy", "unknown")
+                "pnl": pnl, "pnl_pct": pnl_pct, "portfolio_pnl_pct": portfolio_pnl_pct,
+                "strategy": pos.get("strategy", "unknown")
             })
             if sell_qty >= pos["qty"]: del self.positions[symbol]
             else:

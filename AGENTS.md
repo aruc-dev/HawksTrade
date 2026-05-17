@@ -264,6 +264,9 @@ Capital must not scale unless the master walk-forward passes at the configured
 stressed cost threshold. Baseline and severe rows are diagnostic unless the
 profile lists them under `blocking_levels`; the locked OOS window scales its
 minimum trade-count gate to its shorter duration.
+Backtest protection rows carry position-size-adjusted `portfolio_pnl_pct` for
+portfolio-wide realized-drawdown locks; symbol stop-loss, strategy stop-loss,
+and low-profit protections still use raw closed-trade `pnl_pct`.
 The active 90-day OOS lockup in `data/oos_lockup.json` is excluded from normal
 backtests. Run `python3 scheduler/run_backtest.py --oos-validation --output
 reports/oos_validation_<date>.md` only for the single-use final validation; do
@@ -345,6 +348,9 @@ Use locked OOS only for final capital-scaling validation:
 python3 scheduler/run_backtest.py --oos-validation --output reports/oos_validation_<date>.md
 ```
 Do not tune against OOS.
+Backtest protection rows carry position-size-adjusted `portfolio_pnl_pct` for
+portfolio-wide realized-drawdown locks; symbol stop-loss, strategy stop-loss,
+and low-profit protections still use raw closed-trade `pnl_pct`.
 Do not bypass `validation.sample_size_scaling`; allocation increases also
 require passing bootstrap CI bounds and current SPA evidence (`p < 0.20`).
 

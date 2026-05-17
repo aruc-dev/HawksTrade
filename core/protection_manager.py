@@ -203,6 +203,14 @@ def _row_pnl_pct(row: Mapping) -> float | None:
     return _parse_float(row.get("pnl_pct"))
 
 
+def _row_portfolio_pnl_pct(row: Mapping) -> float | None:
+    for key in ("portfolio_pnl_pct", "portfolio_return_pct", "portfolio_impact_pct"):
+        parsed = _parse_float(row.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
 def _is_stoploss_row(row: Mapping, cfg: ProtectionConfig) -> bool:
     reason = str(row.get("exit_reason") or row.get("reason") or "").lower()
     if any(term in reason for term in STOPLOSS_REASON_TERMS):
@@ -423,18 +431,22 @@ class ProtectionManager:
         points = []
         for row in rows:
             ts = _row_timestamp(row)
-            pnl_pct = _row_pnl_pct(row)
-            if ts is None or ts < cutoff or pnl_pct is None:
+            return_pct = _row_portfolio_pnl_pct(row)
+            return_source = "portfolio_pnl_pct"
+            if return_pct is None:
+                return_pct = _row_pnl_pct(row)
+                return_source = "pnl_pct"
+            if ts is None or ts < cutoff or return_pct is None:
                 continue
-            points.append((ts, pnl_pct))
+            points.append((ts, return_pct, return_source))
         points.sort(key=lambda item: item[0])
         if not points:
             return None
         equity = 1.0
         peak = 1.0
         max_drawdown = 0.0
-        for _ts, pnl_pct in points:
-            equity *= 1.0 + pnl_pct
+        for _ts, return_pct, _source in points:
+            equity *= 1.0 + return_pct
             peak = max(peak, equity)
             drawdown = (equity - peak) / peak if peak > 0 else 0.0
             max_drawdown = min(max_drawdown, drawdown)
@@ -449,7 +461,11 @@ class ProtectionManager:
             trigger=f"max_drawdown={max_drawdown:.6f}",
             created_at=latest_ts,
             expires_at=latest_ts + timedelta(days=self.config.max_drawdown_cooldown_days),
-            metadata={"max_drawdown_pct": max_drawdown, "trades": len(points)},
+            metadata={
+                "max_drawdown_pct": max_drawdown,
+                "trades": len(points),
+                "return_sources": sorted({source for _ts, _return, source in points}),
+            },
         )
 
     def _read_locks(self) -> list[ProtectionLock]:
