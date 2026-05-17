@@ -11,7 +11,7 @@
 | Strategy | Asset | Status | File |
 |---|---|---|---|
 | Momentum | Stocks | **Enabled** | `momentum.py` |
-| RSI Reversion | Stocks | **Disabled by default** | `rsi_reversion.py`; live entries require paper-readiness evidence if enabled |
+| RSI Reversion | Stocks | **Enabled as conditional bear/chop sleeve** | `rsi_reversion.py`; live entries require paper-readiness evidence |
 | Gap-Up | Stocks | **Enabled** | `gap_up.py` |
 | MA Crossover | Crypto | **Enabled** | `ma_crossover.py`; live entries require paper-readiness evidence |
 | Range Breakout | Crypto | **Enabled** | `range_breakout.py`; high-water profit protection enabled; live entries require paper-readiness evidence |
@@ -106,7 +106,7 @@ room while the global 3.5% stop remains the baseline fixed-percentage stop.
 
 ---
 
-## 2. RSI Reversion *(Stocks — Disabled by default)*
+## 2. RSI Reversion *(Stocks — Enabled, conditional bear/chop sleeve)*
 
 **Type:** Mean reversion, swing trade.
 
@@ -142,6 +142,7 @@ absent; otherwise the ATR stop can widen the trade's breathing room.
 | Parameter | Value |
 |---|---|
 | `rsi_period` | 14 |
+| `market_regime_mode` | `bear_or_chop_only` |
 | `oversold_threshold` | 40 |
 | `overbought_threshold` | 50 (RSI neutral exit) |
 | `hold_days` | 10 business days |
@@ -163,14 +164,17 @@ absent; otherwise the ATR stop can widen the trade's breathing room.
 | `max_recent_drawdown_pct` | 10% |
 
 **Regime filters:**
+- Bear/chop mode: stand down when the stock market regime filter is bullish
+  (SPY or QQQ above SMA50); only scan when that regime check is not bullish.
 - Crash filter: skip if SPY is >20% below its 252-day peak.
 - VIX proxy: skip if SPY realised HV(20) > 200-day HV MA × `vix_multiplier` (default: 0.95).
 
-**Monitoring gate:** This strategy is disabled in the active default profile.
-Continue running `python3 scheduler/run_validation_gate.py --profile rsi` before
-enabling it or scaling its capital allocation. The gate requires cost-aware backtest performance
-plus at least 60 paper-trading days, 20 closed RSI trades, 48% win rate, 1.15
-profit factor, +2% aggregate paper return, and max drawdown no worse than 4%.
+**Monitoring gate:** RSI is included in the default validation and walk-forward
+profiles only through its conditional bear/chop regime filter. Continue running
+`python3 scheduler/run_validation_gate.py --profile rsi` before scaling its
+capital allocation. The gate requires cost-aware backtest performance plus at
+least 60 paper-trading days, 20 closed RSI trades, 48% win rate, 1.15 profit
+factor, +2% aggregate paper return, and max drawdown no worse than 4%.
 
 **Live readiness:** If this sleeve is enabled in live mode, runtime entries are
 blocked until the trade log shows at least 20 closed paper exits and 60 calendar

@@ -40,6 +40,7 @@ import numpy as np
 from strategies.base_strategy import BaseStrategy
 from strategies.atr_sizing import atr_stop_and_qty
 from core import alpaca_client as ac
+from core import risk_manager as rm
 from core.config_loader import get_config
 
 CFG = get_config()
@@ -248,6 +249,7 @@ class RSIReversionStrategy(BaseStrategy):
             if max_loss_exit_pct > 0
             else "max-loss disabled"
         )
+        market_regime_mode = str(SCFG.get("market_regime_mode", "normal")).strip().lower()
 
         log.info(
             f"[RSI] Scanning {len(universe)} symbols "
@@ -277,6 +279,19 @@ class RSIReversionStrategy(BaseStrategy):
                 log.warning(f"[RSI] Failed to pre-fetch SPY for regime filters: {e}")
 
         allow_regime_warmup = bool(kwargs.get("allow_regime_warmup", False))
+
+        if market_regime_mode in {"bear_or_chop_only", "bear_only"}:
+            if rm.market_regime_ok(
+                bars_data=regime_bars,
+                allow_warmup=allow_regime_warmup,
+            ):
+                log.info("[RSI] Bull market regime — bear/chop sleeve standing down.")
+                return []
+        elif market_regime_mode not in {"", "normal", "all"}:
+            log.warning(
+                "[RSI] Unknown market_regime_mode=%s; using normal RSI regime filters.",
+                market_regime_mode,
+            )
 
         if _in_severe_crash(bars_data=regime_bars, allow_warmup=allow_regime_warmup):
             log.info("[RSI] Severe crash (SPY >20% below 252d peak) — skipping scan.")

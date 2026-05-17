@@ -150,7 +150,7 @@ class TestGetConfig(unittest.TestCase):
         self.assertTrue(cfg["trading"]["crypto_correlation_guard"]["enabled"])
         self.assertEqual(cfg["trading"]["crypto_correlation_guard"]["max_correlation"], 0.85)
         self.assertTrue(strategies["momentum"]["enabled"])
-        self.assertFalse(strategies["rsi_reversion"]["enabled"])
+        self.assertTrue(strategies["rsi_reversion"]["enabled"])
         self.assertTrue(strategies["ma_crossover"]["enabled"])
         self.assertTrue(strategies["range_breakout"]["enabled"])
         self.assertTrue(strategies["gap_up"]["enabled"])
@@ -170,6 +170,7 @@ class TestGetConfig(unittest.TestCase):
         self.assertEqual(strategies["momentum"]["max_stop_loss_pct"], 0.05)
         self.assertEqual(strategies["rsi_reversion"]["live_readiness"]["min_closed_paper_trades"], 20)
         self.assertEqual(strategies["rsi_reversion"]["live_readiness"]["min_paper_days"], 60)
+        self.assertEqual(strategies["rsi_reversion"]["market_regime_mode"], "bear_or_chop_only")
         self.assertEqual(strategies["rsi_reversion"]["oversold_threshold"], 40)
         self.assertEqual(strategies["rsi_reversion"]["vix_multiplier"], 0.95)
         self.assertEqual(strategies["rsi_reversion"]["volume_spike_ratio"], 0.7)
@@ -214,11 +215,11 @@ class TestGetConfig(unittest.TestCase):
         }
         self.assertEqual(
             production_windows["default_12m_costed"]["strategies"],
-            ["momentum", "gap_up", "ma_crossover", "range_breakout"],
+            ["momentum", "rsi_reversion", "gap_up", "ma_crossover", "range_breakout"],
         )
         self.assertEqual(
             production_windows["default_6m_costed"]["strategies"],
-            ["momentum", "gap_up", "ma_crossover", "range_breakout"],
+            ["momentum", "rsi_reversion", "gap_up", "ma_crossover", "range_breakout"],
         )
         self.assertEqual(production_windows["default_12m_costed"]["end_date"], "04/29/2026")
         self.assertEqual(production_windows["default_6m_costed"]["end_date"], "04/29/2026")

@@ -200,14 +200,15 @@ strategies:
     volume_spike_ratio: 2.0        # Legacy daily fallback: latest daily volume must exceed this multiple of the 20-day average
 
   rsi_reversion:
-    enabled: false
+    enabled: true
     asset_class: stocks
-    description: "Balanced RSI mean reversion. Entry: RSI<40, %B<20%, liquidity confirmation, 1-bar recovery, price within 15% below and 15% above SMA200, 5-day drawdown <=10%, and ATR/price <=5%. ATR stop extension: 0.8×ATR(14), capped at 6% max stop distance; the global stop governs when the ATR stop is tighter or absent. Exit: price reaches SMA20, RSI>50, 6% daily-close max-loss, or 10-day cap. Regime: skip on severe crash (SPY >20% below 252d peak) or elevated realised-volatility proxy."
+    description: "Conditional bear/chop RSI mean reversion. Entry: RSI<40, %B<20%, liquidity confirmation, 1-bar recovery, price within 15% below and 15% above SMA200, 5-day drawdown <=10%, and ATR/price <=5%. ATR stop extension: 0.8×ATR(14), capped at 6% max stop distance; the global stop governs when the ATR stop is tighter or absent. Exit: price reaches SMA20, RSI>50, 6% daily-close max-loss, or 10-day cap. Regime: stand down in bull regimes, skip severe crash (SPY >20% below 252d peak) or elevated realised-volatility proxy."
     live_readiness:
       enabled: true
       min_closed_paper_trades: 20
       min_paper_days: 60
     rsi_period: 14
+    market_regime_mode: "bear_or_chop_only" # Only scan when the stock regime filter is not in bull mode.
     oversold_threshold: 40          # Entry: RSI below this level (oversold/recovering)
     overbought_threshold: 50        # Exit: RSI above this (momentum neutral = edge evaporated)
     hold_days: 10                   # Hard exit after 10 business days
@@ -361,7 +362,7 @@ validation:
       master:
         window_days: 180
         screener: true
-        strategies: [momentum, gap_up, ma_crossover, range_breakout]
+        strategies: [momentum, rsi_reversion, gap_up, ma_crossover, range_breakout]
         windows:
           - end_date: "12/31/2019"
             label: calm_bull_2019
@@ -412,7 +413,7 @@ validation:
       quick:
         window_days: 180
         screener: true
-        strategies: [momentum, gap_up, ma_crossover, range_breakout]
+        strategies: [momentum, rsi_reversion, gap_up, ma_crossover, range_breakout]
         windows:
           - end_date: "09/30/2020"
             label: covid_crash_2020
@@ -448,7 +449,7 @@ validation:
         days: 365
         end_date: "04/29/2026"
         screener: true
-        strategies: [momentum, gap_up, ma_crossover, range_breakout]
+        strategies: [momentum, rsi_reversion, gap_up, ma_crossover, range_breakout]
         required: true
         min_return_pct: 0.10
         max_drawdown_pct: 0.06
@@ -459,7 +460,7 @@ validation:
         days: 180
         end_date: "04/29/2026"
         screener: true
-        strategies: [momentum, gap_up, ma_crossover, range_breakout]
+        strategies: [momentum, rsi_reversion, gap_up, ma_crossover, range_breakout]
         required: true
         min_return_pct: 0.015
         max_drawdown_pct: 0.04
