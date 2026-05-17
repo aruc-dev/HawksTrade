@@ -588,19 +588,21 @@ Steps:
 1. Ensure `ALPACA_LIVE_API_KEY` and `ALPACA_LIVE_SECRET_KEY` are filled in
    `/etc/hawkstrade/hawkstrade.secrets` (or in Secrets Manager if using
    `fetch_secrets.sh`)
-2. Set `mode: live` — either edit `config/config.yaml` directly, or (preferred on EC2) create `config/config.local.yaml` containing just `mode: live`, so the change is not overwritten by a `git pull`
-3. Re-fetch secrets: `sudo systemctl restart hawkstrade-secrets.service`
-4. Verify connection:
+2. Run `python3 scheduler/run_validation_gate.py --profile production` and confirm it passes
+3. Set `mode: live` — either edit `config/config.yaml` directly, or (preferred on EC2) create `config/config.local.yaml` containing just `mode: live`, so the change is not overwritten by a `git pull`
+4. Add `HAWKSTRADE_LIVE_ACK=I_UNDERSTAND_REAL_MONEY` to `/etc/hawkstrade/hawkstrade.env`
+5. Re-fetch secrets: `sudo systemctl restart hawkstrade-secrets.service`
+6. Verify connection:
 
 ```bash
-HAWKSTRADE_REQUIRE_SHM=1 .venv/bin/python -c "
+HAWKSTRADE_REQUIRE_SHM=1 HAWKSTRADE_LIVE_ACK=I_UNDERSTAND_REAL_MONEY .venv/bin/python -c "
 import sys; sys.path.insert(0, '.')
 from core.alpaca_client import get_account
 print(get_account().portfolio_value)
 "
 ```
 
-5. Confirm a real order appears in the Alpaca live dashboard after the next scan
+7. Confirm a real order appears in the Alpaca live dashboard after the next scan
 
 ---
 

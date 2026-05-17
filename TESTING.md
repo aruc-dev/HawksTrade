@@ -31,7 +31,8 @@ print('open_orders', len(ac.get_open_orders()))
 ```
 
 Expected:
-- `mode` is `paper` unless the human explicitly approved live mode.
+- `mode` is `paper` unless the human explicitly approved live mode and the
+  process environment includes `HAWKSTRADE_LIVE_ACK=I_UNDERSTAND_REAL_MONEY`.
 - Account status is active.
 - Position and open-order counts are visible.
 

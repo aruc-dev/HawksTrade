@@ -314,10 +314,12 @@ Only do this after:
 - [ ] Human owner has explicitly said "switch to live"
 
 Steps:
-1. Edit `config/config.yaml` → `mode: live`
-2. Ensure `ALPACA_LIVE_API_KEY` and `ALPACA_LIVE_SECRET_KEY` are in `config/.env` or `.env`
-3. Fund your Alpaca live account
-4. Run a manual test: `python3 scheduler/run_scan.py` and verify a real order appears in Alpaca dashboard
+1. Run `python3 scheduler/run_validation_gate.py --profile production` and confirm it passes
+2. Edit `config/config.yaml` → `mode: live`
+3. Ensure `ALPACA_LIVE_API_KEY` and `ALPACA_LIVE_SECRET_KEY` are in `config/.env` or `.env`
+4. Set `HAWKSTRADE_LIVE_ACK=I_UNDERSTAND_REAL_MONEY` in the shell or scheduler environment, not `config/.env`
+5. Fund your Alpaca live account
+6. Run a manual test with the acknowledgement in the process environment and verify a real order appears in Alpaca dashboard
 
 ---
 

@@ -121,11 +121,12 @@ Did any script fail?
 ## Absolute Rules
 
 1. **Never switch `mode: paper` to `mode: live`** unless the human explicitly says so in chat.
-2. **Never change risk parameters** such as stop-loss, position size, or daily loss limit without human approval.
-3. **Never place a trade if Alpaca connection fails**. Log the error and skip.
-4. **Never ignore a `DailyLossLimitExceeded` condition**. Stop all trading immediately.
-5. **Always log every action** using the log files in `logs/`.
-6. **Intraday trading is OFF by default**. Do not enable it.
+2. **Never set `HAWKSTRADE_LIVE_ACK=I_UNDERSTAND_REAL_MONEY`** until live mode is approved and the production validation gate passes.
+3. **Never change risk parameters** such as stop-loss, position size, or daily loss limit without human approval.
+4. **Never place a trade if Alpaca connection fails**. Log the error and skip.
+5. **Never ignore a `DailyLossLimitExceeded` condition**. Stop all trading immediately.
+6. **Always log every action** using the log files in `logs/`.
+7. **Intraday trading is OFF by default**. Do not enable it.
 
 ---
 

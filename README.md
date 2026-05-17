@@ -94,6 +94,13 @@ windows, and reports watch-only warnings for weak recent crypto windows:
 python3 scheduler/run_validation_gate.py --profile production
 ```
 
+`mode: live` fails closed unless the process environment includes the exact
+runtime acknowledgement `HAWKSTRADE_LIVE_ACK=I_UNDERSTAND_REAL_MONEY`. Set that
+only after the production gate passes and the owner explicitly approves live
+trading. The acknowledgement is checked before local dotenv files are loaded, so
+set it in the shell, scheduler, or systemd environment rather than in
+`config/.env`.
+
 RSI Reversion is enabled in the active default profile. Use its dedicated gate as an ongoing monitoring check before scaling its capital allocation:
 
 ```bash

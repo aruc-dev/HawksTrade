@@ -129,6 +129,10 @@ sudo systemctl disable --now 'hawkstrade-*.timer'
   in `/etc/hawkstrade/hawkstrade.env` to adjust retention.
 - Keep `HAWKSTRADE_REQUIRE_SHM=1` enabled on EC2 so missing RAM secrets fail
   closed instead of falling back to disk dotenv files.
+- When switching `mode: live`, set
+  `HAWKSTRADE_LIVE_ACK=I_UNDERSTAND_REAL_MONEY` in
+  `/etc/hawkstrade/hawkstrade.env` only after the production validation gate
+  passes. Without that runtime acknowledgement, live-mode imports fail closed.
 - The crypto-only timer can overlap with the hourly full scan. Crypto-only scans
   use a non-blocking lock and may exit 75 when the full scan owns the trade lock;
   `hawkstrade-crypto-scan.service` marks that exit as successful, and

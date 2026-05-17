@@ -49,6 +49,24 @@ MODE = CFG["mode"].strip().lower()  # "paper" or "live"
 if MODE not in {"paper", "live"}:
     raise ValueError("config mode must be 'paper' or 'live'")
 
+LIVE_ACK_ENV = "HAWKSTRADE_LIVE_ACK"
+LIVE_ACK_VALUE = "I_UNDERSTAND_REAL_MONEY"
+
+
+def _require_live_runtime_ack(mode: str) -> None:
+    if mode != "live":
+        return
+    if os.getenv(LIVE_ACK_ENV, "").strip() == LIVE_ACK_VALUE:
+        return
+    raise EnvironmentError(
+        "Live trading mode requires explicit runtime acknowledgement. "
+        f"Set {LIVE_ACK_ENV}={LIVE_ACK_VALUE} in the process environment only "
+        "after the production validation gate passes."
+    )
+
+
+_require_live_runtime_ack(MODE)
+
 
 def _env_truthy(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}

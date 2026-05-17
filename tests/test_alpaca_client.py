@@ -362,6 +362,61 @@ class AlpacaClientTests(unittest.TestCase):
         self.assertEqual(price, 249.0)
 
 
+class LiveModeInterlockTests(unittest.TestCase):
+    def test_live_mode_requires_runtime_ack_before_loading_secrets(self):
+        import importlib
+        from unittest.mock import MagicMock
+
+        fake_cfg = {"mode": "live", "secrets_source": "local"}
+        mock_load_dotenv = MagicMock()
+
+        try:
+            with (
+                patch("yaml.safe_load", return_value=fake_cfg),
+                patch("dotenv.load_dotenv", mock_load_dotenv),
+                patch.dict(os.environ, {"HAWKSTRADE_LIVE_ACK": ""}, clear=False),
+            ):
+                with self.assertRaisesRegex(
+                    EnvironmentError,
+                    "HAWKSTRADE_LIVE_ACK=I_UNDERSTAND_REAL_MONEY",
+                ):
+                    importlib.reload(alpaca_client)
+
+            mock_load_dotenv.assert_not_called()
+        finally:
+            with patch.dict(
+                os.environ,
+                {"HAWKSTRADE_LIVE_ACK": alpaca_client.LIVE_ACK_VALUE},
+                clear=False,
+            ):
+                importlib.reload(alpaca_client)
+
+    def test_live_mode_allows_explicit_runtime_ack(self):
+        import importlib
+        from unittest.mock import MagicMock
+
+        fake_cfg = {"mode": "live", "secrets_source": "local"}
+        mock_load_dotenv = MagicMock()
+
+        try:
+            with (
+                patch("yaml.safe_load", return_value=fake_cfg),
+                patch("dotenv.load_dotenv", mock_load_dotenv),
+                patch.dict(
+                    os.environ,
+                    {"HAWKSTRADE_LIVE_ACK": alpaca_client.LIVE_ACK_VALUE},
+                    clear=False,
+                ),
+            ):
+                importlib.reload(alpaca_client)
+
+            self.assertEqual(alpaca_client.MODE, "live")
+            mock_load_dotenv.assert_any_call(alpaca_client.BASE_DIR / "config" / ".env")
+            mock_load_dotenv.assert_any_call(alpaca_client.BASE_DIR / ".env", override=True)
+        finally:
+            importlib.reload(alpaca_client)
+
+
 
 class SecretsSourceShmTests(unittest.TestCase):
     """Tests for secrets_source: shm path in alpaca_client module load."""
