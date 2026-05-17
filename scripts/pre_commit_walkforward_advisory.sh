@@ -47,8 +47,9 @@ echo "walk-forward advisory: running quick profile because staged files touch st
 ) >"$tmp_output" 2>&1
 status=$?
 
-if awk '/^# /{printing=1} printing{print}' "$tmp_output"; then
-  :
+summary=$(awk '/^# /{printing=1} printing{print}' "$tmp_output")
+if [ -n "$summary" ]; then
+  printf '%s\n' "$summary"
 else
   tail -n 80 "$tmp_output"
 fi

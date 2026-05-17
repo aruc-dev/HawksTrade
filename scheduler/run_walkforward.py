@@ -68,6 +68,13 @@ def _format_ratio(value: float) -> str:
     return "inf" if math.isinf(value) else f"{value:.2f}"
 
 
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(BASE_DIR))
+    except ValueError:
+        return str(path)
+
+
 def _as_strategy_list(value) -> list[str] | None:
     if not value:
         return None
@@ -528,10 +535,7 @@ def _render_profile_report(
         lines.append("Backtest semantics:")
         lines.extend(f"- {note}" for note in sorted(execution_notes))
     if artifact_dir:
-        try:
-            artifact_text = str(artifact_dir.relative_to(BASE_DIR))
-        except ValueError:
-            artifact_text = str(artifact_dir)
+        artifact_text = _display_path(artifact_dir)
         lines.append("")
         lines.append(f"Raw JSON artifacts: `{artifact_text}`")
     if not oos_only:
@@ -589,7 +593,7 @@ def _maybe_file_regression_issue(
         f"Required: {binding_summary['required']:.1%}",
     ]
     if report_path:
-        body_lines.append(f"Report: {report_path.relative_to(BASE_DIR)}")
+        body_lines.append(f"Report: {_display_path(report_path)}")
     body_lines.append("")
     body_lines.append("Stop-the-line policy: pause new entries or capital scaling until explained.")
     completed = subprocess.run(

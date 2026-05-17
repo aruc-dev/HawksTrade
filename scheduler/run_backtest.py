@@ -597,11 +597,11 @@ def _compute_strategy_attribution(df_trades: pd.DataFrame) -> dict:
         trades = int(len(group))
         attribution[str(strategy)] = {
             "trades": trades,
-            "win_rate": float((pnl > 0).mean()) if trades else 0.0,
-            "avg_pnl_pct": float(pnl_pct.mean()) if trades else 0.0,
+            "win_rate": float((pnl > 0).mean()),
+            "avg_pnl_pct": float(pnl_pct.mean()),
             "total_pnl": float(pnl.sum()),
-            "best_pnl_pct": float(pnl_pct.max()) if trades else 0.0,
-            "worst_pnl_pct": float(pnl_pct.min()) if trades else 0.0,
+            "best_pnl_pct": float(pnl_pct.max()),
+            "worst_pnl_pct": float(pnl_pct.min()),
             "profit_factor": _compute_profit_factor(group),
         }
     return attribution

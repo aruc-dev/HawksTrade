@@ -2,10 +2,11 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from scheduler.run_walkforward import (
     WalkForwardThresholds,
+    _maybe_file_regression_issue,
     _configured_profile_windows,
     build_rolling_windows,
     get_walkforward_profile,
@@ -316,6 +317,37 @@ class WalkForwardTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("| baseline | advisory | 0/2 | 0.0% | 100.0% | FAIL |", output)
         self.assertIn("| stressed | blocking | 2/2 | 100.0% | 100.0% | PASS |", output)
+
+    def test_regression_issue_uses_absolute_report_path_outside_repo(self):
+        profile = _profile_cfg()
+        profile["regression_issue"]["auto_file"] = True
+        outside_report = Path("/tmp/hawkstrade-outside-walkforward.md")
+        summary = {
+            "stressed": {
+                "result": False,
+                "passed": 0,
+                "total": 2,
+                "pass_rate": 0.0,
+                "required": 1.0,
+            }
+        }
+        completed = Mock(returncode=0, stdout="created issue", stderr="")
+
+        with (
+            patch("scheduler.run_walkforward.shutil.which", return_value="/usr/bin/bd"),
+            patch("scheduler.run_walkforward.subprocess.run", return_value=completed) as run_bd,
+        ):
+            output = _maybe_file_regression_issue(
+                profile_name="unit",
+                summary=summary,
+                profile_cfg=profile,
+                report_path=outside_report,
+                force=None,
+            )
+
+        self.assertEqual(output, "created issue")
+        body = run_bd.call_args.args[0][4]
+        self.assertIn(f"Report: {outside_report}", body)
 
 
 if __name__ == "__main__":
