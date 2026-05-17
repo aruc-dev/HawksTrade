@@ -706,7 +706,11 @@ class RunScanTests(unittest.TestCase):
         with (
             patch.object(run_scan.ProtectionManager, "from_config", return_value=AllowProtectionManager()),
             patch.object(run_scan.ac, "is_market_open", return_value=True),
-            patch.object(run_scan.ac, "get_crypto_bars", return_value={"BTC/USD": [object()] * 21}),
+            patch.object(
+                run_scan.ac,
+                "get_crypto_bars",
+                return_value={"BTC/USD": [object()] * run_scan.rm.crypto_regime_required_bars()},
+            ),
             patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
             patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
             patch.object(run_scan, "CRYPTO_STRATEGIES", [FakeCryptoStrategy()]),
@@ -870,7 +874,11 @@ class RunScanTests(unittest.TestCase):
         with (
             patch.dict(run_scan.CFG["trading"], {"max_positions": 10, "max_crypto_positions": 1, "min_crypto_positions": 0}),
             patch.object(run_scan.ac, "is_market_open", return_value=True),
-            patch.object(run_scan.ac, "get_crypto_bars", return_value={"BTC/USD": [object()] * 21}),
+            patch.object(
+                run_scan.ac,
+                "get_crypto_bars",
+                return_value={"BTC/USD": [object()] * run_scan.rm.crypto_regime_required_bars()},
+            ),
             patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
             patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
             patch.object(run_scan, "CRYPTO_STRATEGIES", [FakeCrypto()]),

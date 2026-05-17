@@ -1057,6 +1057,7 @@ def _apply_runtime_strategy_config(cfg: dict) -> None:
 
 def _patch_runtime_risk_config(stack: contextlib.ExitStack, cfg: dict) -> None:
     """Apply backtest-only trading config overrides to risk manager globals."""
+    stack.enter_context(patch("core.risk_manager.CFG", cfg))
     stack.enter_context(patch("core.risk_manager.T", cfg["trading"]))
     stack.enter_context(patch(
         "core.risk_manager.INTRADAY_ENABLED",

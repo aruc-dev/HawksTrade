@@ -46,14 +46,14 @@ HawksTrade includes a high-fidelity historical simulator. The current tail-risk-
 | **RSI Reversion** | US Stocks | Disabled by default; RSI < 40, %B < 20%, SMA-200 within +/-15%, 0.7x volume confirmation, 1-bar recovery, 5-day drawdown <= 10%, ATR/price <= 5%, 0.8x ATR stop capped at 6%, and profit protection when enabled | Mean reversion with crash, realised-volatility, tail-loss, and high-water trailing guards. |
 | **Gap-Up** | US Stocks | Enabled; true 5-15% opening gap, 1.3x opening-volume pace, 65% breadth guard, prior close above SMA-200, <=35% SMA-200 extension, top-1 ranked signal, 2-day hold, failed-gap exit | Opening momentum sleeve with completed-bar trend confirmation, minute-bar entry confirmation, and ATR-risk sizing. |
 | **EMA Crossover** | Crypto | 6/18 EMA, latest completed cross only, top-1 ranked signal, RSI 35-75, slope + volatility filters, 3-day drawdown guard, price/EMA confirmation, 2% daily-close max-loss exit, 16-day hold cap | Bullish EMA crossover with BTC regime gate and tighter same-scan concentration control. |
-| **Range Breakout** | Crypto | Enabled; 20-day high close breakout, 2.5x volume, rising EMA-50, RSI, 0.8%-8% breakout-extension, upper-range close guards, and profit protection | Ranked Donchian-style breakout sleeve with failed-breakout, trend-loss, and high-water trailing exits. |
+| **Range Breakout** | Crypto | Enabled; 20-day high close breakout, 2.5x volume, rising EMA-50, RSI, 0.8%-8% breakout-extension, upper-10% close guard, and profit protection | Ranked Donchian-style breakout sleeve with failed-breakout, trend-loss, and high-water trailing exits. |
 
 **Crypto Universe**: `BTC/USD`, `ETH/USD`, `SOL/USD`, `LINK/USD`, `XRP/USD`, `ADA/USD`, `AVAX/USD`, `DOGE/USD`, `LTC/USD`, `DOT/USD`, `UNI/USD`, `AAVE/USD`.
 
 ### Market Regime Filters
 
 - **Stock Regime Guards**: Momentum and Gap-Up use the SPY/QQQ SMA-50 regime gate. RSI Reversion has separate crash and realised-volatility filters.
-- **BTC EMA-20 (Crypto)**: EMA Crossover and Range Breakout are gated by BTC/USD trading above its 20-day EMA.
+- **BTC EMA-20 (Crypto)**: EMA Crossover and Range Breakout are gated by BTC/USD trading above its 20-day EMA, with the EMA not falling more than 0.5% over the last 5 days.
 
 Live/paper scans fail closed when regime data is unavailable or insufficient, blocking new entries until the bot can confirm market conditions. Backtests still allow early warmup periods with insufficient bars so simulations can start before every long-window filter is populated.
 

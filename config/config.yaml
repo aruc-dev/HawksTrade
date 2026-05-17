@@ -149,6 +149,11 @@ screener:
 
 # --- CRYPTO UNIVERSE ---
 crypto:
+  regime_filter:
+    ema_period: 20
+    min_ema_slope_lookback_days: 5
+    min_ema_slope_pct: -0.005   # BTC EMA20 may not fall more than 0.5% over 5d.
+    min_price_above_ema_pct: 0.0
   scan_universe:
     - BTC/USD
     - ETH/USD
@@ -306,7 +311,7 @@ strategies:
     breakout_pct: 0.006          # Close must break 0.6% beyond the Donchian high
     min_breakout_extension_pct: 0.008 # Require at least 0.8% follow-through above breakout level
     max_breakout_extension_pct: 0.08  # Avoid chasing closes >8% beyond the breakout level
-    min_close_location: 0.80      # Require close in upper 20% of the daily range
+    min_close_location: 0.90      # Require close in upper 10% of the daily range
     volume_multiplier: 2.5       # Volume must be 2.5x average to confirm breakout
     volume_avg_period: 20        # Lookback for average volume confirmation
     timeframe: "1Day"

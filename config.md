@@ -27,7 +27,8 @@ The latest validated default configuration is:
 | RSI Reversion | enabled, `oversold_threshold: 40`, `max_entry_atr_pct: 0.05`, `max_recent_drawdown_pct: 0.10` | Active mean-reversion stock sleeve with crash, realised-volatility, high-ATR, recent-waterfall, and max-loss guards. |
 | Gap-Up | enabled, `require_prior_close_above_trend: true` | Opening-momentum sleeve with true-gap, opening-volume pace, completed-bar trend, and top-1 ranking guards. |
 | MA Crossover | enabled, `hold_days: 16`, `max_loss_exit_pct: 0.02` | Positive crypto contribution with recent-window weakness reduced while avoiding the older large-loss tail seen with a 3% exit. |
-| Range Breakout | enabled | Crypto Donchian breakout sleeve with volume, trend, RSI, 0.8%-8% extension, close-location, and failed-breakout guards. |
+| Crypto regime filter | `EMA20` + 5-day slope guard | Crypto entries require BTC/USD above EMA20 and the EMA20 not falling more than 0.5% over five days. |
+| Range Breakout | enabled | Crypto Donchian breakout sleeve with volume, trend, RSI, 0.8%-8% extension, upper-10% close-location, and failed-breakout guards. |
 | Momentum exit policy | `profit_trailing` | Exits flat/losing trades after the minimum hold while allowing winners to run under trailing protection. |
 
 Latest recommended 12-month result:
@@ -480,7 +481,7 @@ range_breakout:
   breakout_pct: 0.006
   min_breakout_extension_pct: 0.008
   max_breakout_extension_pct: 0.08
-  min_close_location: 0.70
+  min_close_location: 0.90
   volume_multiplier: 2.5
   volume_avg_period: 20
   timeframe: "1Day"
@@ -503,7 +504,7 @@ range_breakout:
 Recommended: enabled in the all-strategy profile, with continued monitoring.
 
 The implementation uses confirmed daily 20-day Donchian high breakouts, ranked
-signal selection, ATR-risk sizing, breakout-extension and close-location quality
+signal selection, ATR-risk sizing, breakout-extension and upper-10% close-location quality
 guards, and explicit failed-breakout exits before the 14-day hold cap. Its
 12-month all-enabled contribution was positive, but sample size remains low.
 Live entries are therefore gated until the trade log shows 25 closed paper exits

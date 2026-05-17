@@ -39,8 +39,8 @@ The current recommended configuration uses:
 - `momentum` enabled with `top_n: 2`, `min_momentum_pct: 0.08`, `volume_spike_ratio: 2.0`, and `min_breadth_coverage_pct: 0.65`
 - `rsi_reversion` enabled with RSI<40 entries, crash, realised-volatility, 5-day drawdown, high-ATR entry, and 6% tail-loss guards
 - `gap_up` enabled with true-gap, opening-volume pace, SMA200, and top-1 ranking guards
-- `ma_crossover` enabled with 3-day follow-through, price/EMA confirmation, a 2% daily-close max-loss exit, and a 16-day hold cap
-- `range_breakout` enabled with 20-day Donchian breakout, trend, volume, RSI, extension, upper-range close, and failed-breakout guards
+- `ma_crossover` enabled with 3-day follow-through, price/EMA confirmation, BTC EMA20 slope gating, a 2% daily-close max-loss exit, and a 16-day hold cap
+- `range_breakout` enabled with 20-day Donchian breakout, trend, volume, RSI, extension, upper-10% close, BTC EMA20 slope gating, and failed-breakout guards
 
 These costed results enforce `trading.max_position_pct: 0.08` for every entry, including momentum/Kelly sizing, and assume 10 bps adverse slippage plus 5 bps fees per side. The active default enables every configured strategy. The latest tuning hardens RSI tail risk while preserving a positive recent crypto sleeve. Global stop-loss, take-profit, daily-loss halt, max-position cap, and mode remain unchanged.
 

@@ -270,7 +270,8 @@ before scaling capital allocated to this sleeve.
 | `volume_spike_ratio` | 1.0 |
 | `vol_filter_period` | 10 |
 
-**Regime filter:** BTC/USD > 20-day EMA (crypto bull regime required).
+**Regime filter:** BTC/USD > 20-day EMA, and the EMA20 may not be falling more
+than 0.5% over five days.
 
 **Live readiness:** Live entries are blocked until the trade log shows at least
 25 closed paper exits and 90 calendar days of paper validation for this sleeve.
@@ -292,7 +293,7 @@ before scaling capital allocated to this sleeve.
 4. Today's range ≥ 45% of the 10-day average range — market is not compressed.
 5. Close is at least 0.8% and no more than 8% beyond the breakout level — requires
    real follow-through without chasing stale vertical moves.
-6. Close is in the upper 20% of the day's range — avoids weak breakout closes.
+6. Close is in the upper 10% of the day's range — avoids weak breakout closes.
 7. RSI(14) ≤ 82 — avoids severely overextended breakout closes.
 
 **Sizing:** Each signal carries a 2 × ATR(14) stop and ATR-risk quantity targeting
@@ -334,7 +335,8 @@ Stop-loss and take-profit from the global risk manager apply throughout.
 | `timeframe` | 1Day |
 | `hold_days` | 14 calendar days |
 
-**Regime filter:** BTC/USD > 20-day EMA (crypto bull regime required).
+**Regime filter:** BTC/USD > 20-day EMA, and the EMA20 may not be falling more
+than 0.5% over five days.
 
 ---
 

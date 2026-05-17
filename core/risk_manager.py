@@ -32,6 +32,33 @@ INTRADAY_ENABLED = CFG["intraday"]["enabled"]
 log = logging.getLogger("risk_manager")
 
 
+def _cfg_int(value, default: int, *, minimum: int = 0) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, parsed)
+
+
+def _cfg_float(value, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return parsed
+
+
+def _crypto_regime_filter_config() -> dict:
+    return (CFG.get("crypto", {}) or {}).get("regime_filter", {}) or {}
+
+
+def crypto_regime_required_bars() -> int:
+    cfg = _crypto_regime_filter_config()
+    ema_period = _cfg_int(cfg.get("ema_period"), 20, minimum=1)
+    slope_lookback = _cfg_int(cfg.get("min_ema_slope_lookback_days"), 0, minimum=0)
+    return max(ema_period + 1, ema_period + slope_lookback + 1)
+
+
 # ── Daily P&L Tracking ───────────────────────────────────────────────────────
 
 _session_start_value: Optional[float] = None
@@ -471,7 +498,8 @@ def market_breadth_pct(universe: list, bars_data: dict | None = None) -> float:
 
 def crypto_regime_ok(bars_data=None, allow_warmup: bool = False) -> bool:
     """
-    Returns True if BTC/USD is above its 20-day EMA — indicates crypto bull regime.
+    Returns True if BTC/USD is above its configured EMA and the EMA slope guard
+    is not deteriorating beyond the configured tolerance.
     When bars_data is provided (backtest), uses pre-fetched BTC bars.
     In live trading, fetches from Alpaca directly.
 
@@ -483,34 +511,64 @@ def crypto_regime_ok(bars_data=None, allow_warmup: bool = False) -> bool:
     favourable, we should block new entries rather than assume they are.
     """
     try:
+        regime_cfg = _crypto_regime_filter_config()
+        ema_period = _cfg_int(regime_cfg.get("ema_period"), 20, minimum=1)
+        slope_lookback = _cfg_int(regime_cfg.get("min_ema_slope_lookback_days"), 0, minimum=0)
+        min_ema_slope = _cfg_float(regime_cfg.get("min_ema_slope_pct"), float("-inf"))
+        min_price_above_ema = _cfg_float(regime_cfg.get("min_price_above_ema_pct"), 0.0)
+        required_bars = crypto_regime_required_bars()
+
         if bars_data is not None and not bars_data:
             log.warning("[CryptoRegime] Empty regime bars supplied; blocking new entries (fail closed).")
             return False
 
         if bars_data is not None:
             btc_bars = bars_data.get("BTC/USD")
-            if btc_bars is None or len(btc_bars) < 21:
+            if btc_bars is None or len(btc_bars) < required_bars:
                 if allow_warmup:
                     return True
-                log.warning("[CryptoRegime] Insufficient supplied BTC/USD bars for EMA20; blocking new entries (fail closed).")
+                log.warning(
+                    "[CryptoRegime] Insufficient supplied BTC/USD bars for EMA%s + slope guard; "
+                    "blocking new entries (fail closed).",
+                    ema_period,
+                )
                 return False
             closes = _get_closes(btc_bars)
         else:
             # live mode — fail closed if data is unavailable or insufficient
-            raw = ac.get_crypto_bars(["BTC/USD"], timeframe="1Day", limit=25)
+            raw = ac.get_crypto_bars(["BTC/USD"], timeframe="1Day", limit=max(required_bars, 25))
             btc_bars = raw["BTC/USD"]
-            if btc_bars is None or len(btc_bars) < 21:
+            if btc_bars is None or len(btc_bars) < required_bars:
                 log.warning(
-                    "[CryptoRegime] Insufficient BTC/USD bars for EMA20 (%s bars); "
+                    "[CryptoRegime] Insufficient BTC/USD bars for EMA%s + slope guard (%s bars); "
                     "blocking new entries (fail closed).",
+                    ema_period,
                     len(btc_bars) if btc_bars is not None else 0,
                 )
                 return False
             closes = _get_closes(btc_bars)
-        ema20 = closes.ewm(span=20, adjust=False).mean().iloc[-1]
+        ema = closes.ewm(span=ema_period, adjust=False).mean()
+        ema_now = float(ema.iloc[-1])
         current = float(closes.iloc[-1])
-        is_bull = current > ema20
-        log.debug(f"[CryptoRegime] BTC={current:.2f} EMA20={ema20:.2f} bull={is_bull}")
+        price_threshold = ema_now * (1 + min_price_above_ema)
+        is_bull = current > price_threshold
+        ema_slope = 0.0
+        if is_bull and slope_lookback > 0:
+            ema_then = float(ema.iloc[-(slope_lookback + 1)])
+            ema_slope = (ema_now / ema_then) - 1 if ema_then > 0 else float("-inf")
+            is_bull = ema_slope >= min_ema_slope
+        log.debug(
+            "[CryptoRegime] BTC=%.2f EMA%s=%.2f price_threshold=%.2f "
+            "ema_slope_%sd=%.2f%% min_slope=%.2f%% bull=%s",
+            current,
+            ema_period,
+            ema_now,
+            price_threshold,
+            slope_lookback,
+            ema_slope * 100,
+            min_ema_slope * 100,
+            is_bull,
+        )
         return is_bull
     except Exception as e:
         log.warning(

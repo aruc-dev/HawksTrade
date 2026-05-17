@@ -807,6 +807,7 @@ class TestBacktestExperimentControls(unittest.TestCase):
         self.assertEqual(cfg["screener"]["max_atr_pct"], 0.06)
 
     def test_runtime_risk_config_applies_backtest_trading_overrides(self):
+        original_cfg = rm.CFG
         original_t = rm.T
         original_intraday = rm.INTRADAY_ENABLED
         cfg = {
@@ -815,16 +816,20 @@ class TestBacktestExperimentControls(unittest.TestCase):
                 "take_profit_pct": 0.25,
                 "stop_loss_pct": 0.06,
             },
+            "crypto": {"regime_filter": {"ema_period": 30}},
             "intraday": {"enabled": True},
         }
 
         with contextlib.ExitStack() as stack:
             _patch_runtime_risk_config(stack, cfg)
 
+            self.assertIs(rm.CFG, cfg)
+            self.assertEqual(rm.crypto_regime_required_bars(), 31)
             self.assertAlmostEqual(rm.take_profit_price(100), 125.0)
             self.assertAlmostEqual(rm.stop_loss_price(100), 94.0)
             self.assertTrue(rm.intraday_allowed())
 
+        self.assertIs(rm.CFG, original_cfg)
         self.assertIs(rm.T, original_t)
         self.assertEqual(rm.INTRADAY_ENABLED, original_intraday)
 

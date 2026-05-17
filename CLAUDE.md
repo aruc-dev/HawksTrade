@@ -254,8 +254,8 @@ Each can be individually enabled/disabled.
 | `momentum` | Stocks | Buy the top 2 sector-diversified names by 5-day alpha momentum with a 4% floor, optional ATR-scaled momentum gate, 1.5x elapsed-session volume pace, 1.2x ATR stop extension, and 65% breadth coverage; exit flat/losing trades after 4 trading days and let profitable trades run with trailing protection |
 | `rsi_reversion` | Stocks | Enabled by default; mean reversion with RSI < 35, %B < 20%, liquidity confirmation, 1-bar recovery, SMA200 band, 0.8x ATR stop extension, and stricter crash/volatility guards |
 | `gap_up` | Stocks | Enabled by default; true 6-15% opening gap with 1.5x opening-volume pace, 75% breadth guard, <=35% SMA200 extension, top-1 ranked signal, 2-day hold, failed-gap and trend-loss exits |
-| `ma_crossover` | Crypto | Buy the top-ranked latest completed 6-EMA cross above 18-EMA (daily bars), with a 1% daily-close max-loss exit |
-| `range_breakout` | Crypto | Enabled by default; ranked 20-day Donchian-style breakout with 3.0x volume, trend, RSI, extension, and failed-breakout guards |
+| `ma_crossover` | Crypto | Buy the top-ranked latest completed 6-EMA cross above 18-EMA (daily bars), gated by BTC above EMA20 with no more than 0.5% 5-day EMA deterioration, with a 2% daily-close max-loss exit |
+| `range_breakout` | Crypto | Enabled by default; ranked 20-day Donchian-style breakout with 2.5x volume, upper-10% close, trend, RSI, extension, and failed-breakout guards |
 
 Momentum backtests can compare `--exit-policy fixed_hold`, `--exit-policy profit_trailing`, and `--exit-policy risk_only_baseline`. Use `risk_only_baseline` only as a benchmark for the old no-hold-exit behavior, not as the default live policy.
 Use `--strategies momentum,rsi_reversion,gap_up,ma_crossover,range_breakout` and repeated `--set key.path=value` arguments for backtest-only all-strategy experiments without editing `config/config.yaml`.
