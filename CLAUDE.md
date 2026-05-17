@@ -100,7 +100,8 @@ For profit/trade-affecting changes, also run the strategy validation ladder:
 
 ```bash
 python3 -W error::DeprecationWarning -m unittest discover
-python3 -m compileall core strategies scheduler tracking tests screener
+python3 -m compileall core strategies scheduler tracking tests scripts screener
+python3 scripts/check_oos_lockup_leakage.py
 python3 scheduler/run_backtest.py --days 30 --fund 10000
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/29/2026 --screener --slippage-bps 10 --fee-bps 5 --min-fee 0
 python3 scheduler/run_validation_gate.py --profile production
@@ -115,8 +116,12 @@ P&L, drawdown, or position count.
 For major strategy releases or material strategy/config changes, also run:
 
 ```bash
+python3 scheduler/run_backtest.py --days 30 --fund 10000 --end-date <last-pre-lockup-date>
 python3 scheduler/run_walkforward.py --profile master
 ```
+
+Use the explicit `--end-date` fallback only when the normal 30-day backtest is
+blocked because the entire current window is inside the active OOS lockup.
 
 Use locked OOS only for final capital-scaling validation:
 

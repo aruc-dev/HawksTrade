@@ -210,7 +210,8 @@ Run these baseline checks before publishing code changes:
 ```bash
 python3 -m unittest discover -v
 python3 -W error::DeprecationWarning -m unittest discover
-python3 -m compileall core strategies scheduler tracking tests
+python3 -m compileall core strategies scheduler tracking tests scripts
+python3 scripts/check_oos_lockup_leakage.py
 python3 scheduler/run_scan.py --dry-run
 python3 scheduler/run_risk_check.py --dry-run
 python3 scheduler/run_report.py
@@ -230,8 +231,11 @@ python3 scheduler/run_walkforward.py --quick --no-write-report --no-artifacts
 
 For major strategy releases or material strategy/config changes, also run:
 ```bash
+python3 scheduler/run_backtest.py --days 30 --fund 10000 --end-date <last-pre-lockup-date>
 python3 scheduler/run_walkforward.py --profile master
 ```
+Use the explicit `--end-date` fallback only when the normal 30-day backtest is
+blocked because the entire current window is inside the active OOS lockup.
 
 Use `--profile master --oos-only` only for final capital-scaling validation.
 Do not tune against the locked OOS window.
@@ -299,7 +303,8 @@ Run these baseline checks before publishing code changes:
 ```bash
 python3 -m unittest discover -v
 python3 -W error::DeprecationWarning -m unittest discover
-python3 -m compileall core strategies scheduler tracking tests
+python3 -m compileall core strategies scheduler tracking tests scripts
+python3 scripts/check_oos_lockup_leakage.py
 python3 scheduler/run_scan.py --dry-run
 python3 scheduler/run_risk_check.py --dry-run
 python3 scheduler/run_report.py
@@ -315,8 +320,11 @@ python3 scheduler/run_walkforward.py --quick --no-write-report --no-artifacts
 
 For major strategy releases or material strategy/config changes, also run:
 ```bash
+python3 scheduler/run_backtest.py --days 30 --fund 10000 --end-date <last-pre-lockup-date>
 python3 scheduler/run_walkforward.py --profile master
 ```
+Use the explicit `--end-date` fallback only when the normal 30-day backtest is
+blocked because the entire current window is inside the active OOS lockup.
 
 Use locked OOS only for final capital-scaling validation:
 ```bash
