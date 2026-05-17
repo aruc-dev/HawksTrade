@@ -120,6 +120,26 @@ class TestGetConfig(unittest.TestCase):
         self.assertEqual(cfg["validation"]["min_reliable_trades"], 30)
         self.assertEqual(cfg["validation"]["cost_model"]["sensitivity_levels_bps"], [10.0, 20.0, 30.0])
         self.assertEqual(cfg["validation"]["cost_model"]["sensitivity_soft_min_return_pct"], 0.08)
+        self.assertTrue(cfg["validation"]["walkforward"]["enabled"])
+        self.assertEqual(
+            len(cfg["validation"]["walkforward"]["profiles"]["master"]["windows"]),
+            7,
+        )
+        self.assertEqual(
+            cfg["validation"]["walkforward"]["profiles"]["master"]["oos_lock"]["must_pass_at"],
+            "stressed",
+        )
+        self.assertEqual(
+            cfg["validation"]["walkforward"]["profiles"]["master"]["blocking_levels"],
+            ["stressed"],
+        )
+        self.assertTrue(
+            cfg["validation"]["walkforward"]["profiles"]["master"]["oos_lock"]["scale_min_trades_to_window"]
+        )
+        self.assertEqual(
+            cfg["validation"]["walkforward"]["profiles"]["quick"]["cost_levels"][0]["name"],
+            "stressed",
+        )
         self.assertTrue(cfg["trading"]["crypto_correlation_guard"]["enabled"])
         self.assertEqual(cfg["trading"]["crypto_correlation_guard"]["max_correlation"], 0.85)
         self.assertTrue(strategies["momentum"]["enabled"])

@@ -90,19 +90,49 @@ ALPACA_LIVE_SECRET_KEY=...   # Leave blank until ready for live trading
 
 ## Validation After Every Change
 
-After EVERY code change, you MUST run both of the following before committing:
+After every code change, run unit tests before committing:
 
-1. **Unit tests** — must pass with zero failures:
-   ```bash
-   python3 -m unittest discover -v
-   ```
+```bash
+python3 -m unittest discover -v
+```
 
-2. **1-month backtest** — must complete and produce a trades report (not "No trades executed."):
-   ```bash
-   python3 scheduler/run_backtest.py --days 30 --fund 10000
-   ```
+For profit/trade-affecting changes, also run the strategy validation ladder:
 
-If either check fails, fix the issue before proceeding. Do not commit broken code.
+```bash
+python3 -W error::DeprecationWarning -m unittest discover
+python3 -m compileall core strategies scheduler tracking tests screener
+python3 scheduler/run_backtest.py --days 30 --fund 10000
+python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/29/2026 --screener --slippage-bps 10 --fee-bps 5 --min-fee 0
+python3 scheduler/run_validation_gate.py --profile production
+python3 scheduler/run_walkforward.py --quick --no-write-report --no-artifacts
+```
+
+Profit/trade-affecting changes include `strategies/`, entry/exit logic,
+risk/protection/order sizing, trading config, strategy config, crypto/stock
+universes, validation thresholds, or anything expected to alter signals, trades,
+P&L, drawdown, or position count.
+
+For major strategy releases or material strategy/config changes, also run:
+
+```bash
+python3 scheduler/run_walkforward.py --profile master
+```
+
+Use locked OOS only for final capital-scaling validation:
+
+```bash
+python3 scheduler/run_walkforward.py --profile master --oos-only --no-write-report --no-artifacts
+```
+
+Do not tune against OOS.
+
+For scripts, docs, dashboards, health checks, logging, tests, beads metadata, or
+other changes that do not affect profit, trades, strategies, strategy config,
+risk, position sizing, or validation thresholds, skip quick/master
+walk-forward and long backtest gates. Run unit tests and focused tests for the
+touched area instead; run compileall when Python files changed.
+
+If any required check fails, fix the issue before proceeding. Do not commit broken code.
 
 ## Output Persistence
 
@@ -195,6 +225,7 @@ The AI agent should run these scripts on this schedule:
 | `scheduler/run_report.py` | Performance & portfolio report | `--weekly` |
 | `scheduler/run_backtest.py` | Historical strategy simulation | `--days`, `--fund`, `--exit-policy`, `--screener`, `--no-screener`, `--strategies`, `--set` |
 | `scheduler/run_validation_gate.py` | Cost-aware production readiness gates | `--profile production`, `--profile rsi`, `--profile range`, `--profile gap`, `--profile all` |
+| `scheduler/run_walkforward.py` | Multi-regime walk-forward validation | `--profile master`, `--quick`, `--oos-only` |
 
 ---
 
@@ -214,6 +245,7 @@ Each can be individually enabled/disabled.
 Momentum backtests can compare `--exit-policy fixed_hold`, `--exit-policy profit_trailing`, and `--exit-policy risk_only_baseline`. Use `risk_only_baseline` only as a benchmark for the old no-hold-exit behavior, not as the default live policy.
 Use `--strategies momentum,rsi_reversion,gap_up,ma_crossover,range_breakout` and repeated `--set key.path=value` arguments for backtest-only all-strategy experiments without editing `config/config.yaml`.
 Run `python3 scheduler/run_validation_gate.py --profile production` before scaling live capital. Run `python3 scheduler/run_validation_gate.py --profile rsi` before scaling RSI Reversion allocation, `python3 scheduler/run_validation_gate.py --profile gap` before scaling Gap-Up, and `python3 scheduler/run_validation_gate.py --profile range` before scaling Range Breakout.
+Run `python3 scheduler/run_walkforward.py --profile master` before any capital-scaling decision. The master report must pass at the configured stressed cost level and be committed at `reports/walkforward_master.md`.
 
 ---
 
@@ -311,6 +343,8 @@ If you are Claude and you are reading this as part of a scheduled task:
 Only do this after:
 - [ ] At least 30 days of paper trading reviewed
 - [ ] Win rate > 50% and positive total P&L
+- [ ] Master walk-forward passed at the stressed cost level within the last 30 days
+- [ ] `reports/walkforward_master.md` was regenerated and committed from `python3 scheduler/run_walkforward.py --profile master`
 - [ ] Human owner has explicitly said "switch to live"
 
 Steps:
@@ -318,6 +352,25 @@ Steps:
 2. Ensure `ALPACA_LIVE_API_KEY` and `ALPACA_LIVE_SECRET_KEY` are in `config/.env` or `.env`
 3. Fund your Alpaca live account
 4. Run a manual test: `python3 scheduler/run_scan.py` and verify a real order appears in Alpaca dashboard
+
+---
+
+## 13a. Walk-Forward Stop-The-Line Policy
+
+The configured multi-regime gate is the capital-scaling gate. The master profile
+uses `blocking_levels: [stressed]`; baseline and severe rows are diagnostic
+unless a future config explicitly makes them blocking. If a regenerated
+`walkforward_master` report falls below the configured pass-rate threshold at the
+stressed cost level, the agent must:
+
+1. Pause any "scale capital", "enable strategy", or new-entry expansion work.
+2. File a beads issue with the failing profile, pass rate, failing windows, and report path.
+3. Revert the change that caused the regression, or pause new entries until the human owner reviews the regression.
+
+The locked OOS window is intentionally separate. Run `python3 scheduler/run_walkforward.py --profile master --oos-only`
+only when final validation is needed; do not tune against that held-out period.
+Its minimum trade-count gate is scaled from the 180-day master cadence to the
+shorter OOS window.
 
 ---
 
@@ -351,7 +404,7 @@ moving to a new system are:
 
 For every modification to the codebase:
 1. **Unit Tests**: You MUST implement or update relevant unit tests in the `tests/` directory.
-2. **Validation**: Always run the full test suite (`python3 -m unittest discover`) before pushing.
+2. **Validation**: Always run the full test suite (`python3 -m unittest discover`) before pushing. Add backtests, validation gates, and walk-forward only when the change can affect profit, trades, strategies, strategy config, risk, position sizing, or validation thresholds. Skip quick/master walk-forward for ordinary scripts, docs, dashboards, health checks, logging, tests, and beads metadata.
 3. **Documentation**: If strategy parameters, risk rules, or core logic change, you MUST update the following files to reflect the new system state:
    - `strategies/strategy.md` — **always** update when any strategy's entry conditions, exit conditions, filters, parameters, or enabled state change. This is the canonical human-readable reference for all strategies.
    - `README.md` — update when overall system behaviour or strategy roster changes.

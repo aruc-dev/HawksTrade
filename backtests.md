@@ -8,6 +8,24 @@
 
 ---
 
+## Canonical Evidence
+
+The single-window 12-month results below are useful context, but they are not the
+capital-scaling gate. The canonical evidence source is the committed master
+walk-forward report:
+
+- `reports/walkforward_master.md`
+- Regenerate with: `python3 scheduler/run_walkforward.py --profile master`
+- Run the held-out OOS check only when needed: `python3 scheduler/run_walkforward.py --profile master --oos-only`
+
+Capital does not scale unless the master walk-forward passes at the configured
+stressed cost level in `config/config.yaml`. Baseline and severe walk-forward
+rows are diagnostic unless they are listed under a profile's `blocking_levels`.
+The locked 60-day OOS check scales the minimum trade count from the 180-day
+master cadence.
+
+---
+
 ## Recommended Default Result
 
 The current recommended configuration uses:
@@ -126,6 +144,8 @@ python3 scheduler/run_scan.py --dry-run
 python3 scheduler/run_risk_check.py --dry-run
 python3 scheduler/run_report.py
 python3 scheduler/run_backtest.py --days 30 --fund 10000
+python3 scheduler/run_walkforward.py --quick --no-write-report --no-artifacts
+python3 scheduler/run_walkforward.py --profile master
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/29/2026 --exit-policy profit_trailing --screener --slippage-bps 10 --fee-bps 5 --min-fee 0
 python3 scheduler/run_validation_gate.py --profile production
 python3 scheduler/run_validation_gate.py --profile rsi
