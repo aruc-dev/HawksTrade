@@ -11,7 +11,7 @@
 | Strategy | Asset | Status | File |
 |---|---|---|---|
 | Momentum | Stocks | **Enabled** | `momentum.py` |
-| RSI Reversion | Stocks | **Disabled by default** | `rsi_reversion.py` |
+| RSI Reversion | Stocks | **Disabled by default** | `rsi_reversion.py`; live entries require paper-readiness evidence if enabled |
 | Gap-Up | Stocks | **Enabled** | `gap_up.py` |
 | MA Crossover | Crypto | **Enabled** | `ma_crossover.py`; live entries require paper-readiness evidence |
 | Range Breakout | Crypto | **Enabled** | `range_breakout.py`; high-water profit protection enabled; live entries require paper-readiness evidence |
@@ -171,6 +171,11 @@ Continue running `python3 scheduler/run_validation_gate.py --profile rsi` before
 enabling it or scaling its capital allocation. The gate requires cost-aware backtest performance
 plus at least 60 paper-trading days, 20 closed RSI trades, 48% win rate, 1.15
 profit factor, +2% aggregate paper return, and max drawdown no worse than 4%.
+
+**Live readiness:** If this sleeve is enabled in live mode, runtime entries are
+blocked until the trade log shows at least 20 closed paper exits and 60 calendar
+days of RSI paper validation. Paper mode remains available for evidence
+collection.
 
 ---
 

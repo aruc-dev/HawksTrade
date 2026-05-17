@@ -203,6 +203,10 @@ strategies:
     enabled: false
     asset_class: stocks
     description: "Balanced RSI mean reversion. Entry: RSI<40, %B<20%, liquidity confirmation, 1-bar recovery, price within 15% below and 15% above SMA200, 5-day drawdown <=10%, and ATR/price <=5%. ATR stop extension: 0.8×ATR(14), capped at 6% max stop distance; the global stop governs when the ATR stop is tighter or absent. Exit: price reaches SMA20, RSI>50, 6% daily-close max-loss, or 10-day cap. Regime: skip on severe crash (SPY >20% below 252d peak) or elevated realised-volatility proxy."
+    live_readiness:
+      enabled: true
+      min_closed_paper_trades: 20
+      min_paper_days: 60
     rsi_period: 14
     oversold_threshold: 40          # Entry: RSI below this level (oversold/recovering)
     overbought_threshold: 50        # Exit: RSI above this (momentum neutral = edge evaporated)
