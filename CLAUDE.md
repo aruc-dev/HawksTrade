@@ -96,6 +96,11 @@ After every code change, run unit tests before committing:
 python3 -m unittest discover -v
 ```
 
+Terminology: if the human asks for **strategy validation**, run the
+profit/trade-affecting validation ladder below. If the human asks for
+**production validation**, run the major strategy release/material
+strategy-config validation set below.
+
 For profit/trade-affecting changes, also run the strategy validation ladder:
 
 ```bash
