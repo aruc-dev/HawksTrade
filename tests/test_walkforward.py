@@ -1,3 +1,4 @@
+import json
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -191,6 +192,41 @@ class WalkForwardTests(unittest.TestCase):
             files = list(artifact_dir.glob("*.json"))
 
         self.assertEqual([file.name for file in files], ["stressed_bad_window.json"])
+
+    def test_write_profile_artifacts_disambiguates_slug_collisions(self):
+        records = []
+        for label in ("a/b", "a_b", "a_b"):
+            records.append({
+                "cost_level": "stress",
+                "window": {"label": label},
+                "cost_model": {},
+                "stats": _stats(),
+                "failures": [],
+                "passed": True,
+            })
+
+        with TemporaryDirectory() as tmpdir:
+            artifact_dir = Path(tmpdir) / "artifacts"
+            _write_profile_artifacts(
+                records=records,
+                profile_name="unit",
+                run_id="run",
+                artifacts_dir=artifact_dir,
+            )
+
+            files = sorted(artifact_dir.glob("*.json"))
+            payloads = [
+                json.loads(file.read_text(encoding="utf-8"))
+                for file in files
+            ]
+
+        self.assertEqual(len(files), 3)
+        self.assertEqual(len({file.name for file in files}), 3)
+        self.assertNotIn("stress_a_b.json", {file.name for file in files})
+        self.assertCountEqual(
+            [payload["window"]["label"] for payload in payloads],
+            ["a/b", "a_b", "a_b"],
+        )
 
     def test_execution_notes_dedupe_by_stable_note_key(self):
         notes = _dedupe_execution_notes([

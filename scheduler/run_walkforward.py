@@ -8,6 +8,7 @@ stable across different market regimes.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
@@ -396,6 +397,29 @@ def _slugify_artifact_part(value) -> str:
     return slug or "unnamed"
 
 
+def _artifact_name(
+    record: dict,
+    *,
+    duplicate_base: bool = False,
+    suffix: int | None = None,
+) -> str:
+    cost_level = record["cost_level"]
+    window_label = record["window"]["label"]
+    base = (
+        f"{_slugify_artifact_part(cost_level)}_"
+        f"{_slugify_artifact_part(window_label)}"
+    )
+    if duplicate_base:
+        digest_source = f"{cost_level}\0{window_label}".encode(
+            "utf-8",
+            errors="replace",
+        )
+        base = f"{base}_{hashlib.sha1(digest_source).hexdigest()[:8]}"
+    if suffix is not None:
+        base = f"{base}_{suffix}"
+    return f"{base}.json"
+
+
 def _write_profile_artifacts(
     *,
     records: list[dict],
@@ -405,11 +429,23 @@ def _write_profile_artifacts(
 ) -> Path:
     target = artifacts_dir or (BASE_DIR / "reports" / "walkforward" / f"{profile_name}_{run_id}")
     target.mkdir(parents=True, exist_ok=True)
+    base_counts: dict[str, int] = {}
     for record in records:
-        safe_name = (
-            f"{_slugify_artifact_part(record['cost_level'])}_"
-            f"{_slugify_artifact_part(record['window']['label'])}.json"
-        )
+        base_name = _artifact_name(record)
+        base_counts[base_name] = base_counts.get(base_name, 0) + 1
+    used_names: set[str] = set()
+    for record in records:
+        duplicate_base = base_counts[_artifact_name(record)] > 1
+        safe_name = _artifact_name(record, duplicate_base=duplicate_base)
+        suffix = 2
+        while safe_name in used_names or (target / safe_name).exists():
+            safe_name = _artifact_name(
+                record,
+                duplicate_base=True,
+                suffix=suffix,
+            )
+            suffix += 1
+        used_names.add(safe_name)
         payload = {
             "profile": profile_name,
             "cost_level": record["cost_level"],
