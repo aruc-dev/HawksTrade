@@ -38,6 +38,7 @@ from core.data_lockup import (  # noqa: E402
     filter_locked_bars,
     oos_validation_window,
     record_oos_validation,
+    validate_oos_unlock_token,
 )
 from core.protection_manager import ProtectionManager  # noqa: E402
 from core.exit_policy import (  # noqa: E402
@@ -929,6 +930,10 @@ def fetch_all_data(symbols, start_date, end_date, *, allow_oos=False, oos_unlock
     # Separate stock vs crypto symbols
     stock_symbols = [s for s in symbols if "/" not in s]
     crypto_symbols = [s for s in symbols if "/" in s]
+    if oos_unlock_token:
+        if not validate_oos_unlock_token(oos_unlock_token, consume=True):
+            raise ValueError("Invalid or already-used OOS unlock token.")
+        allow_oos = True
 
     # Batch-fetch stocks in groups of 50 (much faster than 1-at-a-time)
     BATCH = 50
@@ -942,7 +947,6 @@ def fetch_all_data(symbols, start_date, end_date, *, allow_oos=False, oos_unlock
                     data[s] = filter_locked_bars(
                         bars.df.loc[s],
                         allow_oos=allow_oos,
-                        oos_unlock_token=oos_unlock_token,
                     )
         except Exception as e:
             log.error(f"Batch stock fetch failed ({i}-{i+BATCH}): {e}")
@@ -955,7 +959,6 @@ def fetch_all_data(symbols, start_date, end_date, *, allow_oos=False, oos_unlock
                         data[s] = filter_locked_bars(
                             bars.df.loc[s],
                             allow_oos=allow_oos,
-                            oos_unlock_token=oos_unlock_token,
                         )
                 except Exception as e2: log.error(f"Failed to fetch {s}: {e2}")
         log.info(f"  Fetched stocks batch {i+1}-{min(i+BATCH, len(stock_symbols))} of {len(stock_symbols)}")
@@ -969,12 +972,21 @@ def fetch_all_data(symbols, start_date, end_date, *, allow_oos=False, oos_unlock
                 data[s] = filter_locked_bars(
                     bars.df.loc[s],
                     allow_oos=allow_oos,
-                    oos_unlock_token=oos_unlock_token,
                 )
         except Exception as e: log.error(f"Failed to fetch {s}: {e}")
 
     log.info(f"Fetched data for {len(data)} of {len(symbols)} symbols")
     return data
+
+
+def _consume_oos_unlock_token_once(oos_unlock_token: str | None) -> bool:
+    """Consume an explicit OOS unlock token once before any data access."""
+    if not oos_unlock_token:
+        return False
+    if validate_oos_unlock_token(oos_unlock_token, consume=True):
+        return True
+    raise ValueError("Invalid or already-used OOS unlock token.")
+
 
 # ── Main Backtest Loop ────────────────────────────────────────────────────────
 
@@ -1140,9 +1152,10 @@ def run_backtest(
     symbols = all_stock_symbols + crypto_symbols
     
     oos_lockup_note = None
+    oos_unlock_allowed = _consume_oos_unlock_token_once(oos_unlock_token)
     if oos_validation:
         oos_start_dt, end_dt, oos_days = oos_validation_window()
-        days = max((end_dt.date() - oos_start_dt.date()).days, 0)
+        days = oos_days
         sim_start_date = oos_start_dt
     elif end_date:
         # Expected format: MM/DD/YYYY (e.g. 12/31/2025)
@@ -1162,8 +1175,7 @@ def run_backtest(
         _, end_dt, oos_lockup_note = clamp_backtest_window(
             start_dt=start_for_lock,
             end_dt=end_dt,
-            allow_oos=False,
-            oos_unlock_token=oos_unlock_token,
+            allow_oos=oos_unlock_allowed,
         )
         if end_dt != original_end_dt:
             sim_start_date = end_dt - timedelta(days=days)
@@ -1179,8 +1191,7 @@ def run_backtest(
         symbols,
         start_dt,
         end_dt,
-        allow_oos=oos_validation,
-        oos_unlock_token=oos_unlock_token,
+        allow_oos=bool(oos_validation or oos_unlock_allowed),
     )
     symbols_with_history = sorted(historical_data.keys())
     missing_history_symbols = sorted(set(symbols) - set(symbols_with_history))

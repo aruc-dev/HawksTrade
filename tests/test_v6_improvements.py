@@ -28,11 +28,13 @@ from scheduler.run_backtest import (
     _compute_max_drawdown,
     _compute_profit_factor,
     _compute_quarterly_performance,
+    _consume_oos_unlock_token_once,
     _patch_runtime_risk_config,
     _run_backtest_risk_exits,
     _run_backtest_hold_exits,
     _run_backtest_strategy_exits,
     _stock_market_open_for_backtest,
+    run_backtest,
 )
 from core import risk_manager as rm
 from core.exit_policy import should_exit_for_hold
@@ -69,6 +71,58 @@ class TestBacktestRegimeHistory(unittest.TestCase):
 
 
 class TestBacktestLiveFidelity(unittest.TestCase):
+    def test_oos_validation_uses_inclusive_lockup_days(self):
+        cfg = {
+            "trading": {},
+            "intraday": {"enabled": False},
+            "screener": {"enabled": False},
+            "stocks": {"scan_universe": []},
+            "crypto": {"scan_universe": []},
+            "strategies": {
+                "momentum": {"enabled": False, "exit_policy": "profit_trailing"},
+                "rsi_reversion": {"enabled": False},
+                "gap_up": {"enabled": False},
+                "ma_crossover": {"enabled": False},
+                "range_breakout": {"enabled": False},
+            },
+            "protections": {"enabled": False},
+            "validation": {"bootstrap": {"enabled": False}},
+        }
+
+        with (
+            patch("scheduler.run_backtest.get_config", return_value=cfg),
+            patch(
+                "scheduler.run_backtest.oos_validation_window",
+                return_value=(
+                    datetime(2026, 2, 15, tzinfo=timezone.utc),
+                    datetime(2026, 5, 15, tzinfo=timezone.utc),
+                    90,
+                ),
+            ),
+            patch("scheduler.run_backtest.fetch_all_data", return_value={}),
+            patch("scheduler.run_backtest._consume_oos_unlock_token_once", return_value=False),
+        ):
+            result = run_backtest(
+                days=1,
+                oos_validation=True,
+                return_result=True,
+                write_quarterly_csv=False,
+            )
+
+        self.assertEqual(result["stats"]["days"], 90)
+        self.assertIn("OOS validation: 2026-02-15 through 2026-05-15", result["report"])
+
+    def test_oos_unlock_token_is_consumed_once_before_backtest_access(self):
+        with patch("scheduler.run_backtest.validate_oos_unlock_token", return_value=True) as validate:
+            self.assertTrue(_consume_oos_unlock_token_once("token-1"))
+
+        validate.assert_called_once_with("token-1", consume=True)
+
+    def test_invalid_oos_unlock_token_fails_closed(self):
+        with patch("scheduler.run_backtest.validate_oos_unlock_token", return_value=False):
+            with self.assertRaisesRegex(ValueError, "Invalid or already-used OOS unlock token"):
+                _consume_oos_unlock_token_once("token-1")
+
     def test_backtest_session_date_uses_simulated_current_date(self):
         sim = BacktestSimulator(initial_fund=10000.0)
         sim.current_date = datetime(2026, 3, 30, 15, 0, tzinfo=timezone.utc)

@@ -14,6 +14,20 @@ sys.path.insert(0, str(ROOT))
 from core.data_lockup import current_lockup, report_mentions_locked_date  # noqa: E402
 
 
+def _is_allowed_oos_validation_report(file_path: Path, text: str) -> bool:
+    try:
+        relative = file_path.resolve().relative_to(ROOT)
+    except ValueError:
+        return False
+    return (
+        len(relative.parts) == 2
+        and relative.parts[0] == "reports"
+        and relative.name.startswith("oos_validation_")
+        and relative.suffix.lower() == ".md"
+        and "OOS validation" in text
+    )
+
+
 def _staged_report_files() -> list[Path]:
     completed = subprocess.run(
         ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMRT"],
@@ -52,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         if not file_path.exists() or file_path.is_dir():
             continue
         text = file_path.read_text(encoding="utf-8", errors="ignore")
-        if args.allow_oos_validation_report and "OOS validation" in text:
+        if args.allow_oos_validation_report and _is_allowed_oos_validation_report(file_path, text):
             continue
         if report_mentions_locked_date(text):
             failures.append(file_path)

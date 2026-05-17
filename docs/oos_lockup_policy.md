@@ -34,7 +34,8 @@ candidate evidence failed final validation.
 
 The pre-commit hook runs `scripts/check_oos_lockup_leakage.py` and blocks staged
 reports that mention a date inside the active lockup. Reports from the explicit
-OOS validation workflow are the only exception.
+OOS validation workflow are the only exception; they must be Markdown files
+named `reports/oos_validation_*.md` and include the `OOS validation` marker.
 
 Before scaling capital or enabling a strategy, the current locked OOS window
 must have a passing validation result within the last 30 days, alongside the
