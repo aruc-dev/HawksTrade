@@ -90,11 +90,8 @@
 - election_chop_2024 / severe: 1 missing-history symbols (ADA/USD)
 
 Backtest semantics:
-- Gap-Up opening-window backtest uses a synthetic 9:35 ET daily-open proxy, not real minute bars; Gap-Up fills are not intraday-validated. Symbols: AAPL, ABBV, ABNB, ADBE, AMAT, AMD, AMGN, AMT.
-- Gap-Up opening-window backtest uses a synthetic 9:35 ET daily-open proxy, not real minute bars; Gap-Up fills are not intraday-validated. Symbols: AAPL, ABBV, ADBE, AMAT, AMD, AMGN, AMT, AMZN.
-- Momentum volume-pace backtest uses a synthetic elapsed-session volume proxy from daily bars, not real minute bars; volume-pace fills are not intraday-validated. Symbols: AAPL, ABBV, ABNB, ADBE, AMAT, AMD, AMGN, AMT.
-- Momentum volume-pace backtest uses a synthetic elapsed-session volume proxy from daily bars, not real minute bars; volume-pace fills are not intraday-validated. Symbols: AAPL, ABBV, ABNB, ADBE, AMAT, AMD, AMGN, AMZN.
-- Momentum volume-pace backtest uses a synthetic elapsed-session volume proxy from daily bars, not real minute bars; volume-pace fills are not intraday-validated. Symbols: AAPL, ABBV, ADBE, AMAT, AMD, AMGN, AMT, AMZN.
+- Gap-Up opening-window backtest uses a synthetic 9:35 ET daily-open proxy, not real minute bars; Gap-Up fills are not intraday-validated. Symbols: AAPL, ABBV, ABNB, ADBE, AMAT, AMD, AMGN, AMT, AMZN.
+- Momentum volume-pace backtest uses a synthetic elapsed-session volume proxy from daily bars, not real minute bars; volume-pace fills are not intraday-validated. Symbols: AAPL, ABBV, ABNB, ADBE, AMAT, AMD, AMGN, AMT, AMZN.
 
 Raw JSON artifacts: `reports/walkforward/master_20260516T214815Z`
 

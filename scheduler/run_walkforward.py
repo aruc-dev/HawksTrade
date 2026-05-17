@@ -8,8 +8,10 @@ stable across different market regimes.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
+import re
 import shutil
 import subprocess
 import sys
@@ -378,6 +380,46 @@ def _json_safe(value):
     return value
 
 
+_SAFE_ARTIFACT_PART_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def _slugify_artifact_part(value) -> str:
+    path_parts = [
+        part
+        for part in str(value or "").replace("\\", "/").split("/")
+        if part.strip() not in ("", ".", "..")
+    ]
+    slug = "_".join(path_parts).strip()
+    slug = _SAFE_ARTIFACT_PART_RE.sub("_", slug)
+    while ".." in slug:
+        slug = slug.replace("..", ".")
+    slug = slug.strip("._-")
+    return slug or "unnamed"
+
+
+def _artifact_name(
+    record: dict,
+    *,
+    duplicate_base: bool = False,
+    suffix: int | None = None,
+) -> str:
+    cost_level = record["cost_level"]
+    window_label = record["window"]["label"]
+    base = (
+        f"{_slugify_artifact_part(cost_level)}_"
+        f"{_slugify_artifact_part(window_label)}"
+    )
+    if duplicate_base:
+        digest_source = f"{cost_level}\0{window_label}".encode(
+            "utf-8",
+            errors="replace",
+        )
+        base = f"{base}_{hashlib.sha1(digest_source).hexdigest()[:8]}"
+    if suffix is not None:
+        base = f"{base}_{suffix}"
+    return f"{base}.json"
+
+
 def _write_profile_artifacts(
     *,
     records: list[dict],
@@ -387,8 +429,23 @@ def _write_profile_artifacts(
 ) -> Path:
     target = artifacts_dir or (BASE_DIR / "reports" / "walkforward" / f"{profile_name}_{run_id}")
     target.mkdir(parents=True, exist_ok=True)
+    base_counts: dict[str, int] = {}
     for record in records:
-        safe_name = f"{record['cost_level']}_{record['window']['label']}.json"
+        base_name = _artifact_name(record)
+        base_counts[base_name] = base_counts.get(base_name, 0) + 1
+    used_names: set[str] = set()
+    for record in records:
+        duplicate_base = base_counts[_artifact_name(record)] > 1
+        safe_name = _artifact_name(record, duplicate_base=duplicate_base)
+        suffix = 2
+        while safe_name in used_names or (target / safe_name).exists():
+            safe_name = _artifact_name(
+                record,
+                duplicate_base=True,
+                suffix=suffix,
+            )
+            suffix += 1
+        used_names.add(safe_name)
         payload = {
             "profile": profile_name,
             "cost_level": record["cost_level"],
@@ -421,6 +478,37 @@ def _render_summary_table(summary: dict, *, blocking_levels: list[str]) -> list[
             f"{record['pass_rate']:.1%} | {record['required']:.1%} | {result} |"
         )
     return lines
+
+
+def _split_execution_note(note: str) -> tuple[str, list[str]]:
+    marker = " Symbols: "
+    if marker not in note:
+        return note.strip(), []
+    base, symbol_text = note.split(marker, 1)
+    symbols = [
+        symbol.strip()
+        for symbol in symbol_text.rstrip(".").split(",")
+        if symbol.strip()
+    ]
+    return base.strip(), symbols
+
+
+def _dedupe_execution_notes(notes: list[str]) -> list[str]:
+    grouped: dict[str, set[str]] = {}
+    for note in notes:
+        base, symbols = _split_execution_note(note)
+        if not base:
+            continue
+        grouped.setdefault(base, set()).update(symbols)
+
+    deduped = []
+    for base in sorted(grouped):
+        symbols = sorted(grouped[base])
+        if symbols:
+            deduped.append(f"{base} Symbols: {', '.join(symbols)}.")
+        else:
+            deduped.append(base)
+    return deduped
 
 
 def _render_profile_report(
@@ -512,7 +600,7 @@ def _render_profile_report(
         "",
     ])
     missing_lines = []
-    execution_notes = set()
+    execution_notes = []
     for record in records:
         coverage = record.get("data_coverage") or {}
         missing = coverage.get("missing_history_symbols") or []
@@ -524,16 +612,17 @@ def _render_profile_report(
                 f"{len(missing)} missing-history symbols ({preview}{suffix})"
             )
         for note in (record.get("stats") or {}).get("execution_notes", []) or []:
-            execution_notes.add(note)
+            execution_notes.append(note)
 
     if missing_lines:
         lines.extend(missing_lines)
     else:
         lines.append("- No missing-history symbols were reported by the backtest payloads.")
-    if execution_notes:
+    deduped_execution_notes = _dedupe_execution_notes(execution_notes)
+    if deduped_execution_notes:
         lines.append("")
         lines.append("Backtest semantics:")
-        lines.extend(f"- {note}" for note in sorted(execution_notes))
+        lines.extend(f"- {note}" for note in deduped_execution_notes)
     if artifact_dir:
         artifact_text = _display_path(artifact_dir)
         lines.append("")
