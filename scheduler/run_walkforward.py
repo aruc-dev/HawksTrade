@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import shutil
 import subprocess
 import sys
@@ -378,6 +379,23 @@ def _json_safe(value):
     return value
 
 
+_SAFE_ARTIFACT_PART_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def _slugify_artifact_part(value) -> str:
+    path_parts = [
+        part
+        for part in str(value or "").replace("\\", "/").split("/")
+        if part.strip() not in ("", ".", "..")
+    ]
+    slug = "_".join(path_parts).strip()
+    slug = _SAFE_ARTIFACT_PART_RE.sub("_", slug)
+    while ".." in slug:
+        slug = slug.replace("..", ".")
+    slug = slug.strip("._-")
+    return slug or "unnamed"
+
+
 def _write_profile_artifacts(
     *,
     records: list[dict],
@@ -388,7 +406,10 @@ def _write_profile_artifacts(
     target = artifacts_dir or (BASE_DIR / "reports" / "walkforward" / f"{profile_name}_{run_id}")
     target.mkdir(parents=True, exist_ok=True)
     for record in records:
-        safe_name = f"{record['cost_level']}_{record['window']['label']}.json"
+        safe_name = (
+            f"{_slugify_artifact_part(record['cost_level'])}_"
+            f"{_slugify_artifact_part(record['window']['label'])}.json"
+        )
         payload = {
             "profile": profile_name,
             "cost_level": record["cost_level"],
@@ -421,6 +442,37 @@ def _render_summary_table(summary: dict, *, blocking_levels: list[str]) -> list[
             f"{record['pass_rate']:.1%} | {record['required']:.1%} | {result} |"
         )
     return lines
+
+
+def _split_execution_note(note: str) -> tuple[str, list[str]]:
+    marker = " Symbols: "
+    if marker not in note:
+        return note.strip(), []
+    base, symbol_text = note.split(marker, 1)
+    symbols = [
+        symbol.strip()
+        for symbol in symbol_text.rstrip(".").split(",")
+        if symbol.strip()
+    ]
+    return base.strip(), symbols
+
+
+def _dedupe_execution_notes(notes: list[str]) -> list[str]:
+    grouped: dict[str, set[str]] = {}
+    for note in notes:
+        base, symbols = _split_execution_note(note)
+        if not base:
+            continue
+        grouped.setdefault(base, set()).update(symbols)
+
+    deduped = []
+    for base in sorted(grouped):
+        symbols = sorted(grouped[base])
+        if symbols:
+            deduped.append(f"{base} Symbols: {', '.join(symbols)}.")
+        else:
+            deduped.append(base)
+    return deduped
 
 
 def _render_profile_report(
@@ -512,7 +564,7 @@ def _render_profile_report(
         "",
     ])
     missing_lines = []
-    execution_notes = set()
+    execution_notes = []
     for record in records:
         coverage = record.get("data_coverage") or {}
         missing = coverage.get("missing_history_symbols") or []
@@ -524,16 +576,17 @@ def _render_profile_report(
                 f"{len(missing)} missing-history symbols ({preview}{suffix})"
             )
         for note in (record.get("stats") or {}).get("execution_notes", []) or []:
-            execution_notes.add(note)
+            execution_notes.append(note)
 
     if missing_lines:
         lines.extend(missing_lines)
     else:
         lines.append("- No missing-history symbols were reported by the backtest payloads.")
-    if execution_notes:
+    deduped_execution_notes = _dedupe_execution_notes(execution_notes)
+    if deduped_execution_notes:
         lines.append("")
         lines.append("Backtest semantics:")
-        lines.extend(f"- {note}" for note in sorted(execution_notes))
+        lines.extend(f"- {note}" for note in deduped_execution_notes)
     if artifact_dir:
         artifact_text = _display_path(artifact_dir)
         lines.append("")

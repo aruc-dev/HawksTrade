@@ -8,6 +8,9 @@ from scheduler.run_walkforward import (
     WalkForwardThresholds,
     _maybe_file_regression_issue,
     _configured_profile_windows,
+    _dedupe_execution_notes,
+    _slugify_artifact_part,
+    _write_profile_artifacts,
     build_rolling_windows,
     get_walkforward_profile,
     profile_window_failures,
@@ -159,6 +162,47 @@ class WalkForwardTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "Unknown walk-forward profile"):
             get_walkforward_profile(cfg, "missing")
+
+    def test_artifact_filename_parts_are_slugified(self):
+        self.assertEqual(_slugify_artifact_part("../bad/window"), "bad_window")
+        self.assertEqual(_slugify_artifact_part("cost level!"), "cost_level")
+        self.assertEqual(_slugify_artifact_part("bad/../window"), "bad_window")
+        self.assertEqual(_slugify_artifact_part(".."), "unnamed")
+
+    def test_write_profile_artifacts_uses_slugified_names(self):
+        record = {
+            "cost_level": "../stressed",
+            "window": {"label": "bad/../window"},
+            "cost_model": {},
+            "stats": _stats(),
+            "failures": [],
+            "passed": True,
+        }
+
+        with TemporaryDirectory() as tmpdir:
+            artifact_dir = Path(tmpdir) / "artifacts"
+            _write_profile_artifacts(
+                records=[record],
+                profile_name="unit",
+                run_id="run",
+                artifacts_dir=artifact_dir,
+            )
+
+            files = list(artifact_dir.glob("*.json"))
+
+        self.assertEqual([file.name for file in files], ["stressed_bad_window.json"])
+
+    def test_execution_notes_dedupe_by_stable_note_key(self):
+        notes = _dedupe_execution_notes([
+            "Gap-Up backtest uses daily bars. Symbols: AAPL, MSFT.",
+            "Gap-Up backtest uses daily bars. Symbols: MSFT, TSLA.",
+            "Momentum backtest uses daily bars. Symbols: AAPL.",
+        ])
+
+        self.assertEqual(notes, [
+            "Gap-Up backtest uses daily bars. Symbols: AAPL, MSFT, TSLA.",
+            "Momentum backtest uses daily bars. Symbols: AAPL.",
+        ])
 
     def test_configured_profile_windows_resolves_auto_and_oos_dates(self):
         today = datetime(2026, 5, 16, tzinfo=timezone.utc)
