@@ -117,8 +117,9 @@ def strategy_search_space_catalog() -> dict[str, list[dict]]:
     """Return the Phase 1 default parameter grids for enabled strategy audits."""
     grids = {
         "momentum": {
-            "strategies.momentum.top_n": [1, 2, 3],
-            "strategies.momentum.min_momentum_pct": [0.06, 0.08, 0.10],
+            "strategies.momentum.top_n": [2, 3, 5],
+            "strategies.momentum.min_momentum_pct": [0.04, 0.06, 0.08],
+            "strategies.momentum.min_momentum_atr_mult": [0.0, 1.5, 2.0],
             "strategies.momentum.atr_multiplier": [1.0, 1.2, 1.5],
         },
         "gap_up": {

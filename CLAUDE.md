@@ -251,7 +251,7 @@ Each can be individually enabled/disabled.
 
 | Strategy | Asset | Logic |
 |----------|-------|-------|
-| `momentum` | Stocks | Buy top 1 by 5-day return (min 10%) with 2.5x volume, 1.2x ATR stop extension, and 75% breadth coverage; exit flat/losing trades after 4 trading days and let profitable trades run with trailing protection |
+| `momentum` | Stocks | Buy the top 2 sector-diversified names by 5-day alpha momentum with a 4% floor, optional ATR-scaled momentum gate, 1.5x elapsed-session volume pace, 1.2x ATR stop extension, and 65% breadth coverage; exit flat/losing trades after 4 trading days and let profitable trades run with trailing protection |
 | `rsi_reversion` | Stocks | Enabled by default; mean reversion with RSI < 35, %B < 20%, liquidity confirmation, 1-bar recovery, SMA200 band, 0.8x ATR stop extension, and stricter crash/volatility guards |
 | `gap_up` | Stocks | Enabled by default; true 6-15% opening gap with 1.5x opening-volume pace, 75% breadth guard, <=35% SMA200 extension, top-1 ranked signal, 2-day hold, failed-gap and trend-loss exits |
 | `ma_crossover` | Crypto | Buy the top-ranked latest completed 6-EMA cross above 18-EMA (daily bars), with a 1% daily-close max-loss exit |

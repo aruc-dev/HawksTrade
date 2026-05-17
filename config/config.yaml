@@ -170,15 +170,16 @@ strategies:
   momentum:
     enabled: true
     asset_class: stocks          # stocks | crypto | both
-    description: "Adaptive momentum: top-2 green-regime ranking with reduced ATR stop extension, 1% risk sizing, sector-neutral ranking, breadth coverage guard, breadth-tiered regime, and time-of-day normalized volume-pace entry"
-    top_n: 2                     # Pick the two strongest stocks by momentum in green regimes
+    description: "Adaptive momentum: top-2 green-regime ranking with a 4% momentum floor, optional ATR-scaled momentum gate, reduced ATR stop extension, 1% risk sizing, sector-neutral ranking, breadth coverage guard, breadth-tiered regime, and time-of-day normalized volume-pace entry"
+    top_n: 2                     # Pick the two strongest sector-diversified momentum stocks in green regimes
     hold_days: 4                 # Minimum hold before profit-aware exit checks
     exit_policy: "profit_trailing" # fixed_hold | profit_trailing | risk_only_baseline
     profit_floor_pct: 0.0        # After hold_days, exit if P&L is flat/negative
     trail_activation_pct: 0.06   # Enable trailing stop once peak gain reaches 6%
     trailing_stop_pct: 0.04      # Exit if price falls 4% from post-entry peak
     max_hold_days: 20            # Cap stale momentum positions even if still green
-    min_momentum_pct: 0.08       # Minimum 8% 5-day gain to qualify
+    min_momentum_pct: 0.04       # Minimum 4% 5-day gain floor to qualify
+    min_momentum_atr_mult: 0.0   # Optional volatility gate: require momentum >= max(floor, ATR/price * multiple); 0 disables
     min_alpha_pct: 0.0           # Optional excess 5-day return over SPY; 0 disables this stricter gate
     weight: 1.0                  # Signal weight (relative to other strategies)
     # Phase 1: Volatility-adjusted risk management

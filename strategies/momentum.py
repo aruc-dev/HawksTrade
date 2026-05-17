@@ -170,6 +170,29 @@ def _calc_atr(bars, period: int = 14) -> float:
     return float(pd.Series(trs).ewm(span=period, adjust=False).mean().iloc[-1])
 
 
+def _momentum_threshold(base_threshold: float, atr: float, price: float, atr_multiple: float) -> float:
+    """Return the volatility-adjusted momentum gate for a candidate."""
+    try:
+        base = float(base_threshold)
+    except (TypeError, ValueError):
+        base = 0.0
+    if not math.isfinite(base):
+        base = 0.0
+    base = max(0.0, base)
+
+    try:
+        atr_value = float(atr)
+        price_value = float(price)
+        multiple = float(atr_multiple)
+    except (TypeError, ValueError):
+        return base
+    if not all(math.isfinite(value) for value in (atr_value, price_value, multiple)):
+        return base
+    if atr_value <= 0 or price_value <= 0 or multiple <= 0:
+        return base
+    return max(base, (atr_value / price_value) * multiple)
+
+
 def _breadth_coverage_pct(bars_data, universe: list, min_bars: int = 51) -> float:
     """Return the fraction of the scan universe with enough valid bars for breadth."""
     if not universe:
@@ -330,6 +353,8 @@ class MomentumStrategy(BaseStrategy):
         scores = []
         atr_period = int(SCFG.get("atr_period", 14))
         atr_mult   = float(SCFG.get("atr_multiplier", 2.0))
+        base_min_momentum_pct = float(SCFG.get("min_momentum_pct", 0.08))
+        min_momentum_atr_mult = float(SCFG.get("min_momentum_atr_mult", 0.0))
         min_alpha_pct = float(SCFG.get("min_alpha_pct", 0.0))
         volume_mode = str(SCFG.get("volume_confirmation_mode", "daily")).strip().lower()
         if volume_mode not in {"daily", "pace"}:
@@ -375,11 +400,22 @@ class MomentumStrategy(BaseStrategy):
                 
                 momentum = (avg_now - avg_then) / avg_then
                 price_now = float(closes.iloc[-1])
+                atr = _calc_atr(bars, period=atr_period) if len(bars) >= atr_period + 1 else 0.0
+                momentum_gate = _momentum_threshold(
+                    base_min_momentum_pct,
+                    atr,
+                    price_now,
+                    min_momentum_atr_mult,
+                )
 
                 # 2. Alpha (Recommendation 2)
                 alpha = momentum - spy_momentum
 
-                if momentum < SCFG["min_momentum_pct"]:
+                if momentum < momentum_gate:
+                    log.debug(
+                        f"[Momentum] {symbol} skipped: momentum {momentum:.1%} < "
+                        f"threshold {momentum_gate:.1%}"
+                    )
                     continue
                 if alpha < min_alpha_pct:
                     log.debug(
@@ -417,17 +453,15 @@ class MomentumStrategy(BaseStrategy):
                     )
                     continue
 
-                # Phase 1: ATR input for stop and risk sizing
-                atr = _calc_atr(bars, period=atr_period) if len(bars) >= atr_period + 1 else 0.0
-
                 scores.append({
-                    "symbol":        symbol,
-                    "momentum":      momentum,
-                    "alpha":         alpha,
-                    "price":         price_now,
-                    "atr":           atr,
-                    "volume_ratio":  volume_ratio,
-                    "volume_basis":  volume_basis,
+                    "symbol":             symbol,
+                    "momentum":           momentum,
+                    "alpha":              alpha,
+                    "price":              price_now,
+                    "atr":                atr,
+                    "momentum_threshold": momentum_gate,
+                    "volume_ratio":       volume_ratio,
+                    "volume_basis":       volume_basis,
                 })
 
             except Exception as e:
@@ -488,6 +522,7 @@ class MomentumStrategy(BaseStrategy):
                 "alpha_score":    round(s["alpha"], 4),
                 "reason":     (
                     f"Alpha momentum: {s['alpha']:.1%} (Absolute {s['momentum']:.1%}) | "
+                    f"Threshold: {s['momentum_threshold']:.1%} | "
                     f"Volume {s['volume_basis']}: {s['volume_ratio']:.1f}x"
                 ),
             }
@@ -496,7 +531,8 @@ class MomentumStrategy(BaseStrategy):
 
             log.info(
                 f"[Momentum] Signal: BUY {s['symbol']} | Alpha={s['alpha']:.1%} "
-                f"| Momentum={s['momentum']:.1%} | sector={get_sector(s['symbol'])} "
+                f"| Momentum={s['momentum']:.1%} threshold={s['momentum_threshold']:.1%} "
+                f"| sector={get_sector(s['symbol'])} "
                 f"| volume_{s['volume_basis']}={s['volume_ratio']:.2f}x "
                 f"| atr_stop={atr_stop} | risk_qty={atr_risk_qty}"
             )
