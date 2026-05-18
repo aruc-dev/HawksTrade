@@ -292,6 +292,40 @@ class OrderExecutorTests(unittest.TestCase):
         self.assertEqual(rows[0]["risk_tier"], "exploration:0")
         self.assertFalse(any(row["symbol"] == "MSFT" for row in trade_log.get_open_trades()))
 
+    def test_closed_trades_for_strategy_supports_legacy_getter_without_strategy_kwarg(self):
+        def legacy_getter(*args, **kwargs):
+            if kwargs:
+                raise TypeError("get_closed_trades() got an unexpected keyword argument 'strategy'")
+            return [{"strategy": "gap_up"}, {"strategy": "momentum"}, {"strategy": "gap_up"}]
+
+        with patch.object(order_executor, "get_closed_trades", side_effect=legacy_getter):
+            rows = order_executor._closed_trades_for_strategy("gap_up")
+
+        self.assertEqual(rows, [{"strategy": "gap_up"}, {"strategy": "gap_up"}])
+
+    def test_closed_trades_for_strategy_reraises_unrelated_type_error(self):
+        with patch.object(order_executor, "get_closed_trades", side_effect=TypeError("bad trade row")):
+            with self.assertRaisesRegex(TypeError, "bad trade row"):
+                order_executor._closed_trades_for_strategy("gap_up")
+
+    def test_enter_position_uses_precomputed_closed_trade_count(self):
+        with (
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 2}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=2),
+            patch.object(order_executor, "get_closed_trades", side_effect=AssertionError("should not read CSV")),
+            patch.object(order_executor, "effective_risk_for", wraps=order_executor.effective_risk_for) as effective_risk,
+        ):
+            result = order_executor.enter_position(
+                "MSFT",
+                "gap_up",
+                dry_run=True,
+                closed_trades_count=42,
+            )
+
+        self.assertEqual(result["status"], "dry_run")
+        self.assertEqual(effective_risk.call_args.kwargs["closed_trades"], 42)
+
     def test_enter_position_blocks_live_strategy_when_readiness_gate_fails_before_price_fetch(self):
         with (
             patch.object(order_executor, "MODE", "live"),

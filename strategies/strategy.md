@@ -378,7 +378,7 @@ Stop-loss and take-profit from the global risk manager apply throughout.
 | `breakout_pct` | 0.6% above prior 20-day high |
 | `min_breakout_extension_pct` | 0.8% above breakout level |
 | `max_breakout_extension_pct` | 8% above breakout level |
-| `min_close_location` | 80% of daily range |
+| `min_close_location` | 90% of daily range |
 | `volume_multiplier` | 2.5× |
 | `volume_avg_period` | 20 |
 | `trend_ema_period` | 50 |

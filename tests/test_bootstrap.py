@@ -21,6 +21,8 @@ class BootstrapTests(unittest.TestCase):
 
         self.assertGreater(summary["return_pct"]["p05"], 0)
         self.assertEqual(summary["prob_loss"], 0.0)
+        self.assertIn("trade_sharpe", summary)
+        self.assertNotIn("daily_sharpe", summary)
 
     def test_block_bootstrap_seed_is_reproducible(self):
         returns = [0.01, -0.002, 0.003, 0.004, -0.001] * 5
@@ -38,6 +40,9 @@ class BootstrapTests(unittest.TestCase):
 
         self.assertIn("prob_drawdown_gt_threshold", summary)
         self.assertGreaterEqual(summary["prob_drawdown_gt_threshold"], 0)
+        self.assertIn("daily_sharpe", summary)
+        self.assertNotIn("profit_factor", summary)
+        self.assertNotIn("win_rate", summary)
 
     def test_bootstrap_backtest_returns_trade_and_block_summaries(self):
         trades = pd.DataFrame({"pnl": [10.0, -5.0, 8.0], "pnl_pct": [0.01, -0.005, 0.008]})
@@ -48,6 +53,10 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual(result["iterations"], 50)
         self.assertIn("return_pct", result["trade"])
         self.assertIn("return_pct", result["block"])
+        self.assertIn("trade_sharpe", result["trade"])
+        self.assertIn("daily_sharpe", result["block"])
+        self.assertNotIn("daily_sharpe", result["trade"])
+        self.assertNotIn("profit_factor", result["block"])
 
     def test_gate_bounds_uses_bootstrap_lower_bounds_when_present(self):
         stats = {

@@ -367,7 +367,9 @@ def _effective_entry_stop_loss(entry_price: float, atr_stop_price: float | None)
 def _closed_trades_for_strategy(strategy: str) -> list[dict]:
     try:
         return get_closed_trades(strategy=strategy)
-    except TypeError:
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc) or "strategy" not in str(exc):
+            raise
         return [row for row in get_closed_trades() if row.get("strategy") == strategy]
 
 
@@ -420,6 +422,7 @@ def enter_position(
     dry_run: bool = False,
     suggested_qty: Optional[float] = None,
     atr_stop_price: Optional[float] = None,
+    closed_trades_count: Optional[int] = None,
 ) -> Optional[dict]:
     """
     Open a new position.
@@ -432,6 +435,8 @@ def enter_position(
         priority over Kelly when provided and positive.
     atr_stop_price: volatility-adjusted stop; written to the trade log so the
         live risk check can use it as the effective stop price.
+    closed_trades_count: optional precomputed strategy sample size for callers
+        that may submit multiple entry attempts in one scan.
     """
     try:
         readiness = evaluate_strategy_live_readiness(strategy, mode=MODE, cfg=CFG)
@@ -472,7 +477,11 @@ def enter_position(
         tier = effective_risk_for(
             strategy,
             CFG,
-            closed_trades=len(_closed_trades_for_strategy(strategy)),
+            closed_trades=(
+                int(closed_trades_count)
+                if closed_trades_count is not None
+                else len(_closed_trades_for_strategy(strategy))
+            ),
         )
         base_position_cap_pct = float(CFG.get("trading", {}).get("max_position_pct", 0.08) or 0.08)
         capped_qty = scale_quantity(

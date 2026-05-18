@@ -25,6 +25,11 @@ class FakeMarker:
 
 
 class RunScanTests(unittest.TestCase):
+    def setUp(self):
+        closed_trades_patch = patch.object(run_scan, "get_closed_trades", return_value=[])
+        closed_trades_patch.start()
+        self.addCleanup(closed_trades_patch.stop)
+
     def _api_error(self, status_code, message):
         error = json.dumps({"code": status_code, "message": message})
         http_error = SimpleNamespace(
@@ -681,7 +686,44 @@ class RunScanTests(unittest.TestCase):
             dry_run=True,
             suggested_qty=7.5,
             atr_stop_price=95.25,
+            closed_trades_count=None,
         )
+
+    def test_entry_pipeline_passes_precomputed_closed_trade_count(self):
+        class FakeMomentum:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def scan(self, universe, **kwargs):
+                return [{"symbol": "AAPL", "action": "buy"}]
+
+        with (
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(
+                run_scan.ac,
+                "get_stock_bars",
+                return_value={"SPY": [object()] * 252, "QQQ": [object()] * 51},
+            ),
+            patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "get_stock_universe", return_value=["AAPL"]),
+            patch.object(run_scan, "STOCK_STRATEGIES", [FakeMomentum()]),
+            patch.object(
+                run_scan,
+                "get_closed_trades",
+                return_value=[
+                    {"strategy": "momentum"},
+                    {"strategy": "momentum"},
+                    {"strategy": "rsi_reversion"},
+                ],
+            ),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+            patch.object(run_scan.oe, "enter_position", return_value={"symbol": "AAPL", "status": "dry_run"}) as enter_position,
+        ):
+            run_scan.run(run_stocks=True, run_crypto=False, dry_run=True)
+
+        self.assertEqual(enter_position.call_args.kwargs["closed_trades_count"], 2)
 
     def test_run_respects_max_positions_with_planned_entries(self):
         class FakeMomentum:
@@ -763,6 +805,7 @@ class RunScanTests(unittest.TestCase):
             dry_run=True,
             suggested_qty=None,
             atr_stop_price=None,
+            closed_trades_count=None,
         )
         self.assertEqual(correlation.call_count, 2)
         self.assertEqual(correlation.call_args_list[0].args[1], [])

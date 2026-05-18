@@ -48,7 +48,7 @@ from core.run_markers import RunScope, run_scope
 from core.logging_config import runtime_log_handlers
 from core.portfolio import get_open_symbols, print_snapshot
 from scheduler.reconcile_trade_log import safe_reconcile
-from tracking.trade_log import get_open_trades, get_trade_age_days, update_high_water_prices
+from tracking.trade_log import get_closed_trades, get_open_trades, get_trade_age_days, update_high_water_prices
 from strategies.momentum import MomentumStrategy
 from strategies.relative_strength import RelativeStrengthStrategy
 from strategies.rsi_reversion import RSIReversionStrategy
@@ -97,6 +97,15 @@ def _configured_hold_days(cfg: dict) -> dict:
         for name, strategy_cfg in cfg.get("strategies", {}).items()
         if strategy_cfg.get("hold_days")
     }
+
+
+def _closed_trade_counts_by_strategy() -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in get_closed_trades():
+        strategy = row.get("strategy")
+        if strategy:
+            counts[strategy] = counts.get(strategy, 0) + 1
+    return counts
 
 
 def _strategy_uses_profit_protection(strategy: str, strategy_cfg: dict) -> bool:
@@ -823,6 +832,11 @@ def run(
         return
 
     log.info(f"Market open: {market_open} | Open positions: {len(open_symbols)}")
+    try:
+        closed_trade_counts = _closed_trade_counts_by_strategy()
+    except Exception as e:
+        closed_trade_counts = {}
+        log.warning("Could not precompute closed-trade counts; falling back to per-entry lookup: %s", e)
 
     # --- Check daily loss limit first ---
     try:
@@ -950,6 +964,7 @@ def run(
                             dry_run=dry_run,
                             suggested_qty=plan.suggested_qty,
                             atr_stop_price=plan.atr_stop_price,
+                            closed_trades_count=closed_trade_counts.get(plan.strategy),
                         )
                         _mark_unhealthy_entry_result(marker, result, "stock_entry")
                         _register_entry_result(
@@ -1000,6 +1015,7 @@ def run(
                             dry_run=dry_run,
                             suggested_qty=plan.suggested_qty,
                             atr_stop_price=plan.atr_stop_price,
+                            closed_trades_count=closed_trade_counts.get(plan.strategy),
                         )
                         _mark_unhealthy_entry_result(marker, result, "crypto_entry")
                         _register_entry_result(

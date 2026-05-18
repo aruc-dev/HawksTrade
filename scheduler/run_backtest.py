@@ -687,20 +687,36 @@ def _format_bootstrap_report(bootstrap: dict) -> str:
         return ""
     iterations = bootstrap.get("iterations", 0)
     lines = [f"### Bootstrap Confidence Intervals ({iterations:,} iterations)"]
-    for label, key in (("Trade Resample", "trade"), ("Daily Block Bootstrap", "block")):
+    sections = (
+        (
+            "Trade Resample",
+            "trade",
+            (
+                ("return_pct", "Return", True),
+                ("max_drawdown", "Max DD", True),
+                ("profit_factor", "Profit Factor", False),
+                ("win_rate", "Win Rate", True),
+                ("trade_sharpe", "Trade Sharpe", False),
+            ),
+        ),
+        (
+            "Daily Block Bootstrap",
+            "block",
+            (
+                ("return_pct", "Return", True),
+                ("max_drawdown", "Max DD", True),
+                ("daily_sharpe", "Daily Sharpe", False),
+            ),
+        ),
+    )
+    for label, key, metrics in sections:
         summary = bootstrap.get(key) or {}
         if not summary:
             continue
         lines.append(f"#### {label}")
         lines.append("| Metric | Median | 5th pct | 95th pct |")
         lines.append("|---|---:|---:|---:|")
-        for metric, display, pct in (
-            ("return_pct", "Return", True),
-            ("max_drawdown", "Max DD", True),
-            ("profit_factor", "Profit Factor", False),
-            ("daily_sharpe", "Daily Sharpe", False),
-            ("win_rate", "Win Rate", True),
-        ):
+        for metric, display, pct in metrics:
             lines.append(f"| {display} {_format_ci_metric(summary, metric, pct=pct)}")
         if "prob_loss" in summary:
             lines.append(f"| P(loss) | {summary['prob_loss']:.1%} |  |  |")

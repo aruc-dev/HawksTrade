@@ -15,7 +15,9 @@ import numpy as np
 import pandas as pd
 
 
-METRICS = ("return_pct", "max_drawdown", "profit_factor", "win_rate", "daily_sharpe")
+TRADE_METRICS = ("return_pct", "max_drawdown", "profit_factor", "win_rate", "trade_sharpe")
+BLOCK_METRICS = ("return_pct", "max_drawdown", "daily_sharpe")
+METRICS = tuple(dict.fromkeys((*TRADE_METRICS, *BLOCK_METRICS)))
 
 
 def _profit_factor(values: np.ndarray) -> float:
@@ -52,7 +54,7 @@ def trade_resample(
     initial_fund: float = 10_000.0,
 ) -> pd.DataFrame:
     if trades_df is None or trades_df.empty:
-        return pd.DataFrame(columns=("iter", *METRICS))
+        return pd.DataFrame(columns=("iter", *TRADE_METRICS))
 
     if "pnl" in trades_df:
         pnl = trades_df["pnl"].astype(float).to_numpy()
@@ -61,10 +63,10 @@ def trade_resample(
         trade_returns = trades_df["pnl_pct"].astype(float).to_numpy()
         pnl = trade_returns * float(initial_fund or 1.0)
     else:
-        return pd.DataFrame(columns=("iter", *METRICS))
+        return pd.DataFrame(columns=("iter", *TRADE_METRICS))
 
     if trade_returns.size == 0:
-        return pd.DataFrame(columns=("iter", *METRICS))
+        return pd.DataFrame(columns=("iter", *TRADE_METRICS))
 
     rng = np.random.default_rng(seed)
     rows = []
@@ -79,7 +81,7 @@ def trade_resample(
             "max_drawdown": _max_drawdown_from_returns(sampled_returns),
             "profit_factor": _profit_factor(sampled_pnl),
             "win_rate": float((sampled_pnl > 0).mean()),
-            "daily_sharpe": _sharpe(sampled_returns, periods_per_year=252.0),
+            "trade_sharpe": _sharpe(sampled_returns, periods_per_year=1.0),
         })
     return pd.DataFrame(rows)
 
@@ -104,7 +106,7 @@ def block_bootstrap_returns(
 ) -> pd.DataFrame:
     values = pd.Series(list(daily_returns), dtype="float64").dropna().to_numpy()
     if values.size == 0:
-        return pd.DataFrame(columns=("iter", *METRICS))
+        return pd.DataFrame(columns=("iter", *BLOCK_METRICS))
 
     rng = np.random.default_rng(seed)
     rows = []
@@ -114,8 +116,6 @@ def block_bootstrap_returns(
             "iter": idx,
             "return_pct": float(np.prod(1.0 + sample) - 1.0),
             "max_drawdown": _max_drawdown_from_returns(sample),
-            "profit_factor": _profit_factor(sample),
-            "win_rate": float((sample > 0).mean()),
             "daily_sharpe": _sharpe(sample),
         })
     return pd.DataFrame(rows)
