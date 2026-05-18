@@ -29,5 +29,5 @@ if [ -n "$repo_root" ] && [ -x "$repo_root/scripts/pre_commit_walkforward_adviso
 fi
 
 if [ -n "$repo_root" ] && [ -f "$repo_root/scripts/check_oos_lockup_leakage.py" ]; then
-  python3 "$repo_root/scripts/check_oos_lockup_leakage.py" --allow-oos-validation-report "$@"
+  python3 "$repo_root/scripts/check_oos_lockup_leakage.py" --staged --allow-oos-validation-report "$@"
 fi
