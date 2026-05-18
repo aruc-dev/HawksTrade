@@ -32,10 +32,12 @@ candidate evidence failed final validation.
 
 ## Leakage Guard
 
-The pre-commit hook runs `scripts/check_oos_lockup_leakage.py` and blocks staged
-reports that mention a date inside the active lockup. Reports from the explicit
-OOS validation workflow are the only exception; they must be Markdown files
-named `reports/oos_validation_*.md` and include the `OOS validation` marker.
+Release validation runs `scripts/check_oos_lockup_leakage.py --tracked` and
+blocks committed reports that mention a date inside the active lockup. Hook
+usage should call `scripts/check_oos_lockup_leakage.py --staged` so only staged
+report changes are checked before commit. Reports from the explicit OOS
+validation workflow are the only exception; they must be Markdown files named
+`reports/oos_validation_*.md` and include the `OOS validation` marker.
 
 Before scaling capital or enabling a strategy, the current locked OOS window
 must have a passing validation result within the last 30 days, alongside the

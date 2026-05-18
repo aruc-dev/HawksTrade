@@ -71,7 +71,7 @@ def build_release_validation_plan(args: argparse.Namespace) -> list[ValidationGa
                 "screener",
             ),
         ),
-        ValidationGate("OOS lockup leakage", (py, "scripts/check_oos_lockup_leakage.py")),
+        ValidationGate("OOS lockup leakage", (py, "scripts/check_oos_lockup_leakage.py", "--tracked")),
         ValidationGate(
             "production validation gate",
             (py, "scheduler/run_validation_gate.py", "--profile", "production"),
