@@ -135,6 +135,63 @@ class TradeLogTests(unittest.TestCase):
         self.assertEqual(rows[0]["symbol"], "AAPL")
         self.assertEqual(open_calls[0][1].get("newline"), "")
 
+    def test_log_trade_migrates_existing_header_before_append(self):
+        old_columns = [col for col in trade_log.COLUMNS if col != "risk_tier"]
+        trade_log.TRADE_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(trade_log.TRADE_LOG, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=old_columns)
+            writer.writeheader()
+            writer.writerow({
+                "timestamp": "2026-04-14T19:05:11+00:00",
+                "mode": "paper",
+                "symbol": "AAPL",
+                "strategy": "momentum",
+                "asset_class": "stock",
+                "side": "buy",
+                "qty": "2",
+                "entry_price": "100",
+                "exit_price": "",
+                "stop_loss": "96.5",
+                "take_profit": "112",
+                "high_water_price": "100",
+                "pnl_pct": "",
+                "exit_reason": "",
+                "order_id": "old-entry",
+                "status": "open",
+            })
+
+        trade_log.log_trade({
+            "timestamp": "2026-04-15T19:05:11+00:00",
+            "mode": "paper",
+            "symbol": "MSFT",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "side": "buy",
+            "qty": "1",
+            "entry_price": "200",
+            "risk_tier": "exploration:0",
+            "stop_loss": "193",
+            "take_profit": "224",
+            "high_water_price": "200",
+            "order_id": "new-entry",
+            "status": "open",
+        })
+
+        with open(trade_log.TRADE_LOG, "r", newline="") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+        self.assertEqual(reader.fieldnames, trade_log.COLUMNS)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["symbol"], "AAPL")
+        self.assertEqual(rows[0]["risk_tier"], "")
+        self.assertEqual(rows[0]["stop_loss"], "96.5")
+        self.assertEqual(rows[0]["take_profit"], "112")
+        self.assertEqual(rows[0]["order_id"], "old-entry")
+        self.assertEqual(rows[1]["symbol"], "MSFT")
+        self.assertEqual(rows[1]["risk_tier"], "exploration:0")
+        self.assertEqual(rows[1]["stop_loss"], "193")
+
     def test_mark_trade_closed_updates_most_recent_open_buy(self):
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         older = (now - timedelta(days=2)).isoformat()

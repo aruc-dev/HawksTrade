@@ -373,6 +373,20 @@ def _ensure_file(path: Path | None = None):
             writer = csv.DictWriter(f, fieldnames=COLUMNS)
             writer.writeheader()
         log.info(f"Trade log created: {trade_log_path}")
+        return
+
+    with open(trade_log_path, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        existing_header = reader.fieldnames or []
+        if existing_header == COLUMNS:
+            return
+        rows = list(reader)
+
+    with open(trade_log_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=COLUMNS)
+        writer.writeheader()
+        writer.writerows({col: row.get(col, "") for col in COLUMNS} for row in rows)
+    log.info(f"Trade log migrated to current header: {trade_log_path}")
 
 
 def _read_rows_unlocked(path: Path) -> list[dict]:
