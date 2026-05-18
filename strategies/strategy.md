@@ -12,7 +12,7 @@
 |---|---|---|---|
 | Momentum | Stocks | **Enabled** | `momentum.py` |
 | RSI Reversion | Stocks | **Enabled as conditional bear/chop sleeve** | `rsi_reversion.py`; live entries require paper-readiness evidence |
-| Gap-Up | Stocks | **Enabled** | `gap_up.py` |
+| Gap-Up | Stocks | **Disabled in default profile** | `gap_up.py`; run standalone validation before re-enabling |
 | MA Crossover | Crypto | **Enabled** | `ma_crossover.py`; live entries require paper-readiness evidence |
 | Range Breakout | Crypto | **Enabled** | `range_breakout.py`; high-water profit protection enabled; live entries require paper-readiness evidence |
 
@@ -51,8 +51,8 @@ filtering:
 
 **Volume Confirmation (per-signal):** Momentum uses time-of-day normalized volume
 pace by default (`volume_confirmation_mode: pace`). Current regular-session volume
-must be at least `1.5x` the expected volume for the elapsed market minutes
-(`volume_pace_ratio: 1.5`), based on the candidate's 20-day average daily volume.
+must be at least `1.8x` the expected volume for the elapsed market minutes
+(`volume_pace_ratio: 1.8`), based on the candidate's 20-day average daily volume.
 If intraday bars are unavailable, the scan time is outside regular-session
 context, or no valid elapsed-session volume can be calculated, it falls back to
 the legacy daily-volume check
@@ -94,7 +94,7 @@ room while the global 3.5% stop remains the baseline fixed-percentage stop.
 | `min_breadth_coverage_pct` | 65% |
 | `yellow_max_positions` | 1 |
 | `volume_confirmation_mode` | `pace` |
-| `volume_pace_ratio` | 1.5x expected elapsed-session volume pace |
+| `volume_pace_ratio` | 1.8x expected elapsed-session volume pace |
 | `volume_pace_timeframe` | `1Min` |
 | `session_minutes` | 390 |
 | `volume_spike_ratio` | 2.0 legacy daily fallback |
@@ -183,7 +183,7 @@ collection.
 
 ---
 
-## 3. Gap-Up *(Stocks — Enabled)*
+## 3. Gap-Up *(Stocks — Disabled in Default Profile)*
 
 **Type:** Opening momentum, short swing trade.
 
@@ -225,8 +225,12 @@ from the global risk manager apply throughout.
 
 **Regime filter:** SPY > SMA50 (bull market required).
 
+**Default status:** Disabled in `config/config.yaml` and excluded from the
+default production/walk-forward strategy lists until its standalone bootstrap
+and minute-fill validation improve.
+
 **Monitoring gate:** Run `python3 scheduler/run_validation_gate.py --profile gap`
-before scaling capital allocated to this sleeve.
+before re-enabling or scaling capital allocated to this sleeve.
 
 ---
 

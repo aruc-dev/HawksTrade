@@ -200,7 +200,7 @@ strategies:
     min_breadth_coverage_pct: 0.65 # Require valid SMA50 coverage for at least 65% of the scan universe
     yellow_max_positions: 1        # Max positions in Yellow regime (breadth 25–50%)
     volume_confirmation_mode: "pace" # "pace" compares current session volume to expected volume for elapsed market minutes; "daily" uses legacy full-day ratio
-    volume_pace_ratio: 1.5         # Current session volume pace must exceed this multiple of the 20-day average daily pace
+    volume_pace_ratio: 1.8         # Current session volume pace must exceed this multiple of the 20-day average daily pace
     volume_pace_timeframe: "1Min"  # Intraday bars used to calculate current session volume pace
     session_minutes: 390           # Regular US equity session length used for volume-pace normalization
     volume_spike_ratio: 2.0        # Legacy daily fallback: latest daily volume must exceed this multiple of the 20-day average
@@ -242,9 +242,9 @@ strategies:
     weight: 1.0
 
   gap_up:
-    enabled: true
+    enabled: false
     asset_class: stocks
-    description: "Buy confirmed true-gap stocks gapping up 5-15% with opening-volume pace, completed-bar trend confirmation, and failed-gap exits"
+    description: "Disabled in the default profile until standalone bootstrap and minute-fill validation improve; buys confirmed true-gap stocks gapping up 5-15% with opening-volume pace, completed-bar trend confirmation, and failed-gap exits"
     min_gap_pct: 0.05            # Minimum gap-up percentage
     max_gap_pct: 0.15            # Avoid buying exhaustion gaps beyond this percentage
     require_true_gap: true       # Today's open must also clear the prior day's high
@@ -368,7 +368,7 @@ validation:
       master:
         window_days: 180
         screener: true
-        strategies: [momentum, rsi_reversion, gap_up, ma_crossover, range_breakout]
+        strategies: [momentum, rsi_reversion, ma_crossover, range_breakout]
         windows:
           - end_date: "12/31/2019"
             label: calm_bull_2019
@@ -419,7 +419,7 @@ validation:
       quick:
         window_days: 180
         screener: true
-        strategies: [momentum, rsi_reversion, gap_up, ma_crossover, range_breakout]
+        strategies: [momentum, rsi_reversion, ma_crossover, range_breakout]
         windows:
           - end_date: "09/30/2020"
             label: covid_crash_2020
@@ -455,7 +455,7 @@ validation:
         days: 365
         end_date: "04/29/2026"
         screener: true
-        strategies: [momentum, rsi_reversion, gap_up, ma_crossover, range_breakout]
+        strategies: [momentum, rsi_reversion, ma_crossover, range_breakout]
         required: true
         min_return_pct: 0.10
         max_drawdown_pct: 0.06
@@ -466,7 +466,7 @@ validation:
         days: 180
         end_date: "04/29/2026"
         screener: true
-        strategies: [momentum, rsi_reversion, gap_up, ma_crossover, range_breakout]
+        strategies: [momentum, rsi_reversion, ma_crossover, range_breakout]
         required: true
         min_return_pct: 0.015
         max_drawdown_pct: 0.04

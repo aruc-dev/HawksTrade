@@ -36,17 +36,17 @@ increases.
 The current guarded configuration uses:
 
 - Dynamic screener enabled with tightened liquidity, trend, volatility, and overextension filters
-- `momentum` enabled with `top_n: 2`, `min_momentum_pct: 0.04`, `volume_confirmation_mode: pace`, `volume_pace_ratio: 1.5`, and `min_breadth_coverage_pct: 0.65`
+- `momentum` enabled with `top_n: 2`, `min_momentum_pct: 0.04`, `volume_confirmation_mode: pace`, `volume_pace_ratio: 1.8`, and `min_breadth_coverage_pct: 0.65`
 - `rsi_reversion` enabled with RSI<40 entries, crash, realised-volatility, 5-day drawdown, high-ATR entry, and 6% tail-loss guards
-- `gap_up` enabled with true-gap, opening-volume pace, SMA200, and top-1 ranking guards
+- `gap_up` disabled in the default profile until its standalone bootstrap and minute-fill validation improve
 - `ma_crossover` enabled with 3-day follow-through, price/EMA confirmation, BTC EMA20 slope gating, a 2% daily-close max-loss exit, and a 16-day hold cap
 - `range_breakout` enabled with 20-day Donchian breakout, trend, volume, RSI, extension, upper-10% close, BTC EMA20 slope gating, and failed-breakout guards
 
-These costed results enforce `trading.max_position_pct: 0.08` for every entry, including momentum/Kelly sizing, and assume 10 bps adverse slippage plus 5 bps fees per side. The active default enables every configured strategy. The latest tuning adds BTC EMA20 slope gating and tightens crypto breakout quality. Global stop-loss, take-profit, daily-loss halt, max-position cap, and mode remain unchanged.
+These costed results enforce `trading.max_position_pct: 0.08` for every entry, including momentum/Kelly sizing, and assume 10 bps adverse slippage plus 5 bps fees per side. The active default excludes Gap-Up until its standalone gate passes. The latest tuning adds BTC EMA20 slope gating, tightens crypto breakout quality, and raises the live momentum volume-pace requirement. Global stop-loss, take-profit, daily-loss halt, max-position cap, and mode remain unchanged.
 
 | Period | Final Value | Return | Trades | Win Rate | Max Drawdown | Profit Factor | Sharpe |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| 12 months | $10,585.28 | +5.85% | 152 | 40.8% | -1.74% | 1.65 | 2.01 |
+| 12 months | $10,777.51 | +7.78% | 121 | 47.9% | -0.99% | 2.27 | 3.02 |
 
 ---
 
@@ -54,21 +54,21 @@ These costed results enforce `trading.max_position_pct: 0.08` for every entry, i
 
 | Strategy | Trades | Win Rate | Avg P&L % | Total P&L | Best | Worst |
 |---|---:|---:|---:|---:|---:|---:|
-| `gap_up` | 11 | 72.7% | +1.00% | $22.17 | +4.91% | -3.69% |
-| `ma_crossover` | 22 | 40.9% | +2.31% | $104.00 | +11.78% | -5.89% |
-| `momentum` | 98 | 34.7% | +0.89% | $378.16 | +11.78% | -5.28% |
+| `gap_up` | 0 | n/a | n/a | $0.00 | n/a | n/a |
+| `ma_crossover` | 22 | 40.9% | +2.31% | $103.64 | +11.78% | -5.89% |
+| `momentum` | 78 | 48.7% | +1.65% | $612.37 | +11.78% | -5.28% |
 | `range_breakout` | 3 | 100.0% | +6.13% | $36.53 | +11.78% | +3.28% |
-| `rsi_reversion` | 18 | 44.4% | -0.14% | $-4.41 | +7.81% | -4.24% |
+| `rsi_reversion` | 18 | 44.4% | -0.14% | $-3.76 | +7.81% | -4.24% |
 
 ## 12-Month Quarterly Breakdown
 
 | Quarter | Start Value | End Value | Return | Trades | Win Rate |
 |---|---:|---:|---:|---:|---:|
-| Q1 2025 | $9,999.40 | $9,902.04 | -0.97% | 11 | 0.0% |
-| Q2 2025 | $9,902.04 | $10,021.39 | +1.21% | 26 | 46.2% |
-| Q3 2025 | $10,009.33 | $10,148.71 | +1.39% | 50 | 42.0% |
-| Q4 2025 | $10,147.98 | $10,270.39 | +1.21% | 39 | 43.6% |
-| Q1 2026 | $10,262.99 | $10,585.28 | +3.14% | 26 | 46.2% |
+| Q1 2025 | $9,999.40 | $9,904.81 | -0.95% | 11 | 0.0% |
+| Q2 2025 | $9,904.81 | $9,925.36 | +0.21% | 22 | 45.5% |
+| Q3 2025 | $9,909.32 | $10,112.34 | +2.05% | 35 | 45.7% |
+| Q4 2025 | $10,111.59 | $10,415.87 | +3.01% | 37 | 56.8% |
+| Q1 2026 | $10,415.56 | $10,777.51 | +3.48% | 16 | 68.8% |
 
 ---
 
@@ -76,7 +76,7 @@ These costed results enforce `trading.max_position_pct: 0.08` for every entry, i
 
 | Scenario | Screener | Strategies | Return | Trades | Win Rate | Max Drawdown |
 |---|---|---|---:|---:|---:|---:|
-| Current guarded all-enabled strategy set | On | `momentum`, `rsi_reversion`, `gap_up`, `ma_crossover`, `range_breakout` | +5.85% | 152 | 40.8% | -1.74% |
+| Current guarded default strategy set | On | `momentum`, `rsi_reversion`, `ma_crossover`, `range_breakout` | +7.78% | 121 | 47.9% | -0.99% |
 | Previous tail-risk-hardened all-enabled strategy set | On | `momentum`, `rsi_reversion`, `gap_up`, `ma_crossover`, `range_breakout` | +20.70% | 112 | 53.6% | -1.92% |
 | Previous moderate-risk all-enabled strategy set | On | `momentum`, `rsi_reversion`, `gap_up`, `ma_crossover`, `range_breakout` | +22.87% | 111 | 48.6% | -4.12% |
 | Previous all-enabled strategy set | On | `momentum`, `rsi_reversion`, `gap_up`, `ma_crossover`, `range_breakout` | +9.43% | 91 | 40.7% | -5.11% |
@@ -91,10 +91,10 @@ These costed results enforce `trading.max_position_pct: 0.08` for every entry, i
 
 Interpretation:
 
-- The current all-enabled profile returns +5.85% over 12 months with a -1.74% max drawdown under the costed model, but production validation still blocks because bootstrap lower bounds do not clear required return, profit-factor, and Sharpe gates.
+- The current default profile returns +7.78% over 12 months with a -0.99% max drawdown under the costed model, but production validation still blocks because the 12-month return lower bound does not clear the required production floor.
 - Range Breakout and MA Crossover remain positive crypto contributors. Range Breakout has only 3 closed trades in the latest 12-month run, so its edge needs continued forward validation before scaling allocation.
-- Gap-Up was profitable over 12 months but contributed modestly after the stricter regime and trend gates. Keep its dedicated gate in the monitoring loop before scaling allocation.
-- Conditional RSI Reversion was slightly negative in the latest combined 12-month run. Keep monitoring the dedicated RSI gate before scaling allocation.
+- Gap-Up has a positive point estimate but failed its standalone bootstrap gate, so it is disabled in the default profile until the dedicated gate and minute-fill validation improve.
+- Conditional RSI Reversion remains in the default profile as a bear/chop sleeve, but its standalone paper/readiness gate is still blocking. Keep monitoring the dedicated RSI gate before scaling allocation.
 - Use the current row above for live/paper expectations and treat older rows as historical baselines only.
 - The configured position cap remains 8%. With `max_positions: 10`, this caps fully deployed gross long exposure at roughly 80% before cash, position, and asset-class constraints.
 
@@ -119,10 +119,10 @@ Experiment-only overrides without editing `config/config.yaml`:
 
 ```bash
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/29/2026 --screener \
-  --strategies momentum,rsi_reversion,gap_up,ma_crossover,range_breakout \
+  --strategies momentum,rsi_reversion,ma_crossover,range_breakout \
   --set strategies.momentum.top_n=2 \
-  --set strategies.momentum.min_momentum_pct=0.08 \
-  --set strategies.momentum.volume_spike_ratio=2.0 \
+  --set strategies.momentum.min_momentum_pct=0.04 \
+  --set strategies.momentum.volume_pace_ratio=1.8 \
   --set strategies.momentum.min_breadth_coverage_pct=0.65 \
   --set strategies.ma_crossover.max_loss_exit_pct=0.02 \
   --slippage-bps 10 --fee-bps 5 --min-fee 0
@@ -133,9 +133,9 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/29/2026 
 ## Validation
 
 The production validation gate now validates the current costed production gate,
-including `gap_up` and `range_breakout` in the configured strategy lists. The
-requested all-enabled profile is benchmarked above; use the production gate
-thresholds in `config/config.yaml` before scaling live allocation.
+including `range_breakout` and excluding `gap_up` from the default strategy
+lists until its standalone gate passes. Use the production gate thresholds in
+`config/config.yaml` before scaling live allocation.
 
 The latest implementation was also checked with:
 
@@ -148,14 +148,17 @@ python3 scheduler/run_risk_check.py --dry-run
 python3 scheduler/run_report.py
 python3 scheduler/run_backtest.py --days 30 --fund 10000
 python3 scheduler/run_walkforward.py --quick --no-write-report --no-artifacts
-python3 scheduler/run_walkforward.py --profile master
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --end-date 04/29/2026 --exit-policy profit_trailing --screener --slippage-bps 10 --fee-bps 5 --min-fee 0
 python3 scheduler/run_validation_gate.py --profile production
 python3 scheduler/run_validation_gate.py --profile rsi
 python3 scheduler/run_validation_gate.py --profile gap
 ```
 
-All checks passed at the time this document was updated.
+The quick walk-forward now passes at the stressed capital-scaling level (2/3
+windows). Production validation remains blocking: the 12-month default gate
+fails the required return lower bound, and the crypto 12-month gate fails return
+and profit-factor lower bounds. RSI and Gap-Up standalone gates also remain
+blocking until forward-paper/bootstrap evidence improves.
 
 The production validation gate is cost-aware. Its default model assumes 10 bps
 adverse slippage and 5 bps fees per side. Required gates cover the default
@@ -189,14 +192,14 @@ the hardened Donchian-style implementation before scaling allocation:
 | `range_breakout_12m_costed` | PASS | +5.70% | -0.92% | 10 | 70.0% | 5.91 | 1.84 |
 | `range_breakout_recent_30d_watch` | WARN | +0.00% | +0.00% | 0 | 0.0% | 0.00 | 0.00 |
 
-Gap-Up is enabled in the active profile. Its dedicated gate validates the
-opening-minute implementation with the dynamic screener enabled before scaling
-allocation:
+Gap-Up is disabled in the active default profile. Its dedicated gate validates
+the opening-minute implementation with the dynamic screener enabled before
+re-enabling or scaling allocation:
 
 | Gate | Result | Return | Max Drawdown | Trades | Win Rate | Profit Factor | Daily Sharpe |
 |---|---|---:|---:|---:|---:|---:|---:|
-| `gap_up_12m_costed` | PASS | +1.45% | -0.99% | 11 | 72.7% | 2.86 | 0.54 |
-| `gap_up_recent_30d_watch` | PASS | +0.52% | -0.01% | 1 | 100.0% | inf | 6.11 |
+| `gap_up_12m_costed` | FAIL | +0.22% | -0.22% | 11 | 72.7% | 2.30 | 0.33 |
+| `gap_up_recent_30d_watch` | SKIP | n/a | n/a | 0 | n/a | n/a | n/a |
 
 ---
 
