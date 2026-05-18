@@ -53,14 +53,17 @@ class RSIReversionScanTests(unittest.TestCase):
         bars = _make_bars()
 
         def _get_stock_bars(symbols, timeframe="1Day", limit=210):
-            if symbols == ["SPY"]:
-                return {"SPY": [_bar(100) for _ in range(30)]}
+            if symbols == ["SPY", "QQQ"]:
+                return {
+                    "SPY": [_bar(100) for _ in range(30)],
+                    "QQQ": [_bar(100) for _ in range(30)],
+                }
             return {"AAPL": bars}
 
         with (
             patch("strategies.rsi_reversion.ac.get_stock_bars", side_effect=_get_stock_bars),
             patch("strategies.rsi_reversion.ac.get_portfolio_value") as get_portfolio_value,
-            patch("strategies.rsi_reversion.rm.market_regime_ok", return_value=True),
+            patch("strategies.rsi_reversion.rm.market_regime_ok", return_value=True) as market_regime_ok,
             patch("strategies.rsi_reversion._calc_rsi", return_value=25.0),
             patch("strategies.rsi_reversion._bollinger_pct_b", return_value=0.10),
             patch("strategies.rsi_reversion._calc_atr", return_value=2.0),
@@ -73,13 +76,17 @@ class RSIReversionScanTests(unittest.TestCase):
 
         self.assertEqual(signals, [])
         get_portfolio_value.assert_not_called()
+        self.assertEqual(set(market_regime_ok.call_args.kwargs["bars_data"]), {"SPY", "QQQ"})
 
     def test_bear_or_chop_mode_allows_non_bull_regime(self):
         bars = _make_bars()
 
         def _get_stock_bars(symbols, timeframe="1Day", limit=210):
-            if symbols == ["SPY"]:
-                return {"SPY": [_bar(100) for _ in range(30)]}
+            if symbols == ["SPY", "QQQ"]:
+                return {
+                    "SPY": [_bar(100) for _ in range(30)],
+                    "QQQ": [_bar(100) for _ in range(30)],
+                }
             return {"AAPL": bars}
 
         with (

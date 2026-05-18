@@ -124,8 +124,8 @@ def strategy_search_space_catalog() -> dict[str, list[dict]]:
         },
         "relative_strength": {
             "strategies.relative_strength.top_n": [1, 2, 3],
-            "strategies.relative_strength.min_rs_pct": [0.01, 0.02, 0.03],
-            "strategies.relative_strength.min_abs_return_pct": [0.00, 0.03, 0.05],
+            "strategies.relative_strength.min_rs_pct": [0.02, 0.05, 0.08],
+            "strategies.relative_strength.min_abs_return_pct": [0.03, 0.05, 0.08],
             "strategies.relative_strength.lookback_days": [15, 20, 30],
         },
         "gap_up": {

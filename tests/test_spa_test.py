@@ -58,6 +58,15 @@ class SPATests(unittest.TestCase):
         self.assertEqual(len(catalog["momentum"]), 81)
         self.assertEqual(len(catalog["relative_strength"]), 81)
         self.assertEqual(len(catalog["gap_up"]), 27)
+        self.assertIn(
+            {
+                "strategies.relative_strength.top_n": 1,
+                "strategies.relative_strength.min_rs_pct": 0.05,
+                "strategies.relative_strength.min_abs_return_pct": 0.08,
+                "strategies.relative_strength.lookback_days": 20,
+            },
+            catalog["relative_strength"],
+        )
 
     def test_returns_matrix_from_csv_and_report(self):
         with tempfile.TemporaryDirectory() as tmpdir:

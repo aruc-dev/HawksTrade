@@ -266,17 +266,26 @@ class RSIReversionStrategy(BaseStrategy):
 
         regime_bars = kwargs.get("regime_bars")
 
-        # Pre-fetch SPY once and share between both regime filters to avoid double API call.
-        if regime_bars is None or "SPY" not in (regime_bars or {}):
+        # Pre-fetch regime symbols once and share between regime filters to avoid duplicate API calls.
+        required_regime_symbols = ["SPY"]
+        if market_regime_mode in {"bear_or_chop_only", "bear_only"}:
+            required_regime_symbols.append("QQQ")
+        supplied_regime_bars = regime_bars if isinstance(regime_bars, dict) else {}
+        missing_regime_symbols = [
+            symbol for symbol in required_regime_symbols
+            if symbol not in supplied_regime_bars
+        ]
+        if missing_regime_symbols:
             try:
-                raw_spy = ac.get_stock_bars(["SPY"], timeframe="1Day", limit=255)
-                spy_bars = raw_spy.get("SPY")
-                if spy_bars:
-                    combined = dict(regime_bars) if regime_bars else {}
-                    combined["SPY"] = spy_bars
-                    regime_bars = combined
+                raw_regime_bars = ac.get_stock_bars(missing_regime_symbols, timeframe="1Day", limit=255)
+                combined = dict(supplied_regime_bars)
+                for symbol in missing_regime_symbols:
+                    bars = raw_regime_bars.get(symbol)
+                    if bars:
+                        combined[symbol] = bars
+                regime_bars = combined
             except Exception as e:
-                log.warning(f"[RSI] Failed to pre-fetch SPY for regime filters: {e}")
+                log.warning(f"[RSI] Failed to pre-fetch stock regime bars: {e}")
 
         allow_regime_warmup = bool(kwargs.get("allow_regime_warmup", False))
 
