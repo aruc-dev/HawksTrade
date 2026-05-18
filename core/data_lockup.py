@@ -9,6 +9,7 @@ can be used by tests, hooks, and backtest code without broker dependencies.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -16,6 +17,12 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback
+    fcntl = None
+    import msvcrt
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_LOCKUP_FILE = BASE_DIR / "data" / "oos_lockup.json"
@@ -71,6 +78,42 @@ def _write_lockup_metadata(metadata: dict[str, Any], path: Path | None = None) -
     tmp_path.replace(lockup_path)
 
 
+def _lock_path(path: Path) -> Path:
+    return path.with_name(f"{path.name}.lock")
+
+
+def _lock_file(lock_file) -> None:
+    if fcntl is not None:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+    else:  # pragma: no cover - Windows fallback
+        lock_file.seek(0, 2)
+        if lock_file.tell() == 0:
+            lock_file.write(b"\0")
+            lock_file.flush()
+        lock_file.seek(0)
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+
+
+def _unlock_file(lock_file) -> None:
+    if fcntl is not None:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    else:  # pragma: no cover - Windows fallback
+        lock_file.seek(0)
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+@contextlib.contextmanager
+def _locked_lockup_file(path: Path | None = None):
+    lockup_path = Path(path or DEFAULT_LOCKUP_FILE)
+    lockup_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(_lock_path(lockup_path), "a+b") as lock_file:
+        _lock_file(lock_file)
+        try:
+            yield lockup_path
+        finally:
+            _unlock_file(lock_file)
+
+
 def current_lockup(path: Path | None = None) -> OOSLockup | None:
     metadata = load_lockup_metadata(path)
     raw = metadata.get("current_lockup") or {}
@@ -95,6 +138,19 @@ def validate_oos_unlock_token(
     now: datetime | None = None,
 ) -> bool:
     """Validate and optionally consume the current lockup's one-shot token."""
+    if consume:
+        with _locked_lockup_file(path) as lockup_path:
+            return _validate_oos_unlock_token_unlocked(token, consume=True, path=lockup_path, now=now)
+    return _validate_oos_unlock_token_unlocked(token, consume=False, path=path, now=now)
+
+
+def _validate_oos_unlock_token_unlocked(
+    token: str | None,
+    *,
+    consume: bool = False,
+    path: Path | None = None,
+    now: datetime | None = None,
+) -> bool:
     metadata = load_lockup_metadata(path)
     raw = metadata.get("current_lockup") or {}
     expected = str(raw.get("unlock_token") or "")

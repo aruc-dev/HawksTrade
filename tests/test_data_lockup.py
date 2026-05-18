@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -131,6 +132,31 @@ class DataLockupTests(unittest.TestCase):
 
             self.assertTrue(data_lockup.validate_oos_unlock_token("token-1", consume=True, path=path))
             self.assertFalse(data_lockup.validate_oos_unlock_token("token-1", path=path))
+
+    def test_unlock_token_consume_locks_read_modify_write(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _lockup_file(tmpdir)
+            calls = []
+            original_load = data_lockup.load_lockup_metadata
+            original_write = data_lockup._write_lockup_metadata
+
+            def load_metadata(path_arg=None):
+                calls.append("load")
+                return original_load(path_arg)
+
+            def write_metadata(metadata, path_arg=None):
+                calls.append("write")
+                return original_write(metadata, path_arg)
+
+            with (
+                patch.object(data_lockup, "_lock_file", side_effect=lambda _handle: calls.append("lock")),
+                patch.object(data_lockup, "_unlock_file", side_effect=lambda _handle: calls.append("unlock")),
+                patch.object(data_lockup, "load_lockup_metadata", side_effect=load_metadata),
+                patch.object(data_lockup, "_write_lockup_metadata", side_effect=write_metadata),
+            ):
+                self.assertTrue(data_lockup.validate_oos_unlock_token("token-1", consume=True, path=path))
+
+        self.assertEqual(calls, ["lock", "load", "write", "unlock"])
 
     def test_report_mentions_locked_date_detects_iso_or_us_date(self):
         with tempfile.TemporaryDirectory() as tmpdir:
