@@ -38,6 +38,7 @@ class OrderIntent:
     price: float | None = None
     limit_price: float | None = None
     position_qty: float | None = None
+    parent_intent_id: str | None = None
 
     @property
     def normalized_symbol(self) -> str:
@@ -341,7 +342,16 @@ class OrderGovernor:
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
         now = now.astimezone(timezone.utc)
-        timestamps = [ts for ts in (_parse_timestamp(row.get("timestamp")) for row in history) if ts is not None]
+        logical_orders: dict[str, datetime] = {}
+        for idx, row in enumerate(history):
+            ts = _parse_timestamp(row.get("timestamp"))
+            if ts is None:
+                continue
+            logical_id = str(row.get("parent_intent_id") or row.get("client_order_id") or idx)
+            existing = logical_orders.get(logical_id)
+            if existing is None or ts < existing:
+                logical_orders[logical_id] = ts
+        timestamps = list(logical_orders.values())
 
         if self.max_orders_per_window is not None:
             cutoff = now - timedelta(seconds=self.order_rate_window_seconds)

@@ -113,6 +113,29 @@ class OrderGovernorTests(unittest.TestCase):
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.code, "order_rate_limit")
 
+    def test_multi_leg_history_counts_as_one_logical_order(self):
+        history = [
+            {
+                "timestamp": (self.now - timedelta(seconds=10)).isoformat(),
+                "parent_intent_id": "parent-1",
+                "leg_number": "1",
+            },
+            {
+                "timestamp": (self.now - timedelta(seconds=20)).isoformat(),
+                "parent_intent_id": "parent-1",
+                "leg_number": "2",
+            },
+        ]
+        intent = OrderIntent("AAPL", "buy", 1, "market", price=100)
+
+        decision = self._governor(
+            max_orders_per_window=2,
+            order_rate_window_seconds=60,
+            order_history_provider=lambda: history,
+        ).evaluate(intent, self.account, [])
+
+        self.assertTrue(decision.allowed)
+
     def test_blocks_daily_order_count_for_entries(self):
         history = [
             {"timestamp": self.now.isoformat()},

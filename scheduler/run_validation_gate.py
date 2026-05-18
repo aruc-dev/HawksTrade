@@ -181,9 +181,32 @@ def evaluate_backtest_gate(
     }
 
 
+def _uses_slippage_model(cost_model: dict) -> bool:
+    return bool(cost_model.get("slippage_model_enabled", False))
+
+
+def _cost_model_summary(cost_model: dict) -> str:
+    fee_text = (
+        f"fee={float(cost_model.get('fee_bps', 0.0)):.2f} bps, "
+        f"min_fee=${float(cost_model.get('min_fee_usd', 0.0)):.2f}"
+    )
+    if _uses_slippage_model(cost_model):
+        return (
+            "Cost model: "
+            f"liquidity-aware slippage x{float(cost_model.get('slippage_multiplier', 1.0)):.2f}, "
+            f"{fee_text}"
+        )
+    return (
+        "Cost model: "
+        f"slippage={float(cost_model.get('slippage_bps', 0.0)):.2f} bps, "
+        f"{fee_text}"
+    )
+
+
 def _sensitivity_levels(cost_model: dict) -> list[float]:
     levels = []
-    for value in _as_list(cost_model.get("sensitivity_levels_bps")):
+    key = "sensitivity_multipliers" if _uses_slippage_model(cost_model) else "sensitivity_levels_bps"
+    for value in _as_list(cost_model.get(key)):
         try:
             parsed = float(value)
         except (TypeError, ValueError):
@@ -197,14 +220,23 @@ def evaluate_slippage_sensitivity_gate(
     gate: dict,
     cost_model: dict,
     initial_fund: float,
-    slippage_bps: float,
+    slippage_level: float,
     *,
     min_reliable_trades: int = 0,
 ) -> dict:
-    """Run a watch-only production window at a stressed slippage level."""
+    """Run a watch-only production window at a stressed slippage level.
+
+    With the liquidity-aware model enabled, the level is a multiplier on the
+    model output. With the legacy flat model, it remains a bps override.
+    """
     stressed_cost_model = dict(cost_model)
-    stressed_cost_model["slippage_bps"] = slippage_bps
-    name_suffix = f"_slippage_{slippage_bps:g}bps"
+    if _uses_slippage_model(cost_model):
+        stressed_cost_model["slippage_model_enabled"] = True
+        stressed_cost_model["slippage_multiplier"] = slippage_level
+        name_suffix = f"_slippage_model_x{slippage_level:g}"
+    else:
+        stressed_cost_model["slippage_bps"] = slippage_level
+        name_suffix = f"_slippage_{slippage_level:g}bps"
     try:
         result = run_backtest(
             days=int(gate["days"]),
@@ -242,7 +274,7 @@ def evaluate_slippage_sensitivity_gate(
         "stats": stats,
         "gate_stats": bounds,
         "uses_bootstrap_bounds": _has_bootstrap_bounds(stats),
-        "slippage_bps": slippage_bps,
+        "slippage_level": slippage_level,
     }
 
 
@@ -427,12 +459,7 @@ def run_validation_gate(
     records: list[dict] = []
     lines = [
         "### HawksTrade Validation Gate",
-        (
-            "Cost model: "
-            f"slippage={float(cost_model.get('slippage_bps', 0.0)):.2f} bps, "
-            f"fee={float(cost_model.get('fee_bps', 0.0)):.2f} bps, "
-            f"min_fee=${float(cost_model.get('min_fee_usd', 0.0)):.2f}"
-        ),
+        _cost_model_summary(cost_model),
         "",
     ]
 
@@ -454,14 +481,15 @@ def run_validation_gate(
             lines.append("Production slippage sensitivity (watch-only):")
             levels = _sensitivity_levels(cost_model)
             if not levels:
-                lines.append("WARN No sensitivity_levels_bps configured.")
+                key = "sensitivity_multipliers" if _uses_slippage_model(cost_model) else "sensitivity_levels_bps"
+                lines.append(f"WARN No {key} configured.")
             for gate in production_windows:
-                for slippage_bps in levels:
+                for slippage_level in levels:
                     record = evaluate_slippage_sensitivity_gate(
                         gate,
                         cost_model,
                         initial_fund,
-                        slippage_bps,
+                        slippage_level,
                         min_reliable_trades=min_reliable_trades,
                     )
                     records.append(record)

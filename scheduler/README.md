@@ -27,6 +27,7 @@ documented in their own sections below.
 | Crypto scan | `./scripts/run_hawkstrade_job.sh scheduler/run_scan.py --crypto-only` | Hourly, every day | Hourly, every day |
 | Daily report | `./scripts/run_hawkstrade_job.sh scheduler/run_report.py` | 4:30 PM Mon-Fri | 1:30 PM Mon-Fri |
 | Weekly report | `./scripts/run_hawkstrade_job.sh scheduler/run_report.py --weekly` | 8:00 AM Monday | 5:00 AM Monday |
+| Weekly TCA report | `./scripts/run_hawkstrade_job.sh scheduler/run_weekly_tca.py` | 8:30 AM Monday | 5:30 AM Monday |
 
 Before enabling schedules:
 
@@ -39,6 +40,7 @@ Before enabling schedules:
 python3 scheduler/run_scan.py --dry-run
 python3 scheduler/run_risk_check.py --dry-run
 python3 scheduler/run_report.py
+python3 scheduler/run_weekly_tca.py
 ```
 
 ## macOS Launchd
@@ -148,6 +150,21 @@ jobs, so they cannot overlap while placing or closing orders. Full scans, stock
 scans, and risk checks wait up to 10 minutes for the lock; redundant
 `--crypto-only` runs skip when another trade-mutating job is already active.
 Report jobs use the same wrapper but do not take the trade-mutation lock.
+
+## Minute-Bar Backtest Cache
+
+Phase 2 backtests use real 1-minute stock bars for Gap-Up opening-window and
+Momentum/Relative Strength volume-pace checks. The on-demand cache lives under
+`data/minute_cache/` and is intentionally not committed. For repeatable
+walk-forward runs, prefetch the cache before running the master profile:
+
+```bash
+python3 scripts/prefetch_minute_bars.py --start 2019-01-01 --end auto --symbols=universe --workers 6
+```
+
+The cache prefers parquet files and falls back to compressed CSV when a parquet
+engine is unavailable. Install dependencies from `requirements.txt` before
+running long prefetches so `pyarrow` is available.
 
 The Linux cron templates also set `HAWKSTRADE_REQUIRE_SHM=1`. When
 `config/config.yaml` uses `secrets_source: shm`, that environment guard makes

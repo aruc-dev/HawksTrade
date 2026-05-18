@@ -27,6 +27,9 @@ COLUMNS = [
     "updated_at",
     "run_id",
     "client_order_id",
+    "parent_intent_id",
+    "leg_number",
+    "execution_policy",
     "symbol",
     "normalized_symbol",
     "side",
@@ -53,9 +56,16 @@ def _slug(value: str, max_len: int) -> str:
     return (text or "x")[:max_len]
 
 
-def make_client_order_id(run_id: str, symbol: str, side: str, strategy: str, intent_timestamp: str) -> str:
+def make_client_order_id(
+    run_id: str,
+    symbol: str,
+    side: str,
+    strategy: str,
+    intent_timestamp: str,
+    intent_suffix: str = "",
+) -> str:
     normalized_symbol = _normalize_symbol(symbol)
-    payload = "|".join([run_id, normalized_symbol, side.lower(), strategy, intent_timestamp])
+    payload = "|".join([run_id, normalized_symbol, side.lower(), strategy, intent_timestamp, intent_suffix])
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
     return f"ht-{side.lower()[:1]}-{_slug(normalized_symbol, 8)}-{_slug(strategy, 10)}-{digest}"
 
@@ -76,9 +86,16 @@ def _write_rows_unlocked(path: Path, rows: list[dict]) -> None:
 
 
 def _ensure_file_unlocked(path: Path) -> None:
-    if path.exists():
+    if not path.exists():
+        _write_rows_unlocked(path, [])
         return
-    _write_rows_unlocked(path, [])
+    with open(path, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames or []
+        if fieldnames == COLUMNS:
+            return
+        rows = list(reader)
+    _write_rows_unlocked(path, rows)
 
 
 def _locked_intents(exclusive: bool = True) -> AbstractContextManager[Path]:
@@ -99,10 +116,16 @@ def get_or_create_order_intent(
     asset_class: str,
     qty,
     limit_price=None,
+    parent_intent_id: str = "",
+    leg_number: int | str = "",
+    execution_policy: str = "",
 ) -> tuple[dict, bool]:
     side = side.lower()
     normalized_symbol = _normalize_symbol(symbol)
     strategy = strategy or "unknown"
+    parent_intent_id = str(parent_intent_id or "")
+    leg_number = str(leg_number or "")
+    execution_policy = str(execution_policy or "")
 
     with _locked_intents(exclusive=True) as path:
         _ensure_file_unlocked(path)
@@ -113,17 +136,23 @@ def get_or_create_order_intent(
                 and row.get("normalized_symbol") == normalized_symbol
                 and row.get("side") == side
                 and row.get("strategy") == strategy
+                and (row.get("parent_intent_id") or "") == parent_intent_id
+                and (row.get("leg_number") or "") == leg_number
                 and row.get("status") not in TERMINAL_STATUSES
             ):
                 return row, False
 
         timestamp = _utc_now().isoformat()
-        client_order_id = make_client_order_id(run_id, symbol, side, strategy, timestamp)
+        suffix = "|".join([parent_intent_id, leg_number, execution_policy])
+        client_order_id = make_client_order_id(run_id, symbol, side, strategy, timestamp, suffix)
         row = {
             "timestamp": timestamp,
             "updated_at": timestamp,
             "run_id": run_id,
             "client_order_id": client_order_id,
+            "parent_intent_id": parent_intent_id,
+            "leg_number": leg_number,
+            "execution_policy": execution_policy,
             "symbol": symbol,
             "normalized_symbol": normalized_symbol,
             "side": side,

@@ -18,6 +18,7 @@ class RunReportTests(unittest.TestCase):
                 patch.object(run_report, "compute_summary", return_value={"total_trades": 0}),
                 patch.object(run_report, "format_report", return_value="report"),
                 patch.object(run_report, "save_performance_snapshot"),
+                patch.object(run_report, "render_tca_section", return_value="daily tca"),
             ):
                 run_report.run_daily_report()
             report_files = list(Path(tmp).glob("daily_*.txt"))
@@ -28,6 +29,7 @@ class RunReportTests(unittest.TestCase):
             logger=run_report.log,
         )
         self.assertIn(f"Version: {__version__}", report_text)
+        self.assertIn("daily tca", report_text)
 
     def test_weekly_report_reconciles_before_summary(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -36,6 +38,7 @@ class RunReportTests(unittest.TestCase):
                 patch.object(run_report, "safe_reconcile", return_value={"positions": 0}) as safe_reconcile,
                 patch.object(run_report, "compute_summary", return_value={"total_trades": 0}),
                 patch.object(run_report, "format_report", return_value="report"),
+                patch.object(run_report, "render_tca_section", return_value="weekly tca"),
             ):
                 run_report.run_weekly_report()
             report_files = list(Path(tmp).glob("weekly_*.txt"))
@@ -46,6 +49,7 @@ class RunReportTests(unittest.TestCase):
             logger=run_report.log,
         )
         self.assertIn(f"Version: {__version__}", report_text)
+        self.assertIn("weekly tca", report_text)
 
     def test_protection_lock_reporting_failure_does_not_abort_report(self):
         with (

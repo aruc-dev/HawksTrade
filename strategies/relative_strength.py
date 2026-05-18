@@ -199,8 +199,10 @@ class RelativeStrengthStrategy(BaseStrategy):
         volume_pace_ratio = float(SCFG.get("volume_pace_ratio", volume_spike_ratio))
         session_minutes = max(1.0, float(SCFG.get("session_minutes", 390)))
         volume_pace_timeframe = str(SCFG.get("volume_pace_timeframe", "1Min"))
+        require_volume_pace_bars = bool(SCFG.get("require_volume_pace_bars", False))
         elapsed_minutes, in_regular_session = _regular_session_progress(current_time, session_minutes)
         intraday_bars_data = None
+        intraday_fetch_failed = False
 
         if volume_mode == "pace" and in_regular_session:
             try:
@@ -216,6 +218,10 @@ class RelativeStrengthStrategy(BaseStrategy):
                     "falling back to daily volume ratio: %s",
                     e,
                 )
+                intraday_fetch_failed = True
+        if volume_mode == "pace" and require_volume_pace_bars and in_regular_session and intraday_fetch_failed:
+            log.warning("[RelativeStrength] Required intraday volume-pace bars unavailable; failing closed.")
+            return []
 
         scores = []
         for symbol in universe:
@@ -303,6 +309,12 @@ class RelativeStrengthStrategy(BaseStrategy):
                         volume_ratio = session_volume / expected_volume
                         volume_required = volume_pace_ratio
                         volume_basis = "pace"
+                    elif require_volume_pace_bars:
+                        log.debug("[RelativeStrength] %s skipped: required intraday volume bars missing.", symbol)
+                        continue
+                elif volume_mode == "pace" and require_volume_pace_bars and in_regular_session:
+                    log.debug("[RelativeStrength] %s skipped: required intraday volume data unavailable.", symbol)
+                    continue
 
                 if volume_ratio < volume_required:
                     log.debug(

@@ -44,6 +44,40 @@ class OrderIntentTests(unittest.TestCase):
         self.assertLessEqual(len(first["client_order_id"]), 48)
         self.assertEqual(len(rows), 1)
 
+    def test_multi_leg_intents_use_distinct_client_order_ids(self):
+        first, created_first = order_intents.get_or_create_order_intent(
+            run_id="run-1",
+            symbol="AAPL",
+            side="buy",
+            strategy="momentum",
+            asset_class="stock",
+            qty="1",
+            limit_price="100",
+            parent_intent_id="parent-1",
+            leg_number=1,
+            execution_policy="two_leg_passive_aggressive",
+        )
+        second, created_second = order_intents.get_or_create_order_intent(
+            run_id="run-1",
+            symbol="AAPL",
+            side="buy",
+            strategy="momentum",
+            asset_class="stock",
+            qty="1",
+            limit_price="101",
+            parent_intent_id="parent-1",
+            leg_number=2,
+            execution_policy="two_leg_passive_aggressive",
+        )
+
+        rows = order_intents.read_order_intents()
+
+        self.assertTrue(created_first)
+        self.assertTrue(created_second)
+        self.assertNotEqual(first["client_order_id"], second["client_order_id"])
+        self.assertEqual(rows[0]["parent_intent_id"], "parent-1")
+        self.assertEqual(rows[1]["leg_number"], "2")
+
     def test_update_order_intent_records_broker_status(self):
         intent, _ = order_intents.get_or_create_order_intent(
             run_id="run-1",

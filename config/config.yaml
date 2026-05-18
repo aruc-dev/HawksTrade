@@ -48,6 +48,51 @@ trading:
     lookback_days: 30            # Daily bars used for the correlation estimate.
     fail_closed: true            # If correlation data cannot be checked, skip the entry.
 
+slippage_model:
+  enabled: true
+  k_stock: 8.0
+  k_crypto: 15.0
+  default_stock_volatility_bps: 120.0
+  default_crypto_volatility_bps: 250.0
+  default_adv_usd:
+    stock: 50000000
+    crypto: 10000000
+  tod_open_window: [["09:30", "09:45"]]
+  tod_close_window: [["15:50", "16:00"]]
+  open_multiplier: 1.5
+  close_multiplier: 1.5
+  buy_asymmetry: 1.2
+  min_stock_bps: 1.0
+  min_crypto_bps: 5.0
+  max_bps: 200.0
+  high_cost_warning_bps: 50.0
+  per_symbol_overrides: {}
+
+execution_policy:
+  enabled: false                    # Enable only after paper A/B validation.
+  policy: "two_leg_passive_aggressive"
+  poll_interval_seconds: 5.0
+  ab_test:
+    enabled: true
+    fraction: 0.5
+  per_asset_class:
+    stock:
+      leg1_fraction: 0.5
+      leg1_offset_bps: 0.0
+      leg1_timeout_seconds: 90
+      leg2_offset_bps: "model"
+    crypto:
+      leg1_fraction: 0.5
+      leg1_offset_bps: 5.0
+      leg1_timeout_seconds: 60
+      leg2_offset_bps: "model"
+
+latency_budget:
+  stock_decision_to_submit_ms: 500
+  crypto_decision_to_submit_ms: 2000
+  alert_p95_breach: true
+  alert_p99_breach: true
+
 # --- ORDER GOVERNOR ---
 # Broker-state safety gate evaluated immediately before order submission.
 order_governor:
@@ -371,6 +416,13 @@ strategies:
     trend_exit_enabled: true     # Exit when completed close falls below trend EMA
     weight: 0.9
 
+backtest:
+  minute_replay:
+    enabled: true
+    cache_dir: "data/minute_cache"
+    allow_synthetic_intraday: false
+    fail_closed_on_missing: true
+
 # --- VALIDATION GATES ---
 # Guardrails used before scaling live capital or strategy sleeves. Sample-size
 # scaling is intentionally active in live/paper/backtest order sizing.
@@ -393,10 +445,13 @@ validation:
     drawdown_threshold_pct: 0.10
 
   cost_model:
-    slippage_bps: 10.0           # Backtest gate assumes 10 bps adverse fill per side
+    slippage_model_enabled: true # Backtest gate uses the same liquidity-aware model as live execution.
+    slippage_multiplier: 1.0     # Multiplier on model-estimated adverse fill per side.
+    slippage_bps: 10.0           # Legacy flat-slippage fallback for explicit --slippage-bps runs.
     fee_bps: 5.0                 # Backtest gate assumes 5 bps fees/commission per side
     min_fee_usd: 0.0
-    sensitivity_levels_bps: [10.0, 20.0, 30.0] # Optional validation reruns for slippage stress checks
+    sensitivity_multipliers: [1.0, 2.0, 3.0] # Optional model-multiplier stress checks.
+    sensitivity_levels_bps: [10.0, 20.0, 30.0] # Legacy flat-bps stress levels when slippage_model_enabled=false.
     sensitivity_soft_min_return_pct: 0.08      # Watch-only return floor for slippage stress checks
 
   walkforward:

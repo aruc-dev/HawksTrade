@@ -1,4 +1,5 @@
 import csv
+import json
 import os
 import tempfile
 import unittest
@@ -60,6 +61,7 @@ class OrderExecutorTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result["status"], "closed")
         self.assertEqual(result["risk_tier"], "exploration:0")
+        self.assertIn("total", json.loads(result["latency_ms"]))
 
         with open(trade_log.TRADE_LOG, "r") as f:
             rows = list(csv.DictReader(f))
@@ -555,6 +557,39 @@ class OrderExecutorTests(unittest.TestCase):
         self.assertEqual(rows[0]["qty"], "1.5")
         self.assertEqual(rows[0]["entry_price"], "101.25")
 
+    def test_enter_position_uses_slippage_model_for_limit_and_logs_telemetry(self):
+        order = SimpleNamespace(id="entry-model", status="filled", filled_qty="1")
+        slippage_cfg = {
+            "enabled": True,
+            "k_stock": 1.0,
+            "default_stock_volatility_bps": 100.0,
+            "default_adv_usd": {"stock": 40_000.0},
+            "tod_open_window": [],
+            "tod_close_window": [],
+            "buy_asymmetry": 1.0,
+            "min_stock_bps": 0.0,
+            "max_bps": 10_000.0,
+        }
+
+        with (
+            patch.dict(order_executor.CFG, {"slippage_model": slippage_cfg}),
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 4}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=4),
+            patch.object(order_executor.ac, "place_limit_order", return_value=order) as place_limit_order,
+        ):
+            result = order_executor.enter_position("MSFT", "gap_up", dry_run=False, closed_trades_count=100)
+
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(place_limit_order.call_args.args[3], 100.1)
+        self.assertAlmostEqual(result["expected_slippage_bps"], 10.0)
+        self.assertEqual(result["realised_slippage_bps"], 0.0)
+
+        rows = [row for row in trade_log.get_open_trades() if row["symbol"] == "MSFT"]
+        self.assertEqual(rows[0]["decision_price"], "100")
+        self.assertEqual(rows[0]["arrival_price"], "100")
+        self.assertEqual(rows[0]["expected_slippage_bps"], "10.0")
+
     def test_enter_position_logs_wider_stock_atr_stop(self):
         order = SimpleNamespace(
             id="entry-filled",
@@ -628,6 +663,82 @@ class OrderExecutorTests(unittest.TestCase):
         self.assertEqual(rows[0]["status"], "partially_filled")
         self.assertEqual(rows[0]["qty"], "0.25")
         self.assertEqual(rows[0]["risk_tier"], "exploration:0")
+
+    def test_enter_position_two_leg_policy_cancels_passive_and_submits_residual(self):
+        passive_order = SimpleNamespace(
+            id="leg-1",
+            status="new",
+            filled_qty="0",
+            filled_avg_price="",
+        )
+        aggressive_order = SimpleNamespace(
+            id="leg-2",
+            status="filled",
+            filled_qty="4",
+            filled_avg_price="100.02",
+        )
+        execution_policy_cfg = {
+            "enabled": True,
+            "policy": "two_leg_passive_aggressive",
+            "poll_interval_seconds": 0,
+            "ab_test": {"enabled": False, "fraction": 1.0},
+            "per_asset_class": {
+                "stock": {
+                    "leg1_fraction": 0.5,
+                    "leg1_offset_bps": 0,
+                    "leg1_timeout_seconds": 0,
+                    "leg2_offset_bps": "model",
+                }
+            },
+        }
+
+        with (
+            patch.dict(order_executor.CFG, {"execution_policy": execution_policy_cfg}),
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 4}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=4),
+            patch.object(order_executor.ac, "place_limit_order", side_effect=[passive_order, aggressive_order]) as place_limit_order,
+            patch.object(order_executor.ac, "cancel_order") as cancel_order,
+        ):
+            result = order_executor.enter_position("MSFT", "gap_up", dry_run=False, closed_trades_count=100)
+
+        self.assertEqual(result["status"], "open")
+        self.assertEqual(result["execution_policy"], "two_leg_passive_aggressive")
+        self.assertEqual(result["order_id"], "leg-1,leg-2")
+        self.assertEqual(place_limit_order.call_count, 2)
+        self.assertEqual(place_limit_order.call_args_list[0].args[1], 2.0)
+        self.assertEqual(place_limit_order.call_args_list[1].args[1], 4.0)
+        cancel_order.assert_called_once_with("leg-1")
+
+    def test_enter_position_logs_latency_payload_and_warns_on_budget_breach(self):
+        order = SimpleNamespace(
+            id="entry-latency",
+            status="filled",
+            filled_qty="4",
+            filled_avg_price="100",
+        )
+        latency_cfg = {
+            "stock_decision_to_submit_ms": 10,
+            "crypto_decision_to_submit_ms": 2000,
+        }
+
+        with (
+            patch.dict(order_executor.CFG, {"latency_budget": latency_cfg}),
+            patch.object(order_executor.time, "monotonic", side_effect=[0.0, 0.02, 0.03, 0.12]),
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 4}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=4),
+            patch.object(order_executor.ac, "place_limit_order", return_value=order),
+            self.assertLogs("core.order_executor", level="WARNING") as logs,
+        ):
+            result = order_executor.enter_position("MSFT", "gap_up", dry_run=False, closed_trades_count=100)
+
+        payload = json.loads(result["latency_ms"])
+        self.assertEqual(payload["governor"], 20.0)
+        self.assertEqual(payload["submit"], 10.0)
+        self.assertEqual(payload["ack"], 90.0)
+        self.assertEqual(payload["total"], 120.0)
+        self.assertTrue(any("LATENCY_BUDGET_BREACH" in message for message in logs.output))
 
     def test_enter_position_reuses_client_order_id_after_submit_failure(self):
         seen_client_ids = []

@@ -14,7 +14,7 @@ import sys
 import logging
 import argparse
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -28,6 +28,7 @@ from core.sample_size_governor import format_tier_report
 from core.version import __version__
 from scheduler.reconcile_trade_log import safe_reconcile
 from tracking.trade_log import get_closed_trades
+from tracking.tca import render_tca_section
 from tracking.performance import compute_summary, format_report, save_performance_snapshot
 
 BASE_DIR    = Path(__file__).resolve().parent.parent
@@ -75,6 +76,16 @@ def _format_sample_size_tiers() -> str:
         return f"Sample-size tier reporting unavailable: {exc}"
 
 
+def _format_tca_report(*, days: int, title: str) -> str:
+    try:
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=days)
+        return render_tca_section(title=title, start=start, end=end)
+    except Exception as exc:
+        log.warning("TCA reporting unavailable: %s", exc, exc_info=True)
+        return f"{title}\n{'=' * len(title)}\nTCA reporting unavailable: {exc}"
+
+
 def run_daily_report():
     log.info("=== DAILY REPORT ===")
     ts = _utc_now().strftime("%Y-%m-%d")
@@ -94,6 +105,9 @@ def run_daily_report():
     sample_size_text = _format_sample_size_tiers()
     if sample_size_text:
         log.info("\n%s", sample_size_text)
+    tca_text = _format_tca_report(days=1, title="Daily Transaction Cost Analysis")
+    if tca_text:
+        log.info("\n%s", tca_text)
 
     # Save report to file
     report_path = REPORTS_DIR / f"daily_{ts}.txt"
@@ -121,6 +135,10 @@ def run_daily_report():
             f.write("\n\n")
         f.write(report_text)
         f.write("\n")
+        if tca_text:
+            f.write("\n")
+            f.write(tca_text)
+            f.write("\n")
 
     save_performance_snapshot()
     log.info(f"Daily report saved: {report_path}")
@@ -140,6 +158,9 @@ def run_weekly_report():
     sample_size_text = _format_sample_size_tiers()
     if sample_size_text:
         log.info("\n%s", sample_size_text)
+    tca_text = _format_tca_report(days=7, title="Weekly Transaction Cost Analysis")
+    if tca_text:
+        log.info("\n%s", tca_text)
 
     report_path = REPORTS_DIR / f"weekly_{ts}.txt"
     with open(report_path, "w") as f:
@@ -154,6 +175,10 @@ def run_weekly_report():
             f.write("\n\n")
         f.write(report_text)
         f.write("\n")
+        if tca_text:
+            f.write("\n")
+            f.write(tca_text)
+            f.write("\n")
 
     log.info(f"Weekly report saved: {report_path}")
 

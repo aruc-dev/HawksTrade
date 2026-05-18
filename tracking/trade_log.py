@@ -314,6 +314,8 @@ COLUMNS = [
     "timestamp", "mode", "symbol", "strategy", "asset_class",
     "side", "qty", "entry_price", "exit_price", "risk_tier", "stop_loss",
     "take_profit", "high_water_price", "pnl_pct", "exit_reason", "order_id", "status",
+    "order_type", "limit_price", "decision_price", "arrival_price",
+    "expected_slippage_bps", "realised_slippage_bps", "execution_policy", "latency_ms",
 ]
 
 

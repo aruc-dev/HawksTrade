@@ -939,6 +939,51 @@ class TestBacktestExperimentControls(unittest.TestCase):
         self.assertAlmostEqual(sim.trades_log[0]["exit_price"], 108.9)
         self.assertAlmostEqual(sim.trades_log[0]["pnl"], 7.6901, places=4)
 
+    def test_backtest_can_use_liquidity_aware_slippage_model(self):
+        sim = BacktestSimulator(
+            initial_fund=1000.0,
+            cost_model={"slippage_model_enabled": True, "slippage_multiplier": 1.0},
+        )
+        sim.historical_data = {
+            "AAPL": pd.DataFrame(
+                {
+                    "open": [100.0],
+                    "high": [110.0],
+                    "low": [90.0],
+                    "close": [100.0],
+                    "volume": [1000],
+                },
+                index=pd.date_range("2026-01-01", periods=1, freq="D", tz=timezone.utc),
+            )
+        }
+
+        class Side:
+            value = "buy"
+
+        class Req:
+            symbol = "AAPL"
+            side = Side()
+            qty = 1
+            strategy = "test"
+
+        with patch("scheduler.run_backtest.get_config", return_value={
+            "slippage_model": {
+                "enabled": True,
+                "k_stock": 1.0,
+                "default_stock_volatility_bps": 100.0,
+                "tod_open_window": [],
+                "tod_close_window": [],
+                "buy_asymmetry": 1.0,
+                "min_stock_bps": 0.0,
+                "max_bps": 10_000.0,
+            }
+        }):
+            sim.current_date = sim.historical_data["AAPL"].index[0]
+            sim.submit_order(Req())
+
+        self.assertGreater(sim.positions["AAPL"]["entry_price"], 100.0)
+        self.assertLess(sim.positions["AAPL"]["entry_price"], 101.0)
+
 
 class TestExtendedPool(unittest.TestCase):
     """Tests for Fix 3: refreshed EXTENDED_POOL."""

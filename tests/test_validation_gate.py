@@ -83,6 +83,31 @@ class ValidationGateTests(unittest.TestCase):
         self.assertEqual(run_backtest.call_args.kwargs["cost_model"]["slippage_bps"], 30.0)
         self.assertFalse(run_backtest.call_args.kwargs["write_quarterly_csv"])
 
+    def test_slippage_sensitivity_gate_uses_model_multiplier_when_enabled(self):
+        gate = {"name": "default_12m_costed", "days": 365}
+        cost_model = {
+            "slippage_model_enabled": True,
+            "slippage_multiplier": 1.0,
+            "fee_bps": 5.0,
+        }
+        result_payload = {
+            "stats": {
+                "return_pct": 0.10,
+                "max_drawdown": -0.01,
+                "profit_factor": 1.5,
+                "daily_sharpe": 1.0,
+                "trades": 20,
+                "win_rate": 0.6,
+            },
+        }
+
+        with patch("scheduler.run_validation_gate.run_backtest", return_value=result_payload) as run_backtest:
+            record = evaluate_slippage_sensitivity_gate(gate, cost_model, 10000, 2.0)
+
+        self.assertEqual(record["name"], "default_12m_costed_slippage_model_x2")
+        self.assertTrue(run_backtest.call_args.kwargs["cost_model"]["slippage_model_enabled"])
+        self.assertEqual(run_backtest.call_args.kwargs["cost_model"]["slippage_multiplier"], 2.0)
+
     def test_slippage_sensitivity_gate_adds_reliability_warning(self):
         gate = {"name": "default_12m_costed", "days": 365}
         result_payload = {
@@ -349,7 +374,8 @@ class ValidationGateTests(unittest.TestCase):
         cfg = {
             "validation": {
                 "cost_model": {
-                    "sensitivity_levels_bps": [10, 30],
+                    "slippage_model_enabled": True,
+                    "sensitivity_multipliers": [1, 3],
                     "sensitivity_soft_min_return_pct": 0.08,
                 },
                 "production_gate": {

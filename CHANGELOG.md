@@ -17,6 +17,8 @@
 - Momentum ATR stop cap so wide ATR stops cannot silently exceed the configured maximum stop distance.
 - Broker protective stop sync for missing broker-side protective sell orders.
 - Strategy live-readiness gate for strategies that require paper-trade history before live entries.
+- Phase 2 execution instrumentation: real minute-bar replay, liquidity-aware
+  slippage estimates, fill-level TCA reporting, and weekly TCA report generation.
 - Slippage sensitivity checks in the validation gate.
 - Rolling-window validation runner for stability checks across multiple historical windows.
 - Crypto correlation guard to block highly correlated same-scan or existing crypto exposure.

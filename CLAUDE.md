@@ -224,6 +224,7 @@ The AI agent should run these scripts on this schedule:
 | Every hour (00 min) | `python3 scheduler/run_scan.py --crypto-only` | Crypto-only scan (24/7) |
 | Every 15 min (market hours) | `python3 scheduler/run_risk_check.py` | Stop-loss enforcement |
 | Monday 08:00 AM | `python3 scheduler/run_report.py --weekly` | Weekly report |
+| Monday 08:30 AM | `python3 scheduler/run_weekly_tca.py` | Weekly TCA report |
 
 ### Weekends / After Hours
 - Crypto scans continue every hour (crypto is 24/7).
@@ -238,6 +239,7 @@ The AI agent should run these scripts on this schedule:
 | `scheduler/run_scan.py` | Main scan: signals → entries → exits | `--stocks-only`, `--crypto-only` |
 | `scheduler/run_risk_check.py` | Stop-loss / take-profit enforcement | none |
 | `scheduler/run_report.py` | Performance & portfolio report | `--weekly` |
+| `scheduler/run_weekly_tca.py` | Standalone transaction-cost analysis report | `--days` |
 | `scheduler/run_backtest.py` | Historical strategy simulation | `--days`, `--fund`, `--exit-policy`, `--screener`, `--no-screener`, `--strategies`, `--set` |
 | `scheduler/run_validation_gate.py` | Cost-aware production readiness gates | `--profile production`, `--profile rsi`, `--profile range`, `--profile gap`, `--profile all` |
 | `scheduler/run_walkforward.py` | Multi-regime walk-forward validation | `--profile master`, `--quick`, `--oos-only` |
@@ -262,6 +264,10 @@ Momentum backtests can compare `--exit-policy fixed_hold`, `--exit-policy profit
 Use `--strategies momentum,relative_strength,rsi_reversion,ma_crossover,range_breakout` and repeated `--set key.path=value` arguments for backtest-only default-profile experiments without editing `config/config.yaml`. Add `gap_up` explicitly only when testing its standalone gate.
 Run `python3 scheduler/run_validation_gate.py --profile production` before scaling live capital. Run `python3 scheduler/run_validation_gate.py --profile rsi` before scaling RSI Reversion allocation, `python3 scheduler/run_validation_gate.py --profile gap` before scaling Gap-Up, and `python3 scheduler/run_validation_gate.py --profile range` before scaling Range Breakout.
 Run `python3 scheduler/run_walkforward.py --profile master` before any capital-scaling decision. The master report must pass at the configured stressed cost level and be committed at `reports/walkforward_master.md`.
+Review the latest `reports/tca_weekly_<date>.md` before any allocation increase.
+Median realised slippage and residual bps should be consistent with the
+configured slippage model; unexplained outliers require investigation before
+scaling.
 Backtest protection rows carry position-size-adjusted `portfolio_pnl_pct` for
 portfolio-wide realized-drawdown locks; symbol stop-loss, strategy stop-loss,
 and low-profit protections still use raw closed-trade `pnl_pct`.

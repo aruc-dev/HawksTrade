@@ -1,9 +1,11 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime
 from datetime import timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -190,6 +192,55 @@ class GapUpIntradayTests(unittest.TestCase):
         self.assertIn("AAPL", sim.synthetic_session_volume_proxy_symbols)
         self.assertEqual((proxy_time_et.hour, proxy_time_et.minute), (15, 55))
         self.assertAlmostEqual(proxy_bar.volume, float(_frame()["volume"].iloc[-1]) * 385 / 390)
+
+    def test_backtest_minute_fetch_uses_real_minute_replay_when_enabled(self):
+        sim = BacktestSimulator(
+            initial_fund=10000.0,
+            minute_replay_enabled=True,
+            use_synthetic_intraday=False,
+        )
+        sim.current_date = pd.Timestamp("2026-01-05T00:00:00Z")
+        sim.historical_data = {"AAPL": _frame()}
+        minute_frame = pd.DataFrame(
+            {
+                "timestamp": [
+                    datetime(2026, 1, 5, 14, 30, tzinfo=timezone.utc),
+                    datetime(2026, 1, 5, 14, 31, tzinfo=timezone.utc),
+                ],
+                "open": [110.0, 111.0],
+                "high": [111.0, 112.0],
+                "low": [109.0, 110.0],
+                "close": [110.5, 111.5],
+                "volume": [5000, 6000],
+            }
+        )
+
+        with patch("scheduler.run_backtest.get_minute_bars", return_value=minute_frame) as mock_get_minute_bars:
+            bars = _make_bar_fetcher(sim)(["AAPL"], timeframe="1Min", limit=10)
+
+        self.assertFalse(sim.synthetic_minute_proxy_used)
+        self.assertTrue(sim.real_minute_replay_used)
+        self.assertIn("AAPL", sim.real_minute_replay_symbols)
+        self.assertEqual(len(bars["AAPL"]), 2)
+        self.assertEqual(bars["AAPL"][-1].close, 111.5)
+        self.assertIn("fetcher", mock_get_minute_bars.call_args.kwargs)
+        self.assertTrue(callable(mock_get_minute_bars.call_args.kwargs["fetcher"]))
+
+    def test_backtest_minute_fetch_fails_closed_when_real_minutes_missing(self):
+        sim = BacktestSimulator(
+            initial_fund=10000.0,
+            minute_replay_enabled=True,
+            use_synthetic_intraday=False,
+        )
+        sim.current_date = pd.Timestamp("2026-01-05T00:00:00Z")
+        sim.historical_data = {"AAPL": _frame()}
+
+        with patch("scheduler.run_backtest.get_minute_bars", return_value=pd.DataFrame()):
+            bars = _make_bar_fetcher(sim)(["AAPL"], timeframe="1Min", limit=10)
+
+        self.assertFalse(sim.synthetic_minute_proxy_used)
+        self.assertIn("AAPL", sim.real_minute_replay_missing_symbols)
+        self.assertEqual(bars["AAPL"], [])
 
     def test_backtest_report_notes_call_out_gap_up_daily_proxy(self):
         sim = BacktestSimulator(initial_fund=10000.0)

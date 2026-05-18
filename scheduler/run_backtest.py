@@ -33,6 +33,7 @@ from core import alpaca_client as ac  # noqa: E402
 from core import risk_manager as rm  # noqa: E402
 from core import order_executor as oe  # noqa: E402
 from core.config_loader import get_config  # noqa: E402
+from core.execution_policy import simulate_backtest_entry_price  # noqa: E402
 from core.data_lockup import (  # noqa: E402
     clamp_backtest_window,
     filter_locked_bars,
@@ -40,7 +41,9 @@ from core.data_lockup import (  # noqa: E402
     record_oos_validation,
     validate_oos_unlock_token,
 )
+from core.minute_cache import fetch_stock_minute_bars, get_minute_bars  # noqa: E402
 from core.protection_manager import ProtectionManager  # noqa: E402
+from core.slippage_model import estimate_slippage_bps  # noqa: E402
 from core.exit_policy import (  # noqa: E402
     VALID_MOMENTUM_EXIT_POLICIES,
     normalize_momentum_exit_policy,
@@ -115,6 +118,7 @@ REGIME_HISTORY_LIMITS = {
 }
 BACKTEST_SESSION_MINUTES = 390.0
 BACKTEST_OPENING_PROXY_MINUTES = 5.0
+_REAL_STOCK_BARS_FETCHER = ac.get_stock_bars
 BACKTEST_OPENING_PROXY_LIMIT_CUTOFF = 90
 
 
@@ -188,6 +192,21 @@ def _synthetic_intraday_proxy(current_date, request_limit: int) -> tuple[datetim
         tzinfo=ZoneInfo("America/New_York"),
     )
     return (session_start + timedelta(minutes=elapsed)).astimezone(timezone.utc), elapsed, "session"
+
+
+def _intraday_request_window(current_date, request_limit: int) -> tuple[datetime, datetime, str]:
+    """Return the regular-session minute window for an intraday backtest request."""
+    proxy_time, _, proxy_kind = _synthetic_intraday_proxy(current_date, request_limit)
+    session_date = _as_datetime(current_date).astimezone(ZoneInfo("America/New_York")).date()
+    session_start = datetime(
+        session_date.year,
+        session_date.month,
+        session_date.day,
+        9,
+        30,
+        tzinfo=ZoneInfo("America/New_York"),
+    ).astimezone(timezone.utc)
+    return session_start, proxy_time, proxy_kind
 
 
 def _as_datetime(value) -> datetime:
@@ -286,6 +305,18 @@ def _backtest_trading_session_date(sim: "BacktestSimulator") -> date:
 
 def _is_crypto_asset(asset_class: str, symbol: str = "") -> bool:
     return "crypto" in str(asset_class or "").lower() or "/" in str(symbol or "")
+
+
+def _real_minute_bar_fetcher(symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
+    """Fetch real minute bars without hitting the backtest's patched bar fetcher."""
+    if _is_crypto_asset("", symbol):
+        return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+    return fetch_stock_minute_bars(
+        symbol,
+        start,
+        end,
+        source=_REAL_STOCK_BARS_FETCHER,
+    )
 
 
 def _strategy_asset_class_matches(strategy_asset_class: str, position_asset_class: str) -> bool:
@@ -507,37 +538,65 @@ def _make_bar_fetcher(sim: "BacktestSimulator"):
                 mask = df.index <= sim.current_date
                 hist_df = df[mask].tail(limit)
                 if timeframe in {"1Min", "5Min", "15Min"}:
-                    sim.synthetic_minute_proxy_used = True
-                    sim.synthetic_minute_proxy_symbols.add(s)
-                    sim.synthetic_minute_proxy_timeframes.add(timeframe)
-                    # Daily historical backtests do not have real minute bars.
-                    # Provide opening-window proxies for gap_up and elapsed-session
-                    # volume proxies for momentum without pretending full minute
-                    # replay exists.
-                    session_date = _as_datetime(sim.current_date).date()
-                    session_mask = pd.Series(
-                        [_as_datetime(idx).date() <= session_date for idx in df.index],
-                        index=df.index,
-                    )
-                    hist_df = df[session_mask].tail(1).copy()
-                    if not hist_df.empty:
-                        hist_df = hist_df.astype({"volume": "float64"})
-                        proxy_time, elapsed_minutes, proxy_kind = _synthetic_intraday_proxy(sim.current_date, limit)
-                        if proxy_kind == "opening":
-                            open_price = hist_df.iloc[-1]["open"]
-                            hist_df.loc[:, "high"] = open_price
-                            hist_df.loc[:, "low"] = open_price
-                            hist_df.loc[:, "close"] = open_price
+                    used_real_minutes = False
+                    if timeframe == "1Min" and sim.real_minute_replay_enabled and not sim.use_synthetic_intraday:
+                        start, end, _ = _intraday_request_window(sim.current_date, limit)
+                        try:
+                            minute_df = get_minute_bars(
+                                s,
+                                start,
+                                end,
+                                cache_dir=sim.minute_cache_dir,
+                                fetcher=_real_minute_bar_fetcher,
+                            )
+                        except Exception as exc:
+                            minute_df = pd.DataFrame()
+                            sim.real_minute_replay_missing_symbols.add(s)
+                            log.warning("Minute replay fetch failed for %s on %s: %s", s, sim.current_date, exc)
+                        if not minute_df.empty:
+                            hist_df = minute_df.set_index("timestamp")[["open", "high", "low", "close", "volume"]]
+                            hist_df.index = pd.DatetimeIndex(hist_df.index)
+                            hist_df = hist_df.tail(limit)
+                            used_real_minutes = True
+                            sim.real_minute_replay_used = True
+                            sim.real_minute_replay_symbols.add(s)
                         else:
-                            sim.synthetic_session_volume_proxy_used = True
-                            sim.synthetic_session_volume_proxy_symbols.add(s)
-                            sim.synthetic_session_volume_proxy_timeframes.add(timeframe)
-                        hist_df.loc[:, "volume"] = (
-                            hist_df["volume"].astype(float)
-                            * min(elapsed_minutes, BACKTEST_SESSION_MINUTES)
-                            / BACKTEST_SESSION_MINUTES
+                            sim.real_minute_replay_missing_symbols.add(s)
+                            hist_df = pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+                            hist_df.index = pd.DatetimeIndex([], tz=timezone.utc)
+
+                    if not used_real_minutes and (sim.use_synthetic_intraday or not sim.real_minute_replay_enabled):
+                        sim.synthetic_minute_proxy_used = True
+                        sim.synthetic_minute_proxy_symbols.add(s)
+                        sim.synthetic_minute_proxy_timeframes.add(timeframe)
+                        # Daily historical backtests do not have real minute bars.
+                        # Provide opening-window proxies for gap_up and elapsed-session
+                        # volume proxies for momentum without pretending full minute
+                        # replay exists.
+                        session_date = _as_datetime(sim.current_date).date()
+                        session_mask = pd.Series(
+                            [_as_datetime(idx).date() <= session_date for idx in df.index],
+                            index=df.index,
                         )
-                        hist_df.index = pd.DatetimeIndex([proxy_time])
+                        hist_df = df[session_mask].tail(1).copy()
+                        if not hist_df.empty:
+                            hist_df = hist_df.astype({"volume": "float64"})
+                            proxy_time, elapsed_minutes, proxy_kind = _synthetic_intraday_proxy(sim.current_date, limit)
+                            if proxy_kind == "opening":
+                                open_price = hist_df.iloc[-1]["open"]
+                                hist_df.loc[:, "high"] = open_price
+                                hist_df.loc[:, "low"] = open_price
+                                hist_df.loc[:, "close"] = open_price
+                            else:
+                                sim.synthetic_session_volume_proxy_used = True
+                                sim.synthetic_session_volume_proxy_symbols.add(s)
+                                sim.synthetic_session_volume_proxy_timeframes.add(timeframe)
+                            hist_df.loc[:, "volume"] = (
+                                hist_df["volume"].astype(float)
+                                * min(elapsed_minutes, BACKTEST_SESSION_MINUTES)
+                                / BACKTEST_SESSION_MINUTES
+                            )
+                            hist_df.index = pd.DatetimeIndex([proxy_time])
                 bars_list = [
                     SimpleBar(
                         open_price=float(row["open"]),
@@ -568,6 +627,8 @@ def _normalise_cost_model(cost_model: dict | None = None) -> dict:
     cost_model = cost_model or {}
     return {
         "slippage_bps": float(cost_model.get("slippage_bps", 0.0) or 0.0),
+        "slippage_model_enabled": bool(cost_model.get("slippage_model_enabled", False)),
+        "slippage_multiplier": float(cost_model.get("slippage_multiplier", 1.0) or 1.0),
         "fee_bps": float(cost_model.get("fee_bps", 0.0) or 0.0),
         "min_fee_usd": float(cost_model.get("min_fee_usd", 0.0) or 0.0),
     }
@@ -627,6 +688,9 @@ def _backtest_execution_notes(cfg: dict, sim: "BacktestSimulator" | None = None)
     notes = []
     gap_up_enabled = cfg.get("strategies", {}).get("gap_up", {}).get("enabled", False)
     momentum_enabled = cfg.get("strategies", {}).get("momentum", {}).get("enabled", False)
+    relative_strength_enabled = cfg.get("strategies", {}).get("relative_strength", {}).get("enabled", False)
+    real_symbols = sorted(getattr(sim, "real_minute_replay_symbols", set())) if sim else []
+    missing_real_symbols = sorted(getattr(sim, "real_minute_replay_missing_symbols", set())) if sim else []
     if gap_up_enabled:
         proxy_used = bool(getattr(sim, "synthetic_minute_proxy_used", False)) if sim else True
         symbols = sorted(getattr(sim, "synthetic_minute_proxy_symbols", set())) if sim else []
@@ -638,10 +702,13 @@ def _backtest_execution_notes(cfg: dict, sim: "BacktestSimulator" | None = None)
                 f"{symbol_suffix}"
             )
         else:
+            real_suffix = f" Symbols: {', '.join(real_symbols[:8])}." if real_symbols else ""
             notes.append(
+                "Gap-Up opening-window backtest used real 1-minute replay for entry-window bars."
+                f"{real_suffix}" if real_symbols else
                 "Gap-Up was enabled, but no opening-window minute replay was exercised in this run."
             )
-    if momentum_enabled:
+    if momentum_enabled or relative_strength_enabled:
         proxy_used = bool(getattr(sim, "synthetic_session_volume_proxy_used", False)) if sim else False
         symbols = sorted(getattr(sim, "synthetic_session_volume_proxy_symbols", set())) if sim else []
         symbol_suffix = f" Symbols: {', '.join(symbols[:8])}." if symbols else ""
@@ -651,6 +718,16 @@ def _backtest_execution_notes(cfg: dict, sim: "BacktestSimulator" | None = None)
                 "from daily bars, not real minute bars; volume-pace fills are not intraday-validated."
                 f"{symbol_suffix}"
             )
+        elif real_symbols:
+            notes.append(
+                "Momentum/Relative Strength volume-pace backtests used real 1-minute replay "
+                f"for elapsed-session volume. Symbols: {', '.join(real_symbols[:8])}."
+            )
+    if missing_real_symbols:
+        notes.append(
+            "Real minute replay had missing bars and failed closed for some symbol/date windows. "
+            f"Symbols: {', '.join(missing_real_symbols[:8])}."
+        )
     return notes
 
 
@@ -670,6 +747,24 @@ def _bootstrap_config(cfg: dict) -> dict:
         "block_size": int(raw.get("block_size", 5) or 5),
         "seed": int(raw.get("seed", 42) or 42),
         "drawdown_threshold": float(raw.get("drawdown_threshold_pct", 0.10) or 0.10),
+    }
+
+
+def _minute_replay_settings(cfg: dict, *, use_synthetic_intraday: bool | None = None) -> dict:
+    raw = (cfg.get("backtest", {}) or {}).get("minute_replay", {}) or {}
+    enabled = bool(raw.get("enabled", False))
+    synthetic = bool(raw.get("allow_synthetic_intraday", not enabled))
+    if use_synthetic_intraday is not None:
+        synthetic = bool(use_synthetic_intraday)
+    cache_dir = raw.get("cache_dir") or "data/minute_cache"
+    cache_path = Path(cache_dir)
+    if not cache_path.is_absolute():
+        cache_path = BASE_DIR / cache_path
+    return {
+        "enabled": enabled and not synthetic,
+        "use_synthetic_intraday": synthetic,
+        "cache_dir": cache_path,
+        "fail_closed_on_missing": bool(raw.get("fail_closed_on_missing", True)),
     }
 
 
@@ -730,7 +825,16 @@ def _format_bootstrap_report(bootstrap: dict) -> str:
 
 
 class BacktestSimulator:
-    def __init__(self, initial_fund=10000.0, cost_model: dict | None = None):
+    def __init__(
+        self,
+        initial_fund=10000.0,
+        cost_model: dict | None = None,
+        *,
+        minute_replay_enabled: bool = False,
+        use_synthetic_intraday: bool = True,
+        minute_cache_dir: str | Path | None = None,
+        fail_closed_on_missing_minute_bars: bool = True,
+    ):
         self.portfolio_value = initial_fund
         self.cash = initial_fund
         self.positions = {}  # symbol -> {qty, entry_price, entry_date, asset_class, strategy}
@@ -747,6 +851,13 @@ class BacktestSimulator:
         self.synthetic_session_volume_proxy_used = False
         self.synthetic_session_volume_proxy_symbols = set()
         self.synthetic_session_volume_proxy_timeframes = set()
+        self.real_minute_replay_enabled = bool(minute_replay_enabled)
+        self.use_synthetic_intraday = bool(use_synthetic_intraday)
+        self.minute_cache_dir = minute_cache_dir
+        self.fail_closed_on_missing_minute_bars = bool(fail_closed_on_missing_minute_bars)
+        self.real_minute_replay_used = False
+        self.real_minute_replay_symbols = set()
+        self.real_minute_replay_missing_symbols = set()
 
     def get_portfolio_value(self):
         pos_value = 0
@@ -855,8 +966,47 @@ class BacktestSimulator:
             return None
         return valid_bars.iloc[-1]
 
-    def _execution_price(self, price: float, side: str) -> float:
-        slippage = self.cost_model["slippage_bps"] / 10000.0
+    def _execution_price(self, symbol: str, price: float, side: str, qty: float) -> float:
+        bar = self.get_current_bar(symbol)
+        if self.cost_model.get("slippage_model_enabled"):
+            bar_volume_usd = None
+            realised_volatility_bps = None
+            if bar is not None:
+                try:
+                    bar_volume_usd = float(bar["volume"]) * float(price)
+                    if float(bar["close"]) > 0:
+                        realised_volatility_bps = ((float(bar["high"]) - float(bar["low"])) / float(bar["close"])) * 10000.0
+                except (TypeError, ValueError, KeyError):
+                    bar_volume_usd = None
+                    realised_volatility_bps = None
+            slippage_bps = estimate_slippage_bps(
+                symbol=symbol,
+                asset_class="crypto" if "/" in symbol else "stock",
+                side=side,
+                order_size_usd=float(price) * float(qty),
+                bar_volume_usd=bar_volume_usd,
+                adv_usd=bar_volume_usd,
+                realised_volatility_bps=realised_volatility_bps,
+                cfg=get_config().get("slippage_model", {}),
+            ) * self.cost_model.get("slippage_multiplier", 1.0)
+        else:
+            slippage_bps = self.cost_model["slippage_bps"]
+        cfg = get_config()
+        if side == "buy" and (cfg.get("execution_policy", {}) or {}).get("enabled"):
+            simulated_price, _policy_name = simulate_backtest_entry_price(
+                symbol=symbol,
+                strategy="backtest",
+                asset_class="crypto" if "/" in symbol else "stock",
+                qty=qty,
+                side=side,
+                price=price,
+                expected_slippage_bps=slippage_bps,
+                cfg=cfg,
+                run_id="backtest",
+                next_bar=bar,
+            )
+            return simulated_price
+        slippage = slippage_bps / 10000.0
         if side == "buy":
             return price * (1 + slippage)
         return price * (1 - slippage)
@@ -875,7 +1025,7 @@ class BacktestSimulator:
         side = req.side.value.lower()
         qty = float(req.qty)
         market_price = self.get_current_price(symbol)
-        price = self._execution_price(market_price, side)
+        price = self._execution_price(symbol, market_price, side, qty)
         
         # Pull strategy from the request object (Alpaca SDK Request mock)
         strategy = getattr(req, "strategy", "unknown")
@@ -1114,6 +1264,7 @@ def run_backtest(
     oos_validation=False,
     oos_unlock_token=None,
     legacy_pool=False,
+    use_synthetic_intraday: bool | None = None,
     return_result=False,
     write_quarterly_csv=True,
     quarterly_output_dir=None,
@@ -1138,6 +1289,12 @@ def run_backtest(
             raise ValueError(f"Unknown strategy name(s): {', '.join(sorted(unknown))}")
         for name, strategy_cfg in cfg["strategies"].items():
             strategy_cfg["enabled"] = name in selected
+
+    minute_replay = _minute_replay_settings(cfg, use_synthetic_intraday=use_synthetic_intraday)
+    if minute_replay["enabled"]:
+        for name in ("momentum", "relative_strength"):
+            if name in cfg.get("strategies", {}):
+                cfg["strategies"][name]["require_volume_pace_bars"] = True
 
     _apply_runtime_strategy_config(cfg)
 
@@ -1244,7 +1401,14 @@ def run_backtest(
         "oos_lockup_note": oos_lockup_note,
         "universe_source": universe_source,
     }
-    sim = BacktestSimulator(initial_fund, cost_model=cost_model)
+    sim = BacktestSimulator(
+        initial_fund,
+        cost_model=cost_model,
+        minute_replay_enabled=minute_replay["enabled"],
+        use_synthetic_intraday=minute_replay["use_synthetic_intraday"],
+        minute_cache_dir=minute_replay["cache_dir"],
+        fail_closed_on_missing_minute_bars=minute_replay["fail_closed_on_missing"],
+    )
     sim.historical_data = historical_data
 
     # Initialize screener with backtest bars for point-in-time accuracy only when enabled.
@@ -1471,12 +1635,24 @@ def run_backtest(
             report += f"- **OOS Lockup**: {oos_lockup_note}\n\n"
         report += f"- **Enabled Strategies**: {', '.join(_enabled_strategy_names(cfg))}\n\n"
         report += _format_execution_notes(execution_notes)
-        if any(sim.cost_model.values()):
-            report += (
-                f"- **Cost Model**: slippage={sim.cost_model['slippage_bps']:.2f} bps, "
-                f"fee={sim.cost_model['fee_bps']:.2f} bps, "
-                f"min_fee=${sim.cost_model['min_fee_usd']:.2f}\n\n"
-            )
+        if (
+            sim.cost_model.get("slippage_model_enabled")
+            or sim.cost_model.get("slippage_bps")
+            or sim.cost_model.get("fee_bps")
+            or sim.cost_model.get("min_fee_usd")
+        ):
+            if sim.cost_model.get("slippage_model_enabled"):
+                report += (
+                    f"- **Cost Model**: liquidity-aware slippage ×{sim.cost_model['slippage_multiplier']:.2f}, "
+                    f"fee={sim.cost_model['fee_bps']:.2f} bps, "
+                    f"min_fee=${sim.cost_model['min_fee_usd']:.2f}\n\n"
+                )
+            else:
+                report += (
+                    f"- **Cost Model**: slippage={sim.cost_model['slippage_bps']:.2f} bps, "
+                    f"fee={sim.cost_model['fee_bps']:.2f} bps, "
+                    f"min_fee=${sim.cost_model['min_fee_usd']:.2f}\n\n"
+                )
         report += summary.to_markdown() + "\n\n"
         report += _format_bootstrap_report(bootstrap_summary)
         if graph_file: report += f"![Equity Curve]({graph_file})\n\n"
@@ -1675,6 +1851,7 @@ def run_strategy_grid(
     end_date: str | None = None,
     use_screener: bool | None = None,
     cost_model: dict | None = None,
+    use_synthetic_intraday: bool | None = None,
     max_variants: int | None = None,
 ) -> Path:
     catalog = strategy_search_space_catalog()
@@ -1695,6 +1872,7 @@ def run_strategy_grid(
             enabled_strategies=[strategy],
             config_overrides=[f"{key}={value}" for key, value in overrides.items()],
             cost_model=cost_model,
+            use_synthetic_intraday=use_synthetic_intraday,
             return_result=True,
             write_quarterly_csv=False,
         )
@@ -1748,8 +1926,15 @@ if __name__ == "__main__":
         help="Backtest-only config override, e.g. --set strategies.momentum.top_n=3",
     )
     parser.add_argument("--slippage-bps", type=float, default=0.0, help="Backtest execution slippage in basis points per side")
+    parser.add_argument("--slippage-model", action="store_true", help="Use the liquidity-aware slippage model instead of flat --slippage-bps.")
+    parser.add_argument("--slippage-multiplier", type=float, default=1.0, help="Multiplier applied to model-estimated slippage.")
     parser.add_argument("--fee-bps", type=float, default=0.0, help="Backtest fee/commission in basis points per side")
     parser.add_argument("--min-fee", type=float, default=0.0, help="Minimum fee per simulated order")
+    parser.add_argument(
+        "--use-synthetic-intraday",
+        action="store_true",
+        help="Use the deprecated daily-bar intraday proxy instead of real 1-minute replay.",
+    )
     parser.add_argument("--grid", type=str, help="Run the configured parameter grid for one strategy and emit daily returns CSV")
     parser.add_argument("--grid-output", type=str, help="Output CSV path for --grid")
     parser.add_argument("--grid-max-variants", type=int, help="Limit grid variants for smoke tests")
@@ -1790,9 +1975,12 @@ if __name__ == "__main__":
             use_screener=args.use_screener,
             cost_model={
                 "slippage_bps": args.slippage_bps,
+                "slippage_model_enabled": args.slippage_model,
+                "slippage_multiplier": args.slippage_multiplier,
                 "fee_bps": args.fee_bps,
                 "min_fee_usd": args.min_fee,
             },
+            use_synthetic_intraday=args.use_synthetic_intraday,
             max_variants=args.grid_max_variants,
         )
         print(f"Grid returns written to {path}")
@@ -1809,12 +1997,15 @@ if __name__ == "__main__":
         config_overrides=args.config_overrides,
         cost_model={
             "slippage_bps": args.slippage_bps,
+            "slippage_model_enabled": args.slippage_model,
+            "slippage_multiplier": args.slippage_multiplier,
             "fee_bps": args.fee_bps,
             "min_fee_usd": args.min_fee,
         },
         oos_validation=args.oos_validation,
         oos_unlock_token=args.oos_unlock_token,
         legacy_pool=args.legacy_pool,
+        use_synthetic_intraday=args.use_synthetic_intraday,
         write_quarterly_csv=args.write_quarterly_csv,
         quarterly_output_dir=args.quarterly_output_dir,
     ))
