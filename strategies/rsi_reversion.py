@@ -148,6 +148,12 @@ def _in_high_volatility_regime(
         return True
 
 
+def _has_minimum_regime_bars(bars_data, symbols: tuple[str, ...], min_bars: int) -> bool:
+    if not isinstance(bars_data, dict):
+        return False
+    return all(len(bars_data.get(symbol) or []) >= min_bars for symbol in symbols)
+
+
 def _calc_rsi(closes: pd.Series, period: int = 14) -> float:
     """Compute RSI for a price series, return the latest value."""
     delta  = closes.diff()
@@ -290,6 +296,9 @@ class RSIReversionStrategy(BaseStrategy):
         allow_regime_warmup = bool(kwargs.get("allow_regime_warmup", False))
 
         if market_regime_mode in {"bear_or_chop_only", "bear_only"}:
+            if not allow_regime_warmup and not _has_minimum_regime_bars(regime_bars, ("SPY", "QQQ"), 51):
+                log.warning("[RSI] Insufficient SPY/QQQ regime bars for bear/chop sleeve — standing down (fail closed).")
+                return []
             if rm.market_regime_ok(
                 bars_data=regime_bars,
                 allow_warmup=allow_regime_warmup,

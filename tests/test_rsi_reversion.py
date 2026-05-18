@@ -105,6 +105,35 @@ class RSIReversionScanTests(unittest.TestCase):
 
         self.assertEqual(len(signals), 1)
 
+    def test_bear_or_chop_mode_stands_down_when_regime_data_is_insufficient(self):
+        bars = _make_bars()
+
+        def _get_stock_bars(symbols, timeframe="1Day", limit=210):
+            if symbols == ["SPY", "QQQ"]:
+                return {
+                    "SPY": [_bar(100) for _ in range(30)],
+                    "QQQ": [_bar(100) for _ in range(30)],
+                }
+            return {"AAPL": bars}
+
+        with (
+            patch("strategies.rsi_reversion.ac.get_stock_bars", side_effect=_get_stock_bars),
+            patch("strategies.rsi_reversion.ac.get_portfolio_value") as get_portfolio_value,
+            patch("strategies.rsi_reversion.rm.market_regime_ok") as market_regime_ok,
+            patch("strategies.rsi_reversion._calc_rsi", return_value=25.0),
+            patch("strategies.rsi_reversion._bollinger_pct_b", return_value=0.10),
+            patch("strategies.rsi_reversion._calc_atr", return_value=2.0),
+            patch.dict(
+                "strategies.rsi_reversion.SCFG",
+                {"enabled": True, "market_regime_mode": "bear_or_chop_only"},
+            ),
+        ):
+            signals = RSIReversionStrategy().scan(["AAPL"])
+
+        self.assertEqual(signals, [])
+        market_regime_ok.assert_not_called()
+        get_portfolio_value.assert_not_called()
+
     def test_scan_skips_signal_when_atr_risk_qty_below_notional_minimum(self):
         # price≈96, atr=20 and 6% stop cap → risk_per_share≈5.76,
         # risk_dollars=1 → qty≈0.17; notional remains below min_trade_value=100.
