@@ -514,17 +514,24 @@ def enter_position(
             )
             return None
         if sizing.capped:
-            log.info(f"Entry size capped for {symbol}: requested={sizing.requested_qty} capped={capped_qty}")
+            log.info(
+                "Entry max-position cap for %s: requested=%s base_capped=%s",
+                symbol,
+                sizing.requested_qty,
+                sizing.capped_qty,
+            )
         if tier.risk_multiplier < 1.0 or tier.position_cap_pct < base_position_cap_pct or tier.override:
             log.info(
                 "Sample-size risk tier for %s/%s: tier=%s closed_trades=%s "
-                "risk_multiplier=%.2f position_cap=%.2f%%",
+                "risk_multiplier=%.2f position_cap=%.2f%% base_qty=%s scaled_qty=%s",
                 strategy,
                 symbol,
                 tier.name,
                 tier.closed_trades,
                 tier.risk_multiplier,
                 tier.position_cap_pct * 100,
+                sizing.capped_qty,
+                capped_qty,
             )
         qty = capped_qty
         order_type = "market" if ORDER_TYPE == "market" else "limit"
@@ -729,11 +736,14 @@ def exit_position(
             from tracking.trade_log import get_open_trades
             open_trades = get_open_trades()
 
+        matched_open_trade = None
         for t in reversed(open_trades):
             if _symbols_match(t["symbol"], symbol):
+                matched_open_trade = t
                 strategy = t.get("strategy", "unknown")
                 trade_symbol = t.get("symbol") or symbol
                 break
+        entry_risk_tier = matched_open_trade.get("risk_tier", "") if matched_open_trade else ""
 
         order_symbol = trade_symbol if asset_class == "crypto" else symbol
 
@@ -775,6 +785,7 @@ def exit_position(
                 "order_id":      "DRY-RUN",
                 "status":        "dry_run",
                 "order_type":     order_type,
+                "risk_tier":      entry_risk_tier,
             }
             if limit_price is not None:
                 trade["limit_price"] = limit_price
@@ -866,6 +877,7 @@ def exit_position(
             "order_id":      order_id,
             "status":        action_status,
             "order_type":     order_type,
+            "risk_tier":      entry_risk_tier,
         }
         if limit_price is not None:
             trade["limit_price"] = limit_price
