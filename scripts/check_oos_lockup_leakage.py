@@ -46,6 +46,16 @@ def _staged_report_files() -> list[Path]:
     return paths
 
 
+def _resolve_input_files(paths: list[str]) -> list[Path]:
+    resolved = []
+    for raw in paths:
+        path = Path(raw)
+        if not path.is_absolute():
+            path = ROOT / path
+        resolved.append(path.resolve())
+    return resolved
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -60,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     if lockup is None:
         return 0
 
-    files = [Path(path) for path in args.files] if args.files else _staged_report_files()
+    files = _resolve_input_files(args.files) if args.files else _staged_report_files()
     failures = []
     for file_path in files:
         if not file_path.exists() or file_path.is_dir():
