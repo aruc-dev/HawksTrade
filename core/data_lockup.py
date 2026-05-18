@@ -120,11 +120,14 @@ def clamp_backtest_window(
 ) -> tuple[datetime, datetime, str | None]:
     """Return a backtest window that excludes current locked dates unless allowed."""
     lockup = current_lockup(path)
+    if allow_oos or lockup is None or not lockup.overlaps(start_dt, end_dt):
+        return start_dt, end_dt, None
+
     token_allowed = bool(
         oos_unlock_token
         and validate_oos_unlock_token(oos_unlock_token, consume=True, path=path)
     )
-    if allow_oos or token_allowed or lockup is None or not lockup.overlaps(start_dt, end_dt):
+    if token_allowed:
         return start_dt, end_dt, None
 
     clipped_end = min(end_dt, _as_utc_datetime(lockup.start_date) - timedelta(days=1))
@@ -159,8 +162,6 @@ def filter_locked_bars(
     """Drop rows inside the current lockup unless explicit validation access is active."""
     if allow_oos or df is None or df.empty:
         return df
-    if oos_unlock_token and validate_oos_unlock_token(oos_unlock_token, consume=True, path=path):
-        return df
     lockup = current_lockup(path)
     if lockup is None:
         return df
@@ -169,10 +170,15 @@ def filter_locked_bars(
         index_dates = index.date
     else:
         index_dates = index.tz_convert("UTC").date
-    mask = [
-        not (lockup.start_date <= idx_date <= lockup.end_date)
+    locked_mask = [
+        lockup.start_date <= idx_date <= lockup.end_date
         for idx_date in index_dates
     ]
+    if not any(locked_mask):
+        return df
+    if oos_unlock_token and validate_oos_unlock_token(oos_unlock_token, consume=True, path=path):
+        return df
+    mask = [not locked for locked in locked_mask]
     return df.loc[mask]
 
 

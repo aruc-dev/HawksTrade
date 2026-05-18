@@ -203,11 +203,11 @@ def _row_pnl_pct(row: Mapping) -> float | None:
     return _parse_float(row.get("pnl_pct"))
 
 
-def _row_portfolio_pnl_pct(row: Mapping) -> float | None:
+def _row_portfolio_pnl_pct(row: Mapping) -> tuple[float, str] | None:
     for key in ("portfolio_pnl_pct", "portfolio_return_pct", "portfolio_impact_pct"):
         parsed = _parse_float(row.get(key))
         if parsed is not None:
-            return parsed
+            return parsed, key
     return None
 
 
@@ -431,9 +431,10 @@ class ProtectionManager:
         points = []
         for row in rows:
             ts = _row_timestamp(row)
-            return_pct = _row_portfolio_pnl_pct(row)
-            return_source = "portfolio_pnl_pct"
-            if return_pct is None:
+            portfolio_return = _row_portfolio_pnl_pct(row)
+            if portfolio_return is not None:
+                return_pct, return_source = portfolio_return
+            else:
                 return_pct = _row_pnl_pct(row)
                 return_source = "pnl_pct"
             if ts is None or ts < cutoff or return_pct is None:

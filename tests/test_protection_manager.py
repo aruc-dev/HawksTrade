@@ -153,6 +153,26 @@ class ProtectionManagerTests(unittest.TestCase):
         drawdown_lock = next(lock for lock in locks if lock.lock_type == "rolling_max_drawdown_lock")
         self.assertEqual(drawdown_lock.metadata["return_sources"], ["pnl_pct"])
 
+    def test_rolling_drawdown_records_actual_portfolio_return_sources(self):
+        manager = self._manager(
+            symbol_cooldown_days=0,
+            symbol_stoploss_cooldown_days=0,
+            strategy_stoploss_threshold=99,
+            low_profit_min_trades=99,
+            max_drawdown_pct=0.03,
+        )
+        rows = [
+            {**self._sell_row(symbol="AAPL", strategy="momentum", pnl_pct=-0.20), "portfolio_return_pct": -0.02},
+            {**self._sell_row(symbol="MSFT", strategy="gap_up", pnl_pct=-0.20), "portfolio_impact_pct": -0.02},
+        ]
+        locks = manager.refresh_from_rows(rows, now=self.now)
+
+        drawdown_lock = next(lock for lock in locks if lock.lock_type == "rolling_max_drawdown_lock")
+        self.assertEqual(
+            drawdown_lock.metadata["return_sources"],
+            ["portfolio_impact_pct", "portfolio_return_pct"],
+        )
+
     def test_existing_active_lock_is_preserved_across_refresh(self):
         future_lock = ProtectionLock(
             lock_type="manual_test_lock",

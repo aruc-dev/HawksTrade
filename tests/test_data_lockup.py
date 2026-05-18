@@ -77,6 +77,22 @@ class DataLockupTests(unittest.TestCase):
             self.assertIsNone(note)
             self.assertFalse(data_lockup.validate_oos_unlock_token("token-1", path=path))
 
+    def test_clamp_backtest_window_does_not_consume_token_without_overlap(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _lockup_file(tmpdir)
+
+            start, end, note = data_lockup.clamp_backtest_window(
+                start_dt=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                end_dt=datetime(2026, 2, 14, tzinfo=timezone.utc),
+                oos_unlock_token="token-1",
+                path=path,
+            )
+
+            self.assertEqual(start.date().isoformat(), "2026-01-01")
+            self.assertEqual(end.date().isoformat(), "2026-02-14")
+            self.assertIsNone(note)
+            self.assertTrue(data_lockup.validate_oos_unlock_token("token-1", path=path))
+
     def test_filter_locked_bars_drops_only_locked_dates(self):
         index = pd.date_range("2026-02-13", periods=5, freq="D", tz=timezone.utc)
         frame = pd.DataFrame({"close": [1, 2, 3, 4, 5]}, index=index)
@@ -97,6 +113,17 @@ class DataLockupTests(unittest.TestCase):
 
             self.assertEqual(len(filtered), len(frame))
             self.assertFalse(data_lockup.validate_oos_unlock_token("token-1", path=path))
+
+    def test_filter_locked_bars_does_not_consume_token_without_locked_dates(self):
+        index = pd.date_range("2026-02-10", periods=5, freq="D", tz=timezone.utc)
+        frame = pd.DataFrame({"close": [1, 2, 3, 4, 5]}, index=index)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _lockup_file(tmpdir)
+            filtered = data_lockup.filter_locked_bars(frame, oos_unlock_token="token-1", path=path)
+
+            self.assertEqual(len(filtered), len(frame))
+            self.assertTrue(data_lockup.validate_oos_unlock_token("token-1", path=path))
 
     def test_unlock_token_permits_access_once_when_consumed(self):
         with tempfile.TemporaryDirectory() as tmpdir:
