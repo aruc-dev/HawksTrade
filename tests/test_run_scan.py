@@ -757,6 +757,34 @@ class RunScanTests(unittest.TestCase):
 
         self.assertEqual(enter_position.call_args.kwargs["closed_trades_count"], 2)
 
+    def test_entry_pipeline_preserves_executor_fallback_when_closed_trade_precompute_fails(self):
+        class FakeMomentum:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def scan(self, universe, **kwargs):
+                return [{"symbol": "AAPL", "action": "buy"}]
+
+        with (
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(
+                run_scan.ac,
+                "get_stock_bars",
+                return_value={"SPY": [object()] * 252, "QQQ": [object()] * 51},
+            ),
+            patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "get_stock_universe", return_value=["AAPL"]),
+            patch.object(run_scan, "STOCK_STRATEGIES", [FakeMomentum()]),
+            patch.object(run_scan, "get_closed_trades", side_effect=RuntimeError("csv unavailable")),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+            patch.object(run_scan.oe, "enter_position", return_value={"symbol": "AAPL", "status": "dry_run"}) as enter_position,
+        ):
+            run_scan.run(run_stocks=True, run_crypto=False, dry_run=True)
+
+        self.assertIsNone(enter_position.call_args.kwargs["closed_trades_count"])
+
     def test_run_respects_max_positions_with_planned_entries(self):
         class FakeMomentum:
             name = "momentum"
@@ -842,6 +870,42 @@ class RunScanTests(unittest.TestCase):
         self.assertEqual(correlation.call_count, 2)
         self.assertEqual(correlation.call_args_list[0].args[1], [])
         self.assertEqual(correlation.call_args_list[1].args[1], ["SOLUSD"])
+
+    def test_crypto_entry_preserves_executor_fallback_when_closed_trade_precompute_fails(self):
+        class FakeCryptoStrategy:
+            name = "ma_crossover"
+            asset_class = "crypto"
+
+            def scan(self, universe, **kwargs):
+                return [{"symbol": "SOL/USD", "action": "buy"}]
+
+        with (
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(
+                run_scan.ac,
+                "get_crypto_bars",
+                return_value={"BTC/USD": [object()] * run_scan.rm.crypto_regime_required_bars()},
+            ),
+            patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "CRYPTO_STRATEGIES", [FakeCryptoStrategy()]),
+            patch.object(run_scan, "get_closed_trades", side_effect=RuntimeError("csv unavailable")),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+            patch.object(
+                run_scan,
+                "evaluate_crypto_correlation",
+                return_value=SimpleNamespace(allowed=True),
+            ),
+            patch.object(
+                run_scan.oe,
+                "enter_position",
+                return_value={"symbol": "SOL/USD", "status": "dry_run"},
+            ) as enter_position,
+        ):
+            run_scan.run(run_stocks=False, run_crypto=True, dry_run=True)
+
+        self.assertIsNone(enter_position.call_args.kwargs["closed_trades_count"])
 
     def test_pending_entry_lookup_failure_marks_scan_unhealthy_and_blocks_entries(self):
         marker = FakeMarker()

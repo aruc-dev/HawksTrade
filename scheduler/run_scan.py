@@ -108,6 +108,12 @@ def _closed_trade_counts_by_strategy() -> dict[str, int]:
     return counts
 
 
+def _closed_trade_count_for_strategy(counts: dict[str, int] | None, strategy: str) -> int | None:
+    if counts is None:
+        return None
+    return counts.get(strategy, 0)
+
+
 def _strategy_uses_profit_protection(strategy: str, strategy_cfg: dict) -> bool:
     if strategy == "momentum":
         return _momentum_exit_policy_for_scan(strategy_cfg) == "profit_trailing"
@@ -832,10 +838,11 @@ def run(
         return
 
     log.info(f"Market open: {market_open} | Open positions: {len(open_symbols)}")
+    closed_trade_counts: dict[str, int] | None
     try:
         closed_trade_counts = _closed_trade_counts_by_strategy()
     except Exception as e:
-        closed_trade_counts = {}
+        closed_trade_counts = None
         log.warning("Could not precompute closed-trade counts; falling back to per-entry lookup: %s", e)
 
     # --- Check daily loss limit first ---
@@ -965,7 +972,7 @@ def run(
                             dry_run=dry_run,
                             suggested_qty=plan.suggested_qty,
                             atr_stop_price=plan.atr_stop_price,
-                            closed_trades_count=closed_trade_counts.get(plan.strategy, 0),
+                            closed_trades_count=_closed_trade_count_for_strategy(closed_trade_counts, plan.strategy),
                         )
                         _mark_unhealthy_entry_result(marker, result, "stock_entry")
                         _register_entry_result(
@@ -1016,7 +1023,7 @@ def run(
                             dry_run=dry_run,
                             suggested_qty=plan.suggested_qty,
                             atr_stop_price=plan.atr_stop_price,
-                            closed_trades_count=closed_trade_counts.get(plan.strategy, 0),
+                            closed_trades_count=_closed_trade_count_for_strategy(closed_trade_counts, plan.strategy),
                         )
                         _mark_unhealthy_entry_result(marker, result, "crypto_entry")
                         _register_entry_result(
