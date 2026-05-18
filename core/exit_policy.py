@@ -19,6 +19,7 @@ VALID_MOMENTUM_EXIT_POLICIES = {
 
 PROFIT_TRAILING_REASON_PREFIXES = {
     "momentum": "Momentum trailing stop",
+    "relative_strength": "Relative strength profit protection",
     "range_breakout": "Range breakout profit protection",
     "rsi_reversion": "RSI reversion profit protection",
 }

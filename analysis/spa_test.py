@@ -122,6 +122,12 @@ def strategy_search_space_catalog() -> dict[str, list[dict]]:
             "strategies.momentum.min_momentum_atr_mult": [0.0, 1.5, 2.0],
             "strategies.momentum.atr_multiplier": [1.0, 1.2, 1.5],
         },
+        "relative_strength": {
+            "strategies.relative_strength.top_n": [1, 2, 3],
+            "strategies.relative_strength.min_rs_pct": [0.01, 0.02, 0.03],
+            "strategies.relative_strength.min_abs_return_pct": [0.00, 0.03, 0.05],
+            "strategies.relative_strength.lookback_days": [15, 20, 30],
+        },
         "gap_up": {
             "strategies.gap_up.min_gap_pct": [0.04, 0.05, 0.06],
             "strategies.gap_up.volume_multiplier": [1.1, 1.3, 1.5],

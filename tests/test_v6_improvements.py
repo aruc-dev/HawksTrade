@@ -645,6 +645,44 @@ class TestRangeBreakoutExitPolicy(unittest.TestCase):
         self.assertEqual(reason, "Hold 14d")
 
 
+class TestRelativeStrengthExitPolicy(unittest.TestCase):
+    """Tests for Relative Strength profit protection before the hold cap."""
+
+    def _cfg(self, enabled=True):
+        return {
+            "hold_days": 7,
+            "profit_trailing_enabled": enabled,
+            "trail_activation_pct": 0.06,
+            "trailing_stop_pct": 0.04,
+        }
+
+    def test_relative_strength_profit_protection_exits_before_hold_cap(self):
+        should_exit, reason = should_exit_for_hold(
+            strategy="relative_strength",
+            age_days=3,
+            entry_price=100,
+            current_price=101,
+            peak_price=108,
+            strategy_cfg=self._cfg(),
+        )
+
+        self.assertTrue(should_exit)
+        self.assertIn("Relative strength profit protection", reason)
+
+    def test_relative_strength_fixed_hold_remains_after_hold_cap(self):
+        should_exit, reason = should_exit_for_hold(
+            strategy="relative_strength",
+            age_days=7,
+            entry_price=100,
+            current_price=105,
+            peak_price=105,
+            strategy_cfg=self._cfg(),
+        )
+
+        self.assertTrue(should_exit)
+        self.assertEqual(reason, "Hold 7d")
+
+
 class TestRSIReversionExitPolicy(unittest.TestCase):
     """Tests for RSI Reversion profit protection before the hold cap."""
 

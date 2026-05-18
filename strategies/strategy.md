@@ -11,6 +11,7 @@
 | Strategy | Asset | Status | File |
 |---|---|---|---|
 | Momentum | Stocks | **Enabled** | `momentum.py` |
+| Relative Strength | Stocks | **Enabled** | `relative_strength.py` |
 | RSI Reversion | Stocks | **Enabled as conditional bear/chop sleeve** | `rsi_reversion.py`; live entries require paper-readiness evidence |
 | Gap-Up | Stocks | **Disabled in default profile** | `gap_up.py`; run standalone validation before re-enabling |
 | MA Crossover | Crypto | **Enabled** | `ma_crossover.py`; live entries require paper-readiness evidence |
@@ -29,12 +30,13 @@ when it is wider than the global stop.
 
 **Type:** Trend-following, swing trade.
 
-**Entry:** Ranks every stock in the scan universe by its 5-day price return. Buys
-up to the top two candidates that have gained at least 8%, subject to four layers of adaptive
+**Entry:** Ranks every stock in the scan universe by its 5-day smoothed alpha
+momentum. Buys up to the top two candidates that have gained at least 4%,
+subject to four layers of adaptive
 filtering:
 
 1. **Phase 1 — ATR Stop + 1% Risk Sizing**: Each signal carries an ATR-based stop
-   (`entry - 2 × ATR_14`). Position size is computed as `(equity × 1%) / (entry - atr_stop)`
+   (`entry - 1.2 × ATR_14`, capped at 5% below entry). Position size is computed as `(equity × 1%) / (entry - atr_stop)`
    so that every trade risks exactly 1% of capital, capped at 8% per-position max.
 2. **Phase 2 — Sector-Neutral Ranking**: Enforces `max_positions_per_sector: 1`
    using a static GICS sector map across both existing/pending positions and new
@@ -78,7 +80,7 @@ room while the global 3.5% stop remains the baseline fixed-percentage stop.
 | Parameter | Value |
 |---|---|
 | `top_n` | 2 |
-| `min_momentum_pct` | 8% (5-day return) |
+| `min_momentum_pct` | 4% (5-day smoothed return) |
 | `min_alpha_pct` | 0% excess return over SPY (disabled) |
 | `hold_days` (minimum) | 4 business days |
 | `max_hold_days` | 20 business days |
@@ -106,7 +108,59 @@ room while the global 3.5% stop remains the baseline fixed-percentage stop.
 
 ---
 
-## 2. RSI Reversion *(Stocks — Enabled, conditional bear/chop sleeve)*
+## 2. Relative Strength *(Stocks — Enabled)*
+
+**Type:** Medium-term benchmark-relative momentum, swing trade.
+
+**Entry:** Ranks stock candidates by 20-day return minus SPY's 20-day return.
+The default profile buys up to one sector-diversified candidate only when all of
+these conditions are true:
+
+1. Candidate 20-day excess return versus SPY is at least 5%.
+2. Candidate absolute 20-day return is at least 8%.
+3. Candidate 3-day return is no more than 3%, avoiding fresh short-term blow-offs.
+4. Price is above the 50-day SMA and no more than 30% above it.
+5. Stock regime is not red: SPY/QQQ regime passes and market breadth is at least 25%.
+6. Breadth coverage is at least 65% of the scan universe.
+7. Volume pace is at least 1.8x expected elapsed-session volume pace, with a 1.8x
+   daily-volume fallback when intraday bars are unavailable.
+
+**Stop and sizing:** Signals include a 1.2x ATR(14) stop capped at 5% below
+entry and ATR-risk quantity targeting 1% account risk before the global 8%
+max-position cap.
+
+**Exit:** The standard risk manager handles global stop-loss, take-profit, and
+custom ATR stops. The scan hold-exit pass enforces a 7-business-day hold cap;
+pre-hold high-water profit protection can still exit once peak gain reaches 6%
+and price falls 4% from that peak.
+
+**Key parameters:**
+
+| Parameter | Value |
+|---|---|
+| `top_n` | 1 |
+| `lookback_days` | 20 |
+| `benchmark_symbol` | SPY |
+| `min_rs_pct` | 5% excess return over SPY |
+| `min_abs_return_pct` | 8% absolute return |
+| `recent_lookback_days` | 3 |
+| `max_recent_return_pct` | 3% |
+| `hold_days` | 7 business days |
+| `atr_period` | 14 |
+| `atr_multiplier` | 1.2 ATR stop extension |
+| `max_stop_loss_pct` | 5% |
+| `max_positions_per_sector` | 1 |
+| `volume_confirmation_mode` | `pace` |
+| `volume_pace_ratio` | 1.8x expected elapsed-session volume pace |
+
+**Validation note:** This sleeve improved the default 12-month production gate
+point estimate and lower-bound return, but production validation remains
+blocking until the 12-month default lower bound and crypto lower-bound gates
+clear.
+
+---
+
+## 3. RSI Reversion *(Stocks — Enabled, conditional bear/chop sleeve)*
 
 **Type:** Mean reversion, swing trade.
 
@@ -183,7 +237,7 @@ collection.
 
 ---
 
-## 3. Gap-Up *(Stocks — Disabled in Default Profile)*
+## 4. Gap-Up *(Stocks — Disabled in Default Profile)*
 
 **Type:** Opening momentum, short swing trade.
 
@@ -234,7 +288,7 @@ before re-enabling or scaling capital allocated to this sleeve.
 
 ---
 
-## 4. MA Crossover *(Crypto — Enabled)*
+## 5. MA Crossover *(Crypto — Enabled)*
 
 **Type:** Trend-following, medium-term swing. Runs 24/7 on daily bars.
 
@@ -286,7 +340,7 @@ before scaling capital allocated to this sleeve.
 
 ---
 
-## 5. Range Breakout *(Crypto — Enabled)*
+## 6. Range Breakout *(Crypto — Enabled)*
 
 **Type:** Breakout, short swing trade. Runs 24/7 on daily bars.
 

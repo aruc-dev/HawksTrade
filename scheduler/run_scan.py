@@ -50,6 +50,7 @@ from core.portfolio import get_open_symbols, print_snapshot
 from scheduler.reconcile_trade_log import safe_reconcile
 from tracking.trade_log import get_open_trades, get_trade_age_days, update_high_water_prices
 from strategies.momentum import MomentumStrategy
+from strategies.relative_strength import RelativeStrengthStrategy
 from strategies.rsi_reversion import RSIReversionStrategy
 from strategies.gap_up import GapUpStrategy
 from strategies.ma_crossover import MACrossoverStrategy
@@ -130,7 +131,7 @@ POLICY_AWARE_HOLD_STRATEGIES = _configured_policy_aware_hold_strategies(CFG)
 
 # ── Strategy Registry ─────────────────────────────────────────────────────────
 
-STOCK_STRATEGIES  = [MomentumStrategy(), RSIReversionStrategy(), GapUpStrategy()]
+STOCK_STRATEGIES  = [MomentumStrategy(), RelativeStrengthStrategy(), RSIReversionStrategy(), GapUpStrategy()]
 CRYPTO_STRATEGIES = [MACrossoverStrategy(), RangeBreakoutStrategy()]
 
 
@@ -921,7 +922,7 @@ def run(
         for strategy in enabled_stock_strategies:
             try:
                 scan_kwargs = {"regime_bars": stock_regime_bars}
-                if strategy.name == "momentum":
+                if strategy.name in {"momentum", "relative_strength"}:
                     scan_kwargs["existing_symbols"] = _planned_symbols_for_asset_class(
                         planned_asset_classes,
                         "stock",

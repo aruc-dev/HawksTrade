@@ -48,11 +48,13 @@ from core.exit_policy import (  # noqa: E402
     update_high_water_price,
 )
 import strategies.momentum as momentum_module  # noqa: E402
+import strategies.relative_strength as relative_strength_module  # noqa: E402
 import strategies.rsi_reversion as rsi_module  # noqa: E402
 import strategies.gap_up as gap_up_module  # noqa: E402
 import strategies.ma_crossover as ma_crossover_module  # noqa: E402
 import strategies.range_breakout as range_breakout_module  # noqa: E402
 from strategies.momentum import MomentumStrategy  # noqa: E402
+from strategies.relative_strength import RelativeStrengthStrategy  # noqa: E402
 from strategies.rsi_reversion import RSIReversionStrategy  # noqa: E402
 from strategies.gap_up import GapUpStrategy  # noqa: E402
 from strategies.ma_crossover import MACrossoverStrategy  # noqa: E402
@@ -1006,6 +1008,7 @@ def _consume_oos_unlock_token_once(oos_unlock_token: str | None) -> bool:
 
 STRATEGY_MODULES = {
     "momentum": momentum_module,
+    "relative_strength": relative_strength_module,
     "rsi_reversion": rsi_module,
     "gap_up": gap_up_module,
     "ma_crossover": ma_crossover_module,
@@ -1243,6 +1246,7 @@ def run_backtest(
     strategies = [
         strat for strat in [
             MomentumStrategy(),
+            RelativeStrengthStrategy(),
             RSIReversionStrategy(),
             GapUpStrategy(),
             MACrossoverStrategy(),
@@ -1326,7 +1330,7 @@ def run_backtest(
                     _gap_up_backtest_scan_time(dt)
                     if strat.name == "gap_up"
                     else _momentum_backtest_scan_time(dt)
-                    if strat.name == "momentum"
+                    if strat.name in {"momentum", "relative_strength"}
                     else dt
                 )
                 scan_kwargs = {
@@ -1334,7 +1338,7 @@ def run_backtest(
                     "regime_bars": regime_bars,
                     "allow_regime_warmup": True,
                 }
-                if strat.name == "momentum":
+                if strat.name in {"momentum", "relative_strength"}:
                     scan_kwargs["existing_symbols"] = [
                         symbol for symbol, pos in sim.positions.items()
                         if pos.get("asset_class", "stock") == "stock"
