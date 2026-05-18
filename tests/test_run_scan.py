@@ -168,6 +168,38 @@ class RunScanTests(unittest.TestCase):
 
         self.assertEqual(seen_regime_bars, [None])
 
+    def test_crypto_prefetch_limit_uses_dynamic_required_bars(self):
+        seen_regime_bars = []
+
+        class FakeCrypto:
+            name = "ma_crossover"
+            asset_class = "crypto"
+
+            def scan(self, universe, **kwargs):
+                seen_regime_bars.append(kwargs.get("regime_bars"))
+                return []
+
+        def get_crypto_bars(symbols, timeframe="1Day", limit=60):
+            self.assertEqual(symbols, ["BTC/USD"])
+            self.assertEqual(timeframe, "1Day")
+            self.assertEqual(limit, 75)
+            return {"BTC/USD": [object()] * 75}
+
+        with (
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(run_scan.ac, "get_crypto_bars", side_effect=get_crypto_bars),
+            patch.object(run_scan.rm, "crypto_regime_required_bars", return_value=75),
+            patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "CRYPTO_STRATEGIES", [FakeCrypto()]),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+        ):
+            run_scan.run(run_stocks=False, run_crypto=True, dry_run=True)
+
+        self.assertEqual(len(seen_regime_bars), 1)
+        self.assertEqual(len(seen_regime_bars[0]["BTC/USD"]), 75)
+
     def test_momentum_receives_planned_stock_symbols_for_sector_filter(self):
         seen_existing_symbols = []
 
@@ -686,7 +718,7 @@ class RunScanTests(unittest.TestCase):
             dry_run=True,
             suggested_qty=7.5,
             atr_stop_price=95.25,
-            closed_trades_count=None,
+            closed_trades_count=0,
         )
 
     def test_entry_pipeline_passes_precomputed_closed_trade_count(self):
@@ -805,7 +837,7 @@ class RunScanTests(unittest.TestCase):
             dry_run=True,
             suggested_qty=None,
             atr_stop_price=None,
-            closed_trades_count=None,
+            closed_trades_count=0,
         )
         self.assertEqual(correlation.call_count, 2)
         self.assertEqual(correlation.call_args_list[0].args[1], [])

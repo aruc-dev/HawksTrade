@@ -399,7 +399,7 @@ class ValidationGateTests(unittest.TestCase):
             )
 
         self.assertEqual(exit_code, 0)
-        self.assertIn("Gate bounds use bootstrap confidence bounds", output)
+        self.assertIn("trade count and win-rate gates use point estimates", output)
         self.assertIn("Production slippage sensitivity", output)
         gate.assert_called_once()
         self.assertEqual(sensitivity.call_count, 2)

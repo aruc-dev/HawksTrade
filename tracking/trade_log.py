@@ -427,6 +427,8 @@ def get_closed_trades(strategy: str | None = None) -> list:
     Only sell rows are returned so callers like kelly_position_size() see
     one row per completed round-trip — not two (the buy row is also marked
     closed by mark_trade_closed, which would otherwise double the sample).
+    When strategy is provided, only closed sell rows for that strategy are
+    returned.
     """
     rows = [
         row for row in read_trade_rows()

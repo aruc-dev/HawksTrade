@@ -23,6 +23,12 @@ from analysis.bootstrap import gate_bounds  # noqa: E402
 from scheduler.run_backtest import run_backtest  # noqa: E402
 
 
+GATE_BOUNDS_NOTE = (
+    "Gate bounds use bootstrap confidence bounds for return, drawdown, profit factor, "
+    "and Sharpe when present; trade count and win-rate gates use point estimates."
+)
+
+
 def _as_list(value) -> list:
     if value is None:
         return []
@@ -432,7 +438,7 @@ def run_validation_gate(
 
     if profile in {"production", "all"}:
         lines.append("Production gates:")
-        lines.append("Gate bounds use bootstrap confidence bounds when present; point estimates are shown first.")
+        lines.append(GATE_BOUNDS_NOTE)
         production_windows = validation_cfg.get("production_gate", {}).get("windows", [])
         for gate in production_windows:
             record = evaluate_backtest_gate(
@@ -465,7 +471,7 @@ def run_validation_gate(
     if profile in {"rsi", "all"}:
         rsi_cfg = validation_cfg.get("rsi_reversion_enablement", {})
         lines.append("RSI Reversion enablement gates:")
-        lines.append("Gate bounds use bootstrap confidence bounds when present; point estimates are shown first.")
+        lines.append(GATE_BOUNDS_NOTE)
         for gate in rsi_cfg.get("backtest_windows", []):
             record = evaluate_backtest_gate(
                 gate,
@@ -484,7 +490,7 @@ def run_validation_gate(
     if profile in {"range", "all"}:
         range_cfg = validation_cfg.get("range_breakout_enablement", {})
         lines.append("Range Breakout enablement gates:")
-        lines.append("Gate bounds use bootstrap confidence bounds when present; point estimates are shown first.")
+        lines.append(GATE_BOUNDS_NOTE)
         for gate in range_cfg.get("backtest_windows", []):
             record = evaluate_backtest_gate(
                 gate,
@@ -499,7 +505,7 @@ def run_validation_gate(
     if profile in {"ma", "all"}:
         ma_cfg = validation_cfg.get("ma_crossover_enablement", {})
         lines.append("MA Crossover enablement gates:")
-        lines.append("Gate bounds use bootstrap confidence bounds when present; point estimates are shown first.")
+        lines.append(GATE_BOUNDS_NOTE)
         for gate in ma_cfg.get("backtest_windows", []):
             record = evaluate_backtest_gate(
                 gate,
@@ -514,7 +520,7 @@ def run_validation_gate(
     if profile in {"gap", "all"}:
         gap_cfg = validation_cfg.get("gap_up_enablement", {})
         lines.append("Gap-Up enablement gates:")
-        lines.append("Gate bounds use bootstrap confidence bounds when present; point estimates are shown first.")
+        lines.append(GATE_BOUNDS_NOTE)
         for gate in gap_cfg.get("backtest_windows", []):
             record = evaluate_backtest_gate(
                 gate,

@@ -918,8 +918,9 @@ def run(
 
     if run_crypto:
         try:
-            fetched = ac.get_crypto_bars(["BTC/USD"], timeframe="1Day", limit=60)
-            if _prefetched_bars_are_sufficient(fetched, {"BTC/USD": rm.crypto_regime_required_bars()}):
+            required_bars = rm.crypto_regime_required_bars()
+            fetched = ac.get_crypto_bars(["BTC/USD"], timeframe="1Day", limit=max(60, required_bars))
+            if _prefetched_bars_are_sufficient(fetched, {"BTC/USD": required_bars}):
                 crypto_regime_bars = fetched
             else:
                 log.warning("Crypto regime prefetch missing required BTC/USD history; strategies will fetch live and fail closed if unavailable.")
@@ -964,7 +965,7 @@ def run(
                             dry_run=dry_run,
                             suggested_qty=plan.suggested_qty,
                             atr_stop_price=plan.atr_stop_price,
-                            closed_trades_count=closed_trade_counts.get(plan.strategy),
+                            closed_trades_count=closed_trade_counts.get(plan.strategy, 0),
                         )
                         _mark_unhealthy_entry_result(marker, result, "stock_entry")
                         _register_entry_result(
@@ -1015,7 +1016,7 @@ def run(
                             dry_run=dry_run,
                             suggested_qty=plan.suggested_qty,
                             atr_stop_price=plan.atr_stop_price,
-                            closed_trades_count=closed_trade_counts.get(plan.strategy),
+                            closed_trades_count=closed_trade_counts.get(plan.strategy, 0),
                         )
                         _mark_unhealthy_entry_result(marker, result, "crypto_entry")
                         _register_entry_result(
