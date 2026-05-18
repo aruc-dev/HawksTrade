@@ -340,11 +340,41 @@ class OrderExecutorTests(unittest.TestCase):
         self.assertTrue(
             any(
                 "Sample-size risk tier for gap_up/MSFT" in message
-                and "base_qty=4" in message
+                and "base_qty=10.0" in message
                 and "scaled_qty=1.0" in message
                 for message in logs.output
             )
         )
+
+    def test_enter_position_tier_cap_uses_uncash_limited_base_cap(self):
+        order = SimpleNamespace(id="entry-scaled", status="filled", filled_qty="2.0")
+
+        with (
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
+            patch.object(
+                order_executor.rm,
+                "pre_trade_check",
+                return_value={
+                    "approved": True,
+                    "qty": 3,
+                    "base_cap_qty": 8,
+                    "cash_qty": 3,
+                },
+            ),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=3),
+            patch.object(order_executor.ac, "place_limit_order", return_value=order) as place_limit_order,
+        ):
+            result = order_executor.enter_position(
+                "MSFT",
+                "gap_up",
+                dry_run=False,
+                suggested_qty=10,
+                closed_trades_count=0,
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["qty"], 2.0)
+        self.assertEqual(place_limit_order.call_args.args[1], 2.0)
 
     def test_closed_trades_for_strategy_supports_legacy_getter_without_strategy_kwarg(self):
         def legacy_getter(*args, **kwargs):

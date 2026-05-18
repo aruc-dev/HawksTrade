@@ -62,15 +62,40 @@ class UniverseMembership:
             return False
         return True
 
+    def _activation_date(self, *, ipo_grace_days: int = 90) -> date | None:
+        source = self.source.lower()
+        if source == "non_index":
+            return self.first_liquid_date or (
+                self.ipo_date + timedelta(days=ipo_grace_days)
+                if self.ipo_date is not None
+                else self.added_date
+            )
+        return self.added_date
+
+    def _deactivation_date(self) -> date | None:
+        source = self.source.lower()
+        dates = []
+        if self.delisted_date is not None:
+            dates.append(self.delisted_date)
+        if source != "non_index" and self.removed_date is not None:
+            dates.append(self.removed_date)
+        return min(dates) if dates else None
+
     def overlaps(self, start: date, end: date, *, ipo_grace_days: int = 90) -> bool:
-        return any(
-            self.active_as_of(day, ipo_grace_days=ipo_grace_days)
-            for day in (start, end)
-        ) or (
-            self.added_date is not None
-            and start <= self.added_date <= end
-            and self.active_as_of(self.added_date, ipo_grace_days=ipo_grace_days)
-        )
+        if end < start:
+            start, end = end, start
+
+        active_start = self._activation_date(ipo_grace_days=ipo_grace_days)
+        if active_start is None:
+            if self.source.lower() == "non_index":
+                return False
+            active_start = date.min
+
+        active_end = self._deactivation_date()
+        if active_end is not None and active_end <= active_start:
+            return False
+
+        return active_start <= end and (active_end is None or active_end > start)
 
 
 class PITUniverseBuilder:

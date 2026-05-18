@@ -132,7 +132,24 @@ def effective_risk_for(
     )
 
 
-def scale_quantity(qty: float, tier: RiskTier, *, base_position_cap_pct: float | None = None, base_cap_qty: float | None = None) -> float:
+def _finite_nonnegative(value) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed) or parsed < 0:
+        return None
+    return parsed
+
+
+def scale_quantity(
+    qty: float,
+    tier: RiskTier,
+    *,
+    base_position_cap_pct: float | None = None,
+    base_cap_qty: float | None = None,
+    cash_qty: float | None = None,
+) -> float:
     """Apply the risk multiplier and tier position cap to a requested quantity."""
     try:
         scaled = float(qty) * float(tier.risk_multiplier)
@@ -144,6 +161,9 @@ def scale_quantity(qty: float, tier: RiskTier, *, base_position_cap_pct: float |
     if base_position_cap_pct and base_cap_qty is not None and base_position_cap_pct > 0:
         cap_ratio = min(1.0, float(tier.position_cap_pct) / float(base_position_cap_pct))
         scaled = min(scaled, float(base_cap_qty) * cap_ratio)
+    cash_cap = _finite_nonnegative(cash_qty)
+    if cash_cap is not None:
+        scaled = min(scaled, cash_cap)
     return round(max(scaled, 0.0), 6)
 
 

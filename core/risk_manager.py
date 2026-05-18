@@ -238,26 +238,51 @@ def max_positions_reached(asset_class: Optional[str] = None, symbol: str = "") -
 
 # ── Position Sizing ───────────────────────────────────────────────────────────
 
+def position_size_limits(price: float) -> dict:
+    """Return portfolio, cash, and base position cap quantities for a price."""
+    if price <= 0:
+        log.info(f"Invalid price for position sizing: {price}")
+        return {
+            "portfolio_value": 0.0,
+            "cash": 0.0,
+            "base_position_value": 0.0,
+            "affordable_value": 0.0,
+            "base_cap_qty": 0.0,
+            "cash_qty": 0.0,
+            "qty": 0.0,
+        }
+
+    portfolio_value = float(ac.get_portfolio_value())
+    cash = float(ac.get_cash())
+    base_position_value = portfolio_value * T["max_position_pct"]
+    affordable_value = min(base_position_value, cash)
+
+    return {
+        "portfolio_value": portfolio_value,
+        "cash": cash,
+        "base_position_value": base_position_value,
+        "affordable_value": affordable_value,
+        "base_cap_qty": round(base_position_value / price, 6),
+        "cash_qty": round(cash / price, 6),
+        "qty": round(affordable_value / price, 6),
+    }
+
+
 def calculate_position_size(price: float) -> float:
     """
     Returns the number of shares/units to buy, capped at max_position_pct of portfolio.
     Returns 0 if trade should not proceed.
     """
+    limits = position_size_limits(price)
     if price <= 0:
-        log.info(f"Invalid price for position sizing: {price}")
         return 0.0
-
-    portfolio_value = ac.get_portfolio_value()
-    cash = ac.get_cash()
-    max_value = portfolio_value * T["max_position_pct"]
-    affordable = min(max_value, cash)
+    affordable = limits["affordable_value"]
 
     if affordable < T["min_trade_value_usd"]:
         log.info(f"Insufficient funds: ${affordable:.2f} < min ${T['min_trade_value_usd']}")
         return 0.0
 
-    qty = affordable / price
-    return round(qty, 6)  # supports fractional shares/crypto
+    return limits["qty"]  # supports fractional shares/crypto
 
 
 def cap_position_qty(price: float, qty: float) -> float:
@@ -321,14 +346,22 @@ def pre_trade_check(price: float, symbol: str, asset_class: Optional[str] = None
         result["reason"] = f"Invalid price for {symbol}: {price}"
         return result
 
-    qty = calculate_position_size(price)
-    if qty <= 0:
+    limits = position_size_limits(price)
+    qty = limits["qty"]
+    if limits["affordable_value"] < T["min_trade_value_usd"] or qty <= 0:
         result["reason"] = "Insufficient funds or below min trade value"
         return result
 
     result["approved"] = True
     result["qty"] = qty
     result["reason"] = "OK"
+    result.update({
+        "portfolio_value": limits["portfolio_value"],
+        "cash": limits["cash"],
+        "base_cap_qty": limits["base_cap_qty"],
+        "cash_qty": limits["cash_qty"],
+        "base_position_value": limits["base_position_value"],
+    })
     log.info(f"Pre-trade check PASSED for {symbol}: qty={qty} @ ${price}")
     return result
 

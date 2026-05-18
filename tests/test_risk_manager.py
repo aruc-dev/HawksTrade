@@ -34,6 +34,21 @@ class RiskManagerTests(unittest.TestCase):
         self.assertEqual(risk_manager.calculate_position_size(0), 0.0)
         self.assertEqual(risk_manager.calculate_position_size(-5), 0.0)
 
+    def test_pre_trade_check_preserves_minimum_trade_value_gate(self):
+        with (
+            patch.object(risk_manager, "daily_loss_exceeded", return_value=False),
+            patch.object(risk_manager.ac, "get_all_positions", return_value=[]),
+            patch.object(risk_manager.ac, "get_portfolio_value", return_value=10000),
+            patch.object(risk_manager.ac, "get_cash", return_value=50),
+        ):
+            result = risk_manager.pre_trade_check(
+                price=100.0, symbol="MSFT", asset_class="stock"
+            )
+
+        self.assertFalse(result["approved"])
+        self.assertEqual(result["qty"], 0.0)
+        self.assertIn("below min trade value", result["reason"])
+
     def test_kelly_position_size_rejects_non_positive_price_before_division(self):
         with self.assertLogs("risk_manager", level="WARNING") as logs:
             qty = risk_manager.kelly_position_size(price=0)

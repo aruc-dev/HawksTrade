@@ -17,6 +17,7 @@ def _csv(tmpdir: str) -> Path:
                 "NEW,2020-01-01,,,,,index,new member",
                 "IPO,,,2024-01-01,2024-04-01,,non_index,ipo grace",
                 "DEAD,2000-01-01,,,,2022-01-01,index,delisted",
+                "FLASH,,,2024-05-01,2024-05-15,2024-05-20,non_index,short-lived member",
             ]
         )
         + "\n",
@@ -57,6 +58,18 @@ class PITUniverseTests(unittest.TestCase):
 
         self.assertIn("DEAD", before_delist)
         self.assertNotIn("DEAD", after_delist)
+
+    def test_members_between_includes_short_lived_non_index_overlap(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            builder = PITUniverseBuilder(_csv(tmpdir))
+
+            start_members = builder.members_as_of("2024-05-01")
+            end_members = builder.members_as_of("2024-05-31")
+            window_members = builder.members_between("2024-05-01", "2024-05-31")
+
+        self.assertNotIn("FLASH", start_members)
+        self.assertNotIn("FLASH", end_members)
+        self.assertIn("FLASH", window_members)
 
     def test_backtest_scan_universe_filters_screener_result_by_pit_membership(self):
         with tempfile.TemporaryDirectory() as tmpdir:

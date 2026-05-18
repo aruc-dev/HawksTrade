@@ -73,6 +73,28 @@ def _min_trade_value_usd() -> float:
         return 0.0
 
 
+def _finite_positive(value) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) and parsed > 0 else None
+
+
+def _finite_nonnegative(value) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) and parsed >= 0 else None
+
+
+def _sample_size_scale_input(sizing, check: dict) -> float:
+    if sizing.source == "pre_trade":
+        return _finite_positive(check.get("base_cap_qty")) or sizing.capped_qty
+    return sizing.requested_qty
+
+
 def _create_order_intent(symbol: str, side: str, strategy: str, asset_class: str, qty, limit_price=None) -> dict | None:
     if MODE == "backtest":
         return None
@@ -491,11 +513,15 @@ def enter_position(
             ),
         )
         base_position_cap_pct = float(CFG.get("trading", {}).get("max_position_pct", 0.08) or 0.08)
+        base_cap_qty = _finite_positive(check.get("base_cap_qty")) or check["qty"]
+        cash_qty = _finite_nonnegative(check.get("cash_qty"))
+        scale_input_qty = _sample_size_scale_input(sizing, check)
         capped_qty = scale_quantity(
-            sizing.capped_qty,
+            scale_input_qty,
             tier,
             base_position_cap_pct=base_position_cap_pct,
-            base_cap_qty=check["qty"],
+            base_cap_qty=base_cap_qty,
+            cash_qty=cash_qty,
         )
         if not math.isfinite(capped_qty) or capped_qty <= 0:
             log.info(f"Entry blocked for {symbol}: capped quantity is zero.")
@@ -530,7 +556,7 @@ def enter_position(
                 tier.closed_trades,
                 tier.risk_multiplier,
                 tier.position_cap_pct * 100,
-                sizing.capped_qty,
+                scale_input_qty,
                 capped_qty,
             )
         qty = capped_qty
