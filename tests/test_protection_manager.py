@@ -118,6 +118,61 @@ class ProtectionManagerTests(unittest.TestCase):
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.lock.lock_type, "rolling_max_drawdown_lock")
 
+    def test_rolling_drawdown_uses_portfolio_impact_when_available(self):
+        manager = self._manager(
+            symbol_cooldown_days=0,
+            symbol_stoploss_cooldown_days=0,
+            strategy_stoploss_threshold=99,
+            low_profit_min_trades=99,
+            max_drawdown_pct=0.03,
+        )
+        rows = [
+            {**self._sell_row(symbol="AAPL", strategy="momentum", pnl_pct=-0.04), "portfolio_pnl_pct": -0.004},
+            {**self._sell_row(symbol="MSFT", strategy="gap_up", pnl_pct=-0.04), "portfolio_pnl_pct": -0.004},
+        ]
+        manager.refresh_from_rows(rows, now=self.now)
+
+        decision = manager.evaluate_entry("NVDA", "range_breakout", now=self.now)
+
+        self.assertTrue(decision.allowed)
+
+    def test_rolling_drawdown_falls_back_to_trade_return_without_portfolio_impact(self):
+        manager = self._manager(
+            symbol_cooldown_days=0,
+            symbol_stoploss_cooldown_days=0,
+            strategy_stoploss_threshold=99,
+            low_profit_min_trades=99,
+            max_drawdown_pct=0.03,
+        )
+        rows = [
+            self._sell_row(symbol="AAPL", strategy="momentum", pnl_pct=-0.02),
+            self._sell_row(symbol="MSFT", strategy="gap_up", pnl_pct=-0.03),
+        ]
+        locks = manager.refresh_from_rows(rows, now=self.now)
+
+        drawdown_lock = next(lock for lock in locks if lock.lock_type == "rolling_max_drawdown_lock")
+        self.assertEqual(drawdown_lock.metadata["return_sources"], ["pnl_pct"])
+
+    def test_rolling_drawdown_records_actual_portfolio_return_sources(self):
+        manager = self._manager(
+            symbol_cooldown_days=0,
+            symbol_stoploss_cooldown_days=0,
+            strategy_stoploss_threshold=99,
+            low_profit_min_trades=99,
+            max_drawdown_pct=0.03,
+        )
+        rows = [
+            {**self._sell_row(symbol="AAPL", strategy="momentum", pnl_pct=-0.20), "portfolio_return_pct": -0.02},
+            {**self._sell_row(symbol="MSFT", strategy="gap_up", pnl_pct=-0.20), "portfolio_impact_pct": -0.02},
+        ]
+        locks = manager.refresh_from_rows(rows, now=self.now)
+
+        drawdown_lock = next(lock for lock in locks if lock.lock_type == "rolling_max_drawdown_lock")
+        self.assertEqual(
+            drawdown_lock.metadata["return_sources"],
+            ["portfolio_impact_pct", "portfolio_return_pct"],
+        )
+
     def test_existing_active_lock_is_preserved_across_refresh(self):
         future_lock = ProtectionLock(
             lock_type="manual_test_lock",

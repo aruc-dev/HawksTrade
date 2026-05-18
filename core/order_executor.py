@@ -21,9 +21,10 @@ from core.order_governor import GovernorDecision, OrderGovernor, OrderIntent
 from core import risk_manager as rm
 from core.config_loader import get_config
 from core.portfolio_construction import construct_entry_size
+from core.sample_size_governor import effective_risk_for, scale_quantity
 from core.strategy_readiness import ReadinessDecision, evaluate_strategy_live_readiness
 from tracking import order_intents
-from tracking.trade_log import log_trade, mark_trade_closed, get_trade_age_days
+from tracking.trade_log import log_trade, mark_trade_closed, get_trade_age_days, get_closed_trades
 
 # ── Setup ───────────────────────────────────────────────────────────────────
 
@@ -63,6 +64,35 @@ def _broker_order_id(order) -> str:
 
 def _current_run_id() -> str:
     return os.getenv("HAWKSTRADE_RUN_ID") or "manual"
+
+
+def _min_trade_value_usd() -> float:
+    try:
+        return max(0.0, float(CFG.get("trading", {}).get("min_trade_value_usd", 0) or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _finite_positive(value) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) and parsed > 0 else None
+
+
+def _finite_nonnegative(value) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) and parsed >= 0 else None
+
+
+def _sample_size_scale_input(sizing, check: dict) -> float:
+    if sizing.source == "pre_trade":
+        return _finite_positive(check.get("base_cap_qty")) or sizing.capped_qty
+    return sizing.requested_qty
 
 
 def _create_order_intent(symbol: str, side: str, strategy: str, asset_class: str, qty, limit_price=None) -> dict | None:
@@ -363,6 +393,15 @@ def _effective_entry_stop_loss(entry_price: float, atr_stop_price: float | None)
     return custom_stop if custom_stop < global_sl else global_sl
 
 
+def _closed_trades_for_strategy(strategy: str) -> list[dict]:
+    try:
+        return get_closed_trades(strategy=strategy)
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc) or "strategy" not in str(exc):
+            raise
+        return [row for row in get_closed_trades() if row.get("strategy") == strategy]
+
+
 def _exit_failure_result(
     symbol: str,
     strategy: str,
@@ -412,6 +451,7 @@ def enter_position(
     dry_run: bool = False,
     suggested_qty: Optional[float] = None,
     atr_stop_price: Optional[float] = None,
+    closed_trades_count: Optional[int] = None,
 ) -> Optional[dict]:
     """
     Open a new position.
@@ -424,6 +464,8 @@ def enter_position(
         priority over Kelly when provided and positive.
     atr_stop_price: volatility-adjusted stop; written to the trade log so the
         live risk check can use it as the effective stop price.
+    closed_trades_count: optional precomputed strategy sample size for callers
+        that may submit multiple entry attempts in one scan.
     """
     try:
         readiness = evaluate_strategy_live_readiness(strategy, mode=MODE, cfg=CFG)
@@ -461,12 +503,62 @@ def enter_position(
             kelly_sizer=rm.kelly_position_size,
             capper=rm.cap_position_qty,
         )
-        capped_qty = sizing.capped_qty
-        if capped_qty <= 0:
+        tier = effective_risk_for(
+            strategy,
+            CFG,
+            closed_trades=(
+                int(closed_trades_count)
+                if closed_trades_count is not None
+                else len(_closed_trades_for_strategy(strategy))
+            ),
+        )
+        base_position_cap_pct = float(CFG.get("trading", {}).get("max_position_pct", 0.08) or 0.08)
+        base_cap_qty = _finite_positive(check.get("base_cap_qty")) or check["qty"]
+        cash_qty = _finite_nonnegative(check.get("cash_qty"))
+        scale_input_qty = _sample_size_scale_input(sizing, check)
+        capped_qty = scale_quantity(
+            scale_input_qty,
+            tier,
+            base_position_cap_pct=base_position_cap_pct,
+            base_cap_qty=base_cap_qty,
+            cash_qty=cash_qty,
+        )
+        if not math.isfinite(capped_qty) or capped_qty <= 0:
             log.info(f"Entry blocked for {symbol}: capped quantity is zero.")
             return None
+        min_trade_value = _min_trade_value_usd()
+        scaled_notional = capped_qty * price
+        if min_trade_value > 0 and scaled_notional + 1e-9 < min_trade_value:
+            log.info(
+                "Entry blocked for %s: scaled notional $%.2f is below min trade value $%.2f "
+                "(qty=%s price=%.4f).",
+                symbol,
+                scaled_notional,
+                min_trade_value,
+                capped_qty,
+                price,
+            )
+            return None
         if sizing.capped:
-            log.info(f"Entry size capped for {symbol}: requested={sizing.requested_qty} capped={capped_qty}")
+            log.info(
+                "Entry max-position cap for %s: requested=%s base_capped=%s",
+                symbol,
+                sizing.requested_qty,
+                sizing.capped_qty,
+            )
+        if tier.risk_multiplier < 1.0 or tier.position_cap_pct < base_position_cap_pct or tier.override:
+            log.info(
+                "Sample-size risk tier for %s/%s: tier=%s closed_trades=%s "
+                "risk_multiplier=%.2f position_cap=%.2f%% base_qty=%s scaled_qty=%s",
+                strategy,
+                symbol,
+                tier.name,
+                tier.closed_trades,
+                tier.risk_multiplier,
+                tier.position_cap_pct * 100,
+                scale_input_qty,
+                capped_qty,
+            )
         qty = capped_qty
         order_type = "market" if ORDER_TYPE == "market" else "limit"
         limit_px = price * (1 + SLIPPAGE) if order_type == "limit" else None
@@ -550,6 +642,7 @@ def enter_position(
             "stop_loss":        sl,
             "take_profit":      tp,
             "high_water_price": entry_price,
+            "risk_tier":        tier.audit_label,
             "order_id":         order_id,
             "status":           action_status,
         }
@@ -669,11 +762,14 @@ def exit_position(
             from tracking.trade_log import get_open_trades
             open_trades = get_open_trades()
 
+        matched_open_trade = None
         for t in reversed(open_trades):
             if _symbols_match(t["symbol"], symbol):
+                matched_open_trade = t
                 strategy = t.get("strategy", "unknown")
                 trade_symbol = t.get("symbol") or symbol
                 break
+        entry_risk_tier = matched_open_trade.get("risk_tier", "") if matched_open_trade else ""
 
         order_symbol = trade_symbol if asset_class == "crypto" else symbol
 
@@ -715,6 +811,7 @@ def exit_position(
                 "order_id":      "DRY-RUN",
                 "status":        "dry_run",
                 "order_type":     order_type,
+                "risk_tier":      entry_risk_tier,
             }
             if limit_price is not None:
                 trade["limit_price"] = limit_price
@@ -806,6 +903,7 @@ def exit_position(
             "order_id":      order_id,
             "status":        action_status,
             "order_type":     order_type,
+            "risk_tier":      entry_risk_tier,
         }
         if limit_price is not None:
             trade["limit_price"] = limit_price

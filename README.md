@@ -4,7 +4,7 @@
 
 **Automated swing trading bot for US stocks and crypto, powered by Alpaca Markets.**
 
-Ships with 5 independent strategies, enables the validated core set by default,
+Ships with 6 independent strategies, enables the guarded core set by default,
 enforces strict risk rules, and is designed to be operated autonomously by an AI agent.
 
 ---
@@ -30,7 +30,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener
 
 ## Backtesting & Performance
 
-HawksTrade includes a high-fidelity historical simulator. The current tail-risk-hardened default strategy set achieved **+20.70% annual return** in the 12-month backtest through 2026-04-30 on $10,000 starting capital, with the configured 8% max-position risk cap enforced.
+HawksTrade includes a high-fidelity historical simulator. The current guarded default strategy set produced a **+9.55% 12-month costed point return** through the OOS lockup boundary on $10,000 starting capital, with the configured 8% max-position risk cap enforced. Production validation remains blocking until bootstrap confidence gates improve and the crypto sleeve clears its lower-bound gate.
 
 - **Backtest Summary**: [backtests.md](backtests.md)
 - **Configuration Guide**: [config.md](config.md)
@@ -42,24 +42,25 @@ HawksTrade includes a high-fidelity historical simulator. The current tail-risk-
 
 | Strategy | Market | Key Parameters | Approach |
 |----------|--------|----------------|----------|
-| **Momentum** | US Stocks | Top 2 by 5-day return in green regimes, min 8% momentum, 1.5x elapsed-session volume pace, 65% breadth coverage, 1.2x ATR stop extension capped at 5%, profit-aware exit | Captures high-conviction rallies with a moderate opportunity increase while yellow regimes remain capped at one signal. |
-| **RSI Reversion** | US Stocks | Disabled by default; RSI < 40, %B < 20%, SMA-200 within +/-15%, 0.7x volume confirmation, 1-bar recovery, 5-day drawdown <= 10%, ATR/price <= 5%, 0.8x ATR stop capped at 6%, and profit protection when enabled | Mean reversion with crash, realised-volatility, tail-loss, and high-water trailing guards. |
-| **Gap-Up** | US Stocks | Enabled; true 5-15% opening gap, 1.3x opening-volume pace, 65% breadth guard, prior close above SMA-200, <=35% SMA-200 extension, top-1 ranked signal, 2-day hold, failed-gap exit | Opening momentum sleeve with completed-bar trend confirmation, minute-bar entry confirmation, and ATR-risk sizing. |
+| **Momentum** | US Stocks | Top 2 sector-diversified names by 5-day alpha momentum in green regimes, 4% momentum floor, optional ATR-scaled momentum gate, 1.8x elapsed-session volume pace, 65% breadth coverage, 1.2x ATR stop extension capped at 5%, profit-aware exit | Captures high-conviction rallies with a lower recent-window threshold while keeping concurrent momentum exposure capped and yellow regimes limited to one signal. |
+| **Relative Strength** | US Stocks | Top 1 stock by 20-day return minus SPY, minimum 5% RS, minimum 8% absolute return, max 3% recent 3-day gain, 1.8x elapsed-session volume pace, 7-day hold, ATR stop capped at 5% | Adds a stricter medium-term leadership sleeve that avoids fresh short-term blow-offs and shares stock breadth, sector, volume, and ATR-risk controls. |
+| **RSI Reversion** | US Stocks | Enabled only in bear/chop regimes; RSI < 40, %B < 20%, SMA-200 within +/-15%, 0.7x volume confirmation, 1-bar recovery, 5-day drawdown <= 10%, ATR/price <= 5%, 0.8x ATR stop capped at 6%, and profit protection | Mean reversion with crash, realised-volatility, tail-loss, and high-water trailing guards. |
+| **Gap-Up** | US Stocks | Disabled in the default profile; true 5-15% opening gap, 1.3x opening-volume pace, 65% breadth guard, prior close above SMA-200, <=35% SMA-200 extension, top-1 ranked signal, 2-day hold, failed-gap exit | Opening momentum sleeve kept behind its standalone validation gate until bootstrap and minute-fill evidence improve. |
 | **EMA Crossover** | Crypto | 6/18 EMA, latest completed cross only, top-1 ranked signal, RSI 35-75, slope + volatility filters, 3-day drawdown guard, price/EMA confirmation, 2% daily-close max-loss exit, 16-day hold cap | Bullish EMA crossover with BTC regime gate and tighter same-scan concentration control. |
-| **Range Breakout** | Crypto | Enabled; 20-day high close breakout, 2.5x volume, rising EMA-50, RSI, 0.8%-8% breakout-extension, upper-range close guards, and profit protection | Ranked Donchian-style breakout sleeve with failed-breakout, trend-loss, and high-water trailing exits. |
+| **Range Breakout** | Crypto | Enabled; 20-day high close breakout, 2.5x volume, rising EMA-50, RSI, 0.8%-8% breakout-extension, upper-10% close guard, and profit protection | Ranked Donchian-style breakout sleeve with failed-breakout, trend-loss, and high-water trailing exits. |
 
 **Crypto Universe**: `BTC/USD`, `ETH/USD`, `SOL/USD`, `LINK/USD`, `XRP/USD`, `ADA/USD`, `AVAX/USD`, `DOGE/USD`, `LTC/USD`, `DOT/USD`, `UNI/USD`, `AAVE/USD`.
 
 ### Market Regime Filters
 
-- **Stock Regime Guards**: Momentum and Gap-Up use the SPY/QQQ SMA-50 regime gate. RSI Reversion has separate crash and realised-volatility filters.
-- **BTC EMA-20 (Crypto)**: EMA Crossover and Range Breakout are gated by BTC/USD trading above its 20-day EMA.
+- **Stock Regime Guards**: Momentum uses the SPY/QQQ SMA-50 regime gate. RSI Reversion has separate crash and realised-volatility filters. Gap-Up has its own SPY SMA-50 gate but is disabled in the default profile.
+- **BTC EMA-20 (Crypto)**: EMA Crossover and Range Breakout are gated by BTC/USD trading above its 20-day EMA, with the EMA not falling more than 0.5% over the last 5 days.
 
 Live/paper scans fail closed when regime data is unavailable or insufficient, blocking new entries until the bot can confirm market conditions. Backtests still allow early warmup periods with insufficient bars so simulations can start before every long-window filter is populated.
 
 ### Strategy Position Sizing
 
-Momentum, RSI Reversion, Gap-Up, EMA Crossover, and Range Breakout emit ATR-risk quantities that target 1% account risk per trade before the global 8% max-position cap is applied. Momentum still has a Half-Kelly fallback in the executor if a signal does not include ATR sizing, but the current strategy path provides ATR-risk sizing by default.
+Momentum, Relative Strength, RSI Reversion, Gap-Up, EMA Crossover, and Range Breakout emit ATR-risk quantities that target 1% account risk per trade before the global 8% max-position cap is applied. Momentum still has a Half-Kelly fallback in the executor if a signal does not include ATR sizing, but the current strategy path provides ATR-risk sizing by default.
 
 ### Momentum Exit Policy
 
@@ -77,11 +78,12 @@ Use `--no-screener` to backtest only the fixed configured stock universe, or `--
 
 ```bash
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
-  --strategies momentum,rsi_reversion,gap_up,ma_crossover,range_breakout \
+  --strategies momentum,relative_strength,rsi_reversion,ma_crossover,range_breakout \
   --set strategies.momentum.top_n=2 \
-  --set strategies.momentum.min_momentum_pct=0.08 \
+  --set strategies.momentum.min_momentum_pct=0.04 \
+  --set strategies.momentum.min_momentum_atr_mult=0.0 \
   --set strategies.momentum.volume_confirmation_mode=pace \
-  --set strategies.momentum.volume_pace_ratio=1.5 \
+  --set strategies.momentum.volume_pace_ratio=1.8 \
   --set strategies.momentum.min_breadth_coverage_pct=0.65 \
   --set strategies.ma_crossover.fast_ema=6 \
   --set strategies.ma_crossover.slow_ema=18 \
@@ -110,14 +112,15 @@ The research harness writes `factor_dataset.csv`, `factor_summary.json`, and
 `factor_summary.md`. Treat those outputs as evidence for a separate strategy
 change; do not tune production defaults from the harness alone.
 
-RSI Reversion is disabled in the active default profile. Use its dedicated gate as an ongoing monitoring check before enabling it or scaling its capital allocation:
+RSI Reversion is enabled in the active default profile only as a conditional bear/chop sleeve. Use its dedicated gate as an ongoing monitoring check before scaling its capital allocation:
 
 ```bash
 python3 scheduler/run_validation_gate.py --profile rsi
 ```
 
-Gap-Up and Range Breakout are enabled in the active profile. Continue using
-their dedicated gates before scaling either sleeve:
+Gap-Up is disabled in the active default profile and Range Breakout remains
+enabled. Continue using their dedicated gates before re-enabling or scaling
+either sleeve:
 
 ```bash
 python3 scheduler/run_validation_gate.py --profile gap
@@ -135,12 +138,14 @@ python3 scheduler/run_validation_gate.py --profile range
 - **Capital Protection**: SMA-based trend filters on all strategies.
 - **Strategy-Local Loss Defense**: Momentum and RSI use less-permissive ATR stop extensions on top of the global stop layer, RSI blocks high-ATR and unresolved waterfall entries and exits daily closes 6% below entry, Gap-Up exits failed continuations, and MA Crossover exits on a daily close at least 2% below entry.
 - **Position Limits**: Max 8% of portfolio per trade, cap of 10 concurrent positions.
+- **Sample-Size Sizing Gate**: Strategies with fewer than 30 closed trades run at exploratory risk through `validation.sample_size_scaling`; overrides must include a reason and expiry.
+- **Statistical Hardening**: Backtests use point-in-time stock universe membership, exclude the active OOS lockup by default, publish bootstrap CIs, and support SPA-style multiple-testing checks before allocation increases.
 - **Crypto Concentration Guard**: New crypto entries are blocked when recent daily-return correlation is too high versus existing or same-scan planned crypto exposure.
 - **Daily Guardrail**: 5% daily loss limit (hard stop for the day), keyed to the `America/New_York` trading-session date so UTC cloud hosts do not reset the baseline at UTC midnight. The baseline is the first observed account value for that trading date and is persisted in `data/daily_loss_baseline.json`; it is not reconstructed from the prior close.
 - **Broker Resilience**: Alpaca timeouts, rate limits, and 5xx outages use bounded retry; auth failures, not-found responses, and broker rejections are classified for fail-closed logging.
 - **Broker Protective Stops**: Live mode syncs missing broker-side protective sells for open trade-log rows; equities use stop orders and crypto uses stop-limit orders.
 - **Strategy Live Readiness**: Live entries are blocked for any strategy with a configured paper-history gate until `data/trades.csv` shows the required closed paper exits and validation age.
-- **Entry Protections**: Protection locks are enabled for new entries after recent symbol cooldowns, stop-loss clusters, weak strategy performance, or realized drawdown; exits continue while entry locks are active.
+- **Entry Protections**: Protection locks are enabled for new entries after recent symbol cooldowns, stop-loss clusters, weak strategy performance, or realized drawdown; exits continue while entry locks are active. Backtests evaluate portfolio-wide realized drawdown locks with position-size-adjusted portfolio P&L impact, while symbol and strategy loss guards continue to use raw closed-trade returns.
 - **Price-Fetch Visibility**: Risk checks track consecutive latest-price failures per open position and surface repeated failures as `[NOK]` in the Linux health dashboard.
 - **Trade-Log Reconciliation**: Scheduled scans, risk checks, reports, and health checks reconcile `data/trades.csv` with broker positions when Alpaca is reachable.
 - **Health Alerts**: Linux health checks write `reports/alerts/health_alert_latest.txt`, timestamped alert files for `[NOK]` states, and can POST alerts to `HAWKSTRADE_HEALTH_ALERT_WEBHOOK_URL`.

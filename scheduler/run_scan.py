@@ -48,8 +48,9 @@ from core.run_markers import RunScope, run_scope
 from core.logging_config import runtime_log_handlers
 from core.portfolio import get_open_symbols, print_snapshot
 from scheduler.reconcile_trade_log import safe_reconcile
-from tracking.trade_log import get_open_trades, get_trade_age_days, update_high_water_prices
+from tracking.trade_log import get_closed_trades, get_open_trades, get_trade_age_days, update_high_water_prices
 from strategies.momentum import MomentumStrategy
+from strategies.relative_strength import RelativeStrengthStrategy
 from strategies.rsi_reversion import RSIReversionStrategy
 from strategies.gap_up import GapUpStrategy
 from strategies.ma_crossover import MACrossoverStrategy
@@ -98,6 +99,21 @@ def _configured_hold_days(cfg: dict) -> dict:
     }
 
 
+def _closed_trade_counts_by_strategy() -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in get_closed_trades():
+        strategy = row.get("strategy")
+        if strategy:
+            counts[strategy] = counts.get(strategy, 0) + 1
+    return counts
+
+
+def _closed_trade_count_for_strategy(counts: dict[str, int] | None, strategy: str) -> int | None:
+    if counts is None:
+        return None
+    return counts.get(strategy, 0)
+
+
 def _strategy_uses_profit_protection(strategy: str, strategy_cfg: dict) -> bool:
     if strategy == "momentum":
         return _momentum_exit_policy_for_scan(strategy_cfg) == "profit_trailing"
@@ -130,7 +146,7 @@ POLICY_AWARE_HOLD_STRATEGIES = _configured_policy_aware_hold_strategies(CFG)
 
 # ── Strategy Registry ─────────────────────────────────────────────────────────
 
-STOCK_STRATEGIES  = [MomentumStrategy(), RSIReversionStrategy(), GapUpStrategy()]
+STOCK_STRATEGIES  = [MomentumStrategy(), RelativeStrengthStrategy(), RSIReversionStrategy(), GapUpStrategy()]
 CRYPTO_STRATEGIES = [MACrossoverStrategy(), RangeBreakoutStrategy()]
 
 
@@ -822,6 +838,12 @@ def run(
         return
 
     log.info(f"Market open: {market_open} | Open positions: {len(open_symbols)}")
+    closed_trade_counts: dict[str, int] | None
+    try:
+        closed_trade_counts = _closed_trade_counts_by_strategy()
+    except Exception as e:
+        closed_trade_counts = None
+        log.warning("Could not precompute closed-trade counts; falling back to per-entry lookup: %s", e)
 
     # --- Check daily loss limit first ---
     try:
@@ -903,8 +925,9 @@ def run(
 
     if run_crypto:
         try:
-            fetched = ac.get_crypto_bars(["BTC/USD"], timeframe="1Day", limit=60)
-            if _prefetched_bars_are_sufficient(fetched, {"BTC/USD": 21}):
+            required_bars = rm.crypto_regime_required_bars()
+            fetched = ac.get_crypto_bars(["BTC/USD"], timeframe="1Day", limit=max(60, required_bars))
+            if _prefetched_bars_are_sufficient(fetched, {"BTC/USD": required_bars}):
                 crypto_regime_bars = fetched
             else:
                 log.warning("Crypto regime prefetch missing required BTC/USD history; strategies will fetch live and fail closed if unavailable.")
@@ -921,7 +944,7 @@ def run(
         for strategy in enabled_stock_strategies:
             try:
                 scan_kwargs = {"regime_bars": stock_regime_bars}
-                if strategy.name == "momentum":
+                if strategy.name in {"momentum", "relative_strength"}:
                     scan_kwargs["existing_symbols"] = _planned_symbols_for_asset_class(
                         planned_asset_classes,
                         "stock",
@@ -949,6 +972,7 @@ def run(
                             dry_run=dry_run,
                             suggested_qty=plan.suggested_qty,
                             atr_stop_price=plan.atr_stop_price,
+                            closed_trades_count=_closed_trade_count_for_strategy(closed_trade_counts, plan.strategy),
                         )
                         _mark_unhealthy_entry_result(marker, result, "stock_entry")
                         _register_entry_result(
@@ -999,6 +1023,7 @@ def run(
                             dry_run=dry_run,
                             suggested_qty=plan.suggested_qty,
                             atr_stop_price=plan.atr_stop_price,
+                            closed_trades_count=_closed_trade_count_for_strategy(closed_trade_counts, plan.strategy),
                         )
                         _mark_unhealthy_entry_result(marker, result, "crypto_entry")
                         _register_entry_result(

@@ -12,6 +12,7 @@ import sys
 import logging
 import argparse
 import tempfile
+import warnings
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -26,10 +27,19 @@ from zoneinfo import ZoneInfo
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
+from analysis.bootstrap import bootstrap_backtest  # noqa: E402
+from analysis.spa_test import strategy_search_space_catalog  # noqa: E402
 from core import alpaca_client as ac  # noqa: E402
 from core import risk_manager as rm  # noqa: E402
 from core import order_executor as oe  # noqa: E402
 from core.config_loader import get_config  # noqa: E402
+from core.data_lockup import (  # noqa: E402
+    clamp_backtest_window,
+    filter_locked_bars,
+    oos_validation_window,
+    record_oos_validation,
+    validate_oos_unlock_token,
+)
 from core.protection_manager import ProtectionManager  # noqa: E402
 from core.exit_policy import (  # noqa: E402
     VALID_MOMENTUM_EXIT_POLICIES,
@@ -38,16 +48,19 @@ from core.exit_policy import (  # noqa: E402
     update_high_water_price,
 )
 import strategies.momentum as momentum_module  # noqa: E402
+import strategies.relative_strength as relative_strength_module  # noqa: E402
 import strategies.rsi_reversion as rsi_module  # noqa: E402
 import strategies.gap_up as gap_up_module  # noqa: E402
 import strategies.ma_crossover as ma_crossover_module  # noqa: E402
 import strategies.range_breakout as range_breakout_module  # noqa: E402
 from strategies.momentum import MomentumStrategy  # noqa: E402
+from strategies.relative_strength import RelativeStrengthStrategy  # noqa: E402
 from strategies.rsi_reversion import RSIReversionStrategy  # noqa: E402
 from strategies.gap_up import GapUpStrategy  # noqa: E402
 from strategies.ma_crossover import MACrossoverStrategy  # noqa: E402
 from strategies.range_breakout import RangeBreakoutStrategy  # noqa: E402
 from screener.universe_builder import UniverseBuilder  # noqa: E402
+from screener.pit_universe import PITUniverseBuilder  # noqa: E402
 
 # Extended pool of ~110 high-liquidity symbols covering major sectors
 EXTENDED_POOL = [
@@ -446,13 +459,15 @@ def _backtest_scan_universe(
     *,
     screener,
     screener_enabled: bool,
+    pit_universe: PITUniverseBuilder | None = None,
     current_date,
     market_open: bool,
 ) -> list | None:
     if strat.asset_class == "stocks":
         if not market_open:
             return None
-        return screener.get_universe(as_of_date=current_date) if screener_enabled else cfg["stocks"]["scan_universe"]
+        universe = screener.get_universe(as_of_date=current_date) if screener_enabled else cfg["stocks"]["scan_universe"]
+        return pit_universe.filter(universe, current_date) if pit_universe is not None else universe
     return cfg["crypto"]["scan_universe"]
 
 
@@ -467,6 +482,7 @@ def _backtest_protection_rows(trades_log: list[dict]) -> list[dict]:
             "symbol": trade.get("symbol", ""),
             "strategy": trade.get("strategy", "unknown"),
             "pnl_pct": trade.get("pnl_pct", ""),
+            "portfolio_pnl_pct": trade.get("portfolio_pnl_pct", ""),
             "timestamp": timestamp,
             "exit_reason": trade.get("exit_reason", ""),
         })
@@ -646,6 +662,73 @@ def _format_execution_notes(notes: list[str]) -> str:
     return "\n".join(lines) + "\n\n"
 
 
+def _bootstrap_config(cfg: dict) -> dict:
+    raw = cfg.get("validation", {}).get("bootstrap", {}) or {}
+    return {
+        "enabled": bool(raw.get("enabled", True)),
+        "n_iter": int(raw.get("n_iter", 10_000) or 10_000),
+        "block_size": int(raw.get("block_size", 5) or 5),
+        "seed": int(raw.get("seed", 42) or 42),
+        "drawdown_threshold": float(raw.get("drawdown_threshold_pct", 0.10) or 0.10),
+    }
+
+
+def _format_ci_metric(summary: dict, metric: str, *, pct: bool = True) -> str:
+    values = summary.get(metric)
+    if not values:
+        return "| n/a | n/a | n/a |"
+    if pct:
+        return f"| {values['median']:+.2%} | {values['p05']:+.2%} | {values['p95']:+.2%} |"
+    return f"| {values['median']:.2f} | {values['p05']:.2f} | {values['p95']:.2f} |"
+
+
+def _format_bootstrap_report(bootstrap: dict) -> str:
+    if not bootstrap:
+        return ""
+    iterations = bootstrap.get("iterations", 0)
+    lines = [f"### Bootstrap Confidence Intervals ({iterations:,} iterations)"]
+    sections = (
+        (
+            "Trade Resample",
+            "trade",
+            (
+                ("return_pct", "Return", True),
+                ("max_drawdown", "Max DD", True),
+                ("profit_factor", "Profit Factor", False),
+                ("win_rate", "Win Rate", True),
+                ("trade_sharpe", "Trade Sharpe", False),
+            ),
+        ),
+        (
+            "Daily Block Bootstrap",
+            "block",
+            (
+                ("return_pct", "Return", True),
+                ("max_drawdown", "Max DD", True),
+                ("daily_sharpe", "Daily Sharpe", False),
+            ),
+        ),
+    )
+    for label, key, metrics in sections:
+        summary = bootstrap.get(key) or {}
+        if not summary:
+            continue
+        lines.append(f"#### {label}")
+        lines.append("| Metric | Median | 5th pct | 95th pct |")
+        lines.append("|---|---:|---:|---:|")
+        for metric, display, pct in metrics:
+            lines.append(f"| {display} {_format_ci_metric(summary, metric, pct=pct)}")
+        if "prob_loss" in summary:
+            lines.append(f"| P(loss) | {summary['prob_loss']:.1%} |  |  |")
+        if "prob_drawdown_gt_threshold" in summary:
+            threshold = summary.get("drawdown_threshold", 0.10)
+            lines.append(
+                f"| P(DD > {threshold:.0%}) | {summary['prob_drawdown_gt_threshold']:.1%} |  |  |"
+            )
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n\n"
+
+
 class BacktestSimulator:
     def __init__(self, initial_fund=10000.0, cost_model: dict | None = None):
         self.portfolio_value = initial_fund
@@ -712,6 +795,22 @@ class BacktestSimulator:
                 "timestamp": pos["entry_date"].isoformat() if hasattr(pos["entry_date"], "isoformat") else str(pos["entry_date"]),
             })
         return trades
+
+    def get_closed_trades_for_backtest(self, strategy: str | None = None):
+        rows = []
+        for trade in self.trades_log:
+            if strategy is not None and trade.get("strategy") != strategy:
+                continue
+            rows.append({
+                "symbol": trade.get("symbol"),
+                "strategy": trade.get("strategy", "unknown"),
+                "asset_class": "crypto" if "/" in str(trade.get("symbol", "")) else "stock",
+                "side": "sell",
+                "status": "closed",
+                "timestamp": trade.get("exit_date").isoformat() if hasattr(trade.get("exit_date"), "isoformat") else str(trade.get("exit_date", "")),
+                "pnl_pct": trade.get("pnl_pct", 0.0),
+            })
+        return rows
 
     def get_trade_age_days(self, symbol):
         """Return trade age in days. Stocks use business days; crypto uses calendar days.
@@ -782,6 +881,7 @@ class BacktestSimulator:
         strategy = getattr(req, "strategy", "unknown")
 
         if side == "buy":
+            entry_portfolio_value = self.get_portfolio_value()
             notional = qty * price
             fee = self._fee_for_notional(notional)
             cost = notional + fee
@@ -791,9 +891,17 @@ class BacktestSimulator:
                 old_pos = self.positions[symbol]
                 total_qty = old_pos["qty"] + qty
                 avg_price = (old_pos["qty"] * old_pos["entry_price"] + notional) / total_qty
+                old_basis = old_pos["qty"] * old_pos["entry_price"] + old_pos.get("entry_fee", 0.0)
+                new_basis = notional + fee
+                total_basis = old_basis + new_basis
+                old_entry_value = old_pos.get("entry_portfolio_value", entry_portfolio_value)
                 self.positions[symbol]["qty"] = total_qty
                 self.positions[symbol]["entry_price"] = avg_price
                 self.positions[symbol]["entry_fee"] = old_pos.get("entry_fee", 0.0) + fee
+                if total_basis > 0:
+                    self.positions[symbol]["entry_portfolio_value"] = (
+                        (old_entry_value * old_basis) + (entry_portfolio_value * new_basis)
+                    ) / total_basis
                 self.positions[symbol]["high_water_price"] = max(
                     old_pos.get("high_water_price", old_pos["entry_price"]),
                     price,
@@ -807,6 +915,7 @@ class BacktestSimulator:
                     "asset_class": "stock" if "/" not in symbol else "crypto", 
                     "strategy": strategy,
                     "entry_fee": fee,
+                    "entry_portfolio_value": entry_portfolio_value,
                 }
         else:
             if symbol not in self.positions: return MagicMock(id="failed")
@@ -820,10 +929,13 @@ class BacktestSimulator:
             pnl = (price - pos["entry_price"]) * sell_qty - entry_fee_share - fee
             cost_basis = (pos["entry_price"] * sell_qty) + entry_fee_share
             pnl_pct = pnl / cost_basis if cost_basis > 0 else 0.0
+            entry_portfolio_value = float(pos.get("entry_portfolio_value") or 0.0)
+            portfolio_pnl_pct = pnl / entry_portfolio_value if entry_portfolio_value > 0 else 0.0
             self.trades_log.append({
                 "symbol": symbol, "entry_date": pos["entry_date"], "exit_date": self.current_date,
                 "entry_price": pos["entry_price"], "exit_price": price, "qty": sell_qty,
-                "pnl": pnl, "pnl_pct": pnl_pct, "strategy": pos.get("strategy", "unknown")
+                "pnl": pnl, "pnl_pct": pnl_pct, "portfolio_pnl_pct": portfolio_pnl_pct,
+                "strategy": pos.get("strategy", "unknown")
             })
             if sell_qty >= pos["qty"]: del self.positions[symbol]
             else:
@@ -840,7 +952,7 @@ class BacktestSimulator:
 
 # ── Data Fetching ─────────────────────────────────────────────────────────────
 
-def fetch_all_data(symbols, start_date, end_date):
+def fetch_all_data(symbols, start_date, end_date, *, allow_oos=False, oos_unlock_token=None):
     log.info(f"Fetching historical data for {len(symbols)} symbols...")
     data = {}
     from alpaca.data.enums import Adjustment
@@ -850,6 +962,10 @@ def fetch_all_data(symbols, start_date, end_date):
     # Separate stock vs crypto symbols
     stock_symbols = [s for s in symbols if "/" not in s]
     crypto_symbols = [s for s in symbols if "/" in s]
+    if oos_unlock_token:
+        if not validate_oos_unlock_token(oos_unlock_token, consume=True):
+            raise ValueError("Invalid or already-used OOS unlock token.")
+        allow_oos = True
 
     # Batch-fetch stocks in groups of 50 (much faster than 1-at-a-time)
     BATCH = 50
@@ -860,7 +976,10 @@ def fetch_all_data(symbols, start_date, end_date):
             bars = ac.get_stock_data_client().get_stock_bars(req)
             for s in batch:
                 if s in bars.data:
-                    data[s] = bars.df.loc[s]
+                    data[s] = filter_locked_bars(
+                        bars.df.loc[s],
+                        allow_oos=allow_oos,
+                    )
         except Exception as e:
             log.error(f"Batch stock fetch failed ({i}-{i+BATCH}): {e}")
             # Fallback: fetch individually
@@ -868,7 +987,11 @@ def fetch_all_data(symbols, start_date, end_date):
                 try:
                     req = StockBarsRequest(symbol_or_symbols=[s], timeframe=TimeFrame.Day, start=start_date, end=end_date, adjustment=Adjustment.ALL)
                     bars = ac.get_stock_data_client().get_stock_bars(req)
-                    if s in bars.data: data[s] = bars.df.loc[s]
+                    if s in bars.data:
+                        data[s] = filter_locked_bars(
+                            bars.df.loc[s],
+                            allow_oos=allow_oos,
+                        )
                 except Exception as e2: log.error(f"Failed to fetch {s}: {e2}")
         log.info(f"  Fetched stocks batch {i+1}-{min(i+BATCH, len(stock_symbols))} of {len(stock_symbols)}")
 
@@ -877,16 +1000,31 @@ def fetch_all_data(symbols, start_date, end_date):
         try:
             req = CryptoBarsRequest(symbol_or_symbols=[s], timeframe=TimeFrame.Day, start=start_date, end=end_date)
             bars = ac.get_crypto_data_client().get_crypto_bars(req)
-            if s in bars.data: data[s] = bars.df.loc[s]
+            if s in bars.data:
+                data[s] = filter_locked_bars(
+                    bars.df.loc[s],
+                    allow_oos=allow_oos,
+                )
         except Exception as e: log.error(f"Failed to fetch {s}: {e}")
 
     log.info(f"Fetched data for {len(data)} of {len(symbols)} symbols")
     return data
 
+
+def _consume_oos_unlock_token_once(oos_unlock_token: str | None) -> bool:
+    """Consume an explicit OOS unlock token once before any data access."""
+    if not oos_unlock_token:
+        return False
+    if validate_oos_unlock_token(oos_unlock_token, consume=True):
+        return True
+    raise ValueError("Invalid or already-used OOS unlock token.")
+
+
 # ── Main Backtest Loop ────────────────────────────────────────────────────────
 
 STRATEGY_MODULES = {
     "momentum": momentum_module,
+    "relative_strength": relative_strength_module,
     "rsi_reversion": rsi_module,
     "gap_up": gap_up_module,
     "ma_crossover": ma_crossover_module,
@@ -938,6 +1076,7 @@ def _apply_runtime_strategy_config(cfg: dict) -> None:
 
 def _patch_runtime_risk_config(stack: contextlib.ExitStack, cfg: dict) -> None:
     """Apply backtest-only trading config overrides to risk manager globals."""
+    stack.enter_context(patch("core.risk_manager.CFG", cfg))
     stack.enter_context(patch("core.risk_manager.T", cfg["trading"]))
     stack.enter_context(patch(
         "core.risk_manager.INTRADAY_ENABLED",
@@ -972,8 +1111,12 @@ def run_backtest(
     enabled_strategies=None,
     config_overrides=None,
     cost_model=None,
+    oos_validation=False,
+    oos_unlock_token=None,
+    legacy_pool=False,
     return_result=False,
     write_quarterly_csv=True,
+    quarterly_output_dir=None,
 ):
     cfg = get_config()
 
@@ -1010,31 +1153,81 @@ def run_backtest(
     screener_enabled = cfg.get("screener", {}).get("enabled", False) if use_screener is None else bool(use_screener)
     screener_enabled = screener_enabled and stock_strategy_enabled
 
-    # Build extended symbol pool (legacy + extended, deduped)
-    # When the screener is disabled, backtest the fixed configured universe only.
+    # Build stock symbol pool. Screener backtests default to a point-in-time
+    # membership ledger; the old hand-picked extended pool is retained only for
+    # explicit A/B comparison via --legacy-pool.
     all_stock_symbols = []
+    pit_universe = None
+    universe_source = "none"
     if stock_strategy_enabled:
-        all_stock_symbols = list(dict.fromkeys(
-            cfg["stocks"]["scan_universe"] + (EXTENDED_POOL if screener_enabled else [])
-        ))
+        if screener_enabled and legacy_pool:
+            warnings.warn(
+                "EXTENDED_POOL is forward-biased and deprecated; use only for explicit bias audits.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            all_stock_symbols = list(dict.fromkeys(cfg["stocks"]["scan_universe"] + EXTENDED_POOL))
+            universe_source = "legacy_extended_pool"
+        elif screener_enabled:
+            pit_universe = PITUniverseBuilder()
+            universe_start = (datetime.now(timezone.utc) - timedelta(days=365 + 420))
+            universe_end = datetime.now(timezone.utc)
+            if end_date:
+                try:
+                    universe_end = datetime.strptime(end_date, "%m/%d/%Y").replace(tzinfo=timezone.utc)
+                    universe_start = universe_end - timedelta(days=days + 420)
+                except ValueError:
+                    pass
+            all_stock_symbols = pit_universe.members_between(universe_start, universe_end)
+            universe_source = "point_in_time"
+        else:
+            all_stock_symbols = list(cfg["stocks"]["scan_universe"])
+            universe_source = "configured_static"
     crypto_symbols = cfg["crypto"]["scan_universe"] if crypto_strategy_enabled else []
     symbols = all_stock_symbols + crypto_symbols
     
-    if end_date:
+    oos_lockup_note = None
+    oos_unlock_allowed = _consume_oos_unlock_token_once(oos_unlock_token)
+    if oos_validation:
+        oos_start_dt, end_dt, oos_days = oos_validation_window()
+        days = oos_days
+        sim_start_date = oos_start_dt
+    elif end_date:
         # Expected format: MM/DD/YYYY (e.g. 12/31/2025)
         try:
             end_dt = datetime.strptime(end_date, "%m/%d/%Y").replace(tzinfo=timezone.utc)
         except ValueError:
             log.error(f"Invalid date format: {end_date}. Use MM/DD/YYYY")
             return "Invalid date format."
+        sim_start_date = end_dt - timedelta(days=days)
     else:
         end_dt = datetime.now(timezone.utc) - timedelta(days=2)
-        
+        sim_start_date = end_dt - timedelta(days=days)
+
+    if not oos_validation:
+        original_end_dt = end_dt
+        start_for_lock = end_dt - timedelta(days=days)
+        _, end_dt, oos_lockup_note = clamp_backtest_window(
+            start_dt=start_for_lock,
+            end_dt=end_dt,
+            allow_oos=oos_unlock_allowed,
+        )
+        if end_dt != original_end_dt:
+            sim_start_date = end_dt - timedelta(days=days)
+
     # 420 calendar days gives the RSI regime filters enough trading days for
     # SPY's 252-day crash peak and 220-day realised-volatility window.
-    start_dt = end_dt - timedelta(days=days + 420)
-    
-    historical_data = fetch_all_data(symbols, start_dt, end_dt)
+    start_dt = sim_start_date - timedelta(days=420)
+    if pit_universe is not None:
+        all_stock_symbols = pit_universe.members_between(start_dt, end_dt)
+        symbols = all_stock_symbols + crypto_symbols
+
+    historical_data = fetch_all_data(
+        symbols,
+        start_dt,
+        end_dt,
+        allow_oos=bool(oos_validation or oos_unlock_allowed),
+    )
     symbols_with_history = sorted(historical_data.keys())
     missing_history_symbols = sorted(set(symbols) - set(symbols_with_history))
     data_coverage = {
@@ -1046,6 +1239,10 @@ def run_backtest(
         "missing_history_count": len(missing_history_symbols),
         "start_date": start_dt.date().isoformat(),
         "end_date": end_dt.date().isoformat(),
+        "simulation_start_date": sim_start_date.date().isoformat(),
+        "oos_validation": bool(oos_validation),
+        "oos_lockup_note": oos_lockup_note,
+        "universe_source": universe_source,
     }
     sim = BacktestSimulator(initial_fund, cost_model=cost_model)
     sim.historical_data = historical_data
@@ -1056,7 +1253,6 @@ def run_backtest(
         screener = UniverseBuilder(cfg)
         screener.preload_historical_bars(historical_data)
     
-    sim_start_date = end_dt - timedelta(days=days)
     curr = sim_start_date
     all_dates = []
     while curr <= end_dt:
@@ -1066,6 +1262,7 @@ def run_backtest(
     strategies = [
         strat for strat in [
             MomentumStrategy(),
+            RelativeStrengthStrategy(),
             RSIReversionStrategy(),
             GapUpStrategy(),
             MACrossoverStrategy(),
@@ -1108,9 +1305,12 @@ def run_backtest(
         mock_trading_client = stack.enter_context(patch("core.alpaca_client.get_trading_client"))
         stack.enter_context(patch("core.alpaca_client.is_market_open", side_effect=lambda: _stock_market_open_for_sim(sim)))
         stack.enter_context(patch("tracking.trade_log.get_open_trades", side_effect=lambda: sim.get_open_trades_for_backtest()))
+        stack.enter_context(patch("tracking.trade_log.get_closed_trades", side_effect=lambda strategy=None: sim.get_closed_trades_for_backtest(strategy)))
         stack.enter_context(patch("tracking.trade_log.get_trade_age_days", side_effect=lambda s: sim.get_trade_age_days(s)))
         stack.enter_context(patch("tracking.trade_log.log_trade"))
         stack.enter_context(patch("tracking.trade_log.mark_trade_closed"))
+        stack.enter_context(patch("core.order_executor.CFG", cfg))
+        stack.enter_context(patch("core.order_executor.get_closed_trades", side_effect=lambda strategy=None: sim.get_closed_trades_for_backtest(strategy)))
         stack.enter_context(patch("core.order_executor.log_trade", lambda *a, **kw: None))
         stack.enter_context(patch("core.order_executor.mark_trade_closed", lambda *a, **kw: None))
         stack.enter_context(patch("core.order_executor.MODE", "backtest"))
@@ -1136,6 +1336,7 @@ def run_backtest(
                     cfg,
                     screener=screener,
                     screener_enabled=screener_enabled,
+                    pit_universe=pit_universe,
                     current_date=dt,
                     market_open=market_open,
                 )
@@ -1145,7 +1346,7 @@ def run_backtest(
                     _gap_up_backtest_scan_time(dt)
                     if strat.name == "gap_up"
                     else _momentum_backtest_scan_time(dt)
-                    if strat.name == "momentum"
+                    if strat.name in {"momentum", "relative_strength"}
                     else dt
                 )
                 scan_kwargs = {
@@ -1153,7 +1354,7 @@ def run_backtest(
                     "regime_bars": regime_bars,
                     "allow_regime_warmup": True,
                 }
-                if strat.name == "momentum":
+                if strat.name in {"momentum", "relative_strength"}:
                     scan_kwargs["existing_symbols"] = [
                         symbol for symbol, pos in sim.positions.items()
                         if pos.get("asset_class", "stock") == "stock"
@@ -1238,6 +1439,18 @@ def run_backtest(
         daily_sharpe = _compute_daily_sharpe(df_curve)
         return_pct = (final_val / initial_fund) - 1
         execution_notes = _backtest_execution_notes(cfg, sim)
+        bootstrap_cfg = _bootstrap_config(cfg)
+        bootstrap_summary = {}
+        if bootstrap_cfg["enabled"]:
+            bootstrap_summary = bootstrap_backtest(
+                df,
+                df_curve,
+                initial_fund=initial_fund,
+                n_iter=bootstrap_cfg["n_iter"],
+                block_size=bootstrap_cfg["block_size"],
+                seed=bootstrap_cfg["seed"],
+                drawdown_threshold=bootstrap_cfg["drawdown_threshold"],
+            )
 
         report = f"### Backtest Results ({days} Days)\n"
         report += f"- **Final Value**: ${final_val:,.2f} ({ (final_val/initial_fund-1):+.2%})\n"
@@ -1248,6 +1461,14 @@ def run_backtest(
         report += f"- **Daily Sharpe**: {daily_sharpe:.2f}\n"
         report += f"- **Momentum Exit Policy**: {cfg['strategies']['momentum']['exit_policy']}\n"
         report += f"- **Screener**: {'enabled' if screener_enabled else 'disabled'}\n\n"
+        report += f"- **Universe Source**: {universe_source}\n\n"
+        if oos_validation:
+            report += (
+                f"- **OOS validation**: {sim_start_date.date().isoformat()} "
+                f"through {end_dt.date().isoformat()}\n\n"
+            )
+        elif oos_lockup_note:
+            report += f"- **OOS Lockup**: {oos_lockup_note}\n\n"
         report += f"- **Enabled Strategies**: {', '.join(_enabled_strategy_names(cfg))}\n\n"
         report += _format_execution_notes(execution_notes)
         if any(sim.cost_model.values()):
@@ -1257,6 +1478,7 @@ def run_backtest(
                 f"min_fee=${sim.cost_model['min_fee_usd']:.2f}\n\n"
             )
         report += summary.to_markdown() + "\n\n"
+        report += _format_bootstrap_report(bootstrap_summary)
         if graph_file: report += f"![Equity Curve]({graph_file})\n\n"
 
         # --- Quarterly Performance Breakdown ---
@@ -1270,13 +1492,17 @@ def run_backtest(
             report += "\n"
             if write_quarterly_csv:
                 ts = datetime.now().strftime("%Y%m%d_%H%M")
-                q_csv_path = BASE_DIR / "data" / f"quarterly_{ts}.csv"
-                q_csv_path.parent.mkdir(parents=True, exist_ok=True)
+                q_csv_path = _quarterly_csv_path(ts, quarterly_output_dir)
                 pd.DataFrame(quarterly_data).to_csv(q_csv_path, index=False)
                 log.info(f"Quarterly report saved to {q_csv_path}")
 
         if output_file:
             with open(output_file, "a") as f: f.write(report)
+        if oos_validation and not return_result:
+            record_oos_validation(
+                outcome="completed" if len(df) else "completed_no_trades",
+                report_path=output_file,
+            )
         result = {
             "report": report,
             "stats": {
@@ -1289,7 +1515,11 @@ def run_backtest(
                 "max_drawdown": max_drawdown,
                 "profit_factor": profit_factor,
                 "daily_sharpe": daily_sharpe,
+                "bootstrap": bootstrap_summary,
                 "screener_enabled": screener_enabled,
+                "universe_source": universe_source,
+                "oos_validation": bool(oos_validation),
+                "oos_lockup_note": oos_lockup_note,
                 "enabled_strategies": _enabled_strategy_names(cfg),
                 "cost_model": dict(sim.cost_model),
                 "execution_notes": execution_notes,
@@ -1297,14 +1527,28 @@ def run_backtest(
             "quarterly": quarterly_data,
             "per_strategy": per_strategy,
             "data_coverage": data_coverage,
+            "daily_returns": _daily_returns_payload(df_curve),
         }
         return result if return_result else report
 
     final_val = sim.get_portfolio_value()
     execution_notes = _backtest_execution_notes(cfg, sim)
+    bootstrap_summary = {}
     report = "No trades executed."
     if execution_notes:
         report += "\n\n" + _format_execution_notes(execution_notes).rstrip()
+    if oos_validation:
+        report += (
+            f"\n\nOOS validation: {sim_start_date.date().isoformat()} "
+            f"through {end_dt.date().isoformat()}"
+        )
+    elif oos_lockup_note:
+        report += f"\n\nOOS Lockup: {oos_lockup_note}"
+    if output_file:
+        with open(output_file, "a") as f:
+            f.write(report)
+    if oos_validation and not return_result:
+        record_oos_validation(outcome="completed_no_trades", report_path=output_file)
     result = {
         "report": report,
         "stats": {
@@ -1317,7 +1561,11 @@ def run_backtest(
             "max_drawdown": _compute_max_drawdown(df_curve),
             "profit_factor": 0.0,
             "daily_sharpe": _compute_daily_sharpe(df_curve),
+            "bootstrap": bootstrap_summary,
             "screener_enabled": screener_enabled,
+            "universe_source": universe_source,
+            "oos_validation": bool(oos_validation),
+            "oos_lockup_note": oos_lockup_note,
             "enabled_strategies": _enabled_strategy_names(cfg),
             "cost_model": dict(sim.cost_model),
             "execution_notes": execution_notes,
@@ -1325,8 +1573,17 @@ def run_backtest(
         "quarterly": [],
         "per_strategy": {},
         "data_coverage": data_coverage,
+        "daily_returns": _daily_returns_payload(df_curve),
     }
     return result if return_result else result["report"]
+
+
+def _quarterly_csv_path(timestamp: str, output_dir=None) -> Path:
+    output_base = BASE_DIR / "data" if output_dir is None else Path(output_dir)
+    if not output_base.is_absolute():
+        output_base = BASE_DIR / output_base
+    output_base.mkdir(parents=True, exist_ok=True)
+    return output_base / f"quarterly_{timestamp}.csv"
 
 
 def _compute_quarterly_performance(sim, df_curve):
@@ -1384,6 +1641,80 @@ def _compute_quarterly_performance(sim, df_curve):
 
     return quarters
 
+
+def _daily_returns_payload(df_curve: pd.DataFrame) -> list[dict]:
+    if df_curve.empty or "value" not in df_curve:
+        return []
+    frame = df_curve[["date", "value"]].copy()
+    frame["return_pct"] = frame["value"].astype(float).pct_change()
+    frame = frame.dropna(subset=["return_pct"])
+    return [
+        {
+            "date": row["date"].date().isoformat() if hasattr(row["date"], "date") else str(row["date"])[:10],
+            "return_pct": float(row["return_pct"]),
+        }
+        for _, row in frame.iterrows()
+    ]
+
+
+def _variant_label(strategy: str, overrides: dict) -> str:
+    parts = []
+    prefix = f"strategies.{strategy}."
+    for key, value in sorted(overrides.items()):
+        label = key.replace(prefix, "").replace(".", "_")
+        parts.append(f"{label}-{value}")
+    return f"{strategy}__" + "__".join(parts)
+
+
+def run_strategy_grid(
+    *,
+    strategy: str,
+    output_csv: str | Path,
+    days: int = 365,
+    initial_fund: float = 10000.0,
+    end_date: str | None = None,
+    use_screener: bool | None = None,
+    cost_model: dict | None = None,
+    max_variants: int | None = None,
+) -> Path:
+    catalog = strategy_search_space_catalog()
+    if strategy not in catalog:
+        raise ValueError(f"Unknown strategy grid: {strategy}")
+    variants = catalog[strategy]
+    if max_variants is not None:
+        variants = variants[: int(max_variants)]
+
+    matrix: pd.DataFrame | None = None
+    for overrides in variants:
+        label = _variant_label(strategy, overrides)
+        result = run_backtest(
+            days=days,
+            initial_fund=initial_fund,
+            end_date=end_date,
+            use_screener=use_screener,
+            enabled_strategies=[strategy],
+            config_overrides=[f"{key}={value}" for key, value in overrides.items()],
+            cost_model=cost_model,
+            return_result=True,
+            write_quarterly_csv=False,
+        )
+        series = pd.Series(
+            {item["date"]: item["return_pct"] for item in result.get("daily_returns", [])},
+            name=label,
+            dtype="float64",
+        )
+        matrix = series.to_frame() if matrix is None else matrix.join(series, how="outer")
+
+    output_path = Path(output_csv)
+    if not output_path.is_absolute():
+        output_path = BASE_DIR / output_path
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if matrix is None:
+        matrix = pd.DataFrame()
+    matrix.index.name = "date"
+    matrix.sort_index().fillna(0.0).to_csv(output_path)
+    return output_path
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--days", type=int, default=365)
@@ -1401,6 +1732,11 @@ if __name__ == "__main__":
     screener_group.add_argument("--no-screener", dest="use_screener", action="store_false", help="Force fixed stock universe only")
     parser.set_defaults(use_screener=None)
     parser.add_argument(
+        "--legacy-pool",
+        action="store_true",
+        help="Use the deprecated forward-biased EXTENDED_POOL for explicit A/B bias audits.",
+    )
+    parser.add_argument(
         "--strategies",
         type=str,
         help="Comma-separated strategy allowlist for experiments, e.g. momentum,rsi_reversion,ma_crossover",
@@ -1414,10 +1750,53 @@ if __name__ == "__main__":
     parser.add_argument("--slippage-bps", type=float, default=0.0, help="Backtest execution slippage in basis points per side")
     parser.add_argument("--fee-bps", type=float, default=0.0, help="Backtest fee/commission in basis points per side")
     parser.add_argument("--min-fee", type=float, default=0.0, help="Minimum fee per simulated order")
+    parser.add_argument("--grid", type=str, help="Run the configured parameter grid for one strategy and emit daily returns CSV")
+    parser.add_argument("--grid-output", type=str, help="Output CSV path for --grid")
+    parser.add_argument("--grid-max-variants", type=int, help="Limit grid variants for smoke tests")
+    parser.add_argument(
+        "--no-quarterly-output",
+        dest="write_quarterly_csv",
+        action="store_false",
+        help="Suppress timestamped data/quarterly_*.csv output for CI/release validation runs.",
+    )
+    parser.add_argument(
+        "--quarterly-output-dir",
+        type=str,
+        help="Directory for quarterly CSV output; defaults to data/.",
+    )
+    parser.set_defaults(write_quarterly_csv=True)
+    parser.add_argument(
+        "--oos-validation",
+        action="store_true",
+        help="Run the current locked OOS window and mark it validated after the report is written.",
+    )
+    parser.add_argument(
+        "--oos-unlock-token",
+        type=str,
+        help="Explicit OOS unlock token for one-off audited access.",
+    )
     args = parser.parse_args()
     enabled_strategies = None
     if args.strategies:
         enabled_strategies = [name.strip() for name in args.strategies.split(",") if name.strip()]
+    if args.grid:
+        output = args.grid_output or str(BASE_DIR / "reports" / "spa" / f"{args.grid}_returns.csv")
+        path = run_strategy_grid(
+            strategy=args.grid,
+            output_csv=output,
+            days=args.days,
+            initial_fund=args.fund,
+            end_date=args.end_date,
+            use_screener=args.use_screener,
+            cost_model={
+                "slippage_bps": args.slippage_bps,
+                "fee_bps": args.fee_bps,
+                "min_fee_usd": args.min_fee,
+            },
+            max_variants=args.grid_max_variants,
+        )
+        print(f"Grid returns written to {path}")
+        raise SystemExit(0)
     print(run_backtest(
         days=args.days,
         initial_fund=args.fund,
@@ -1433,4 +1812,9 @@ if __name__ == "__main__":
             "fee_bps": args.fee_bps,
             "min_fee_usd": args.min_fee,
         },
+        oos_validation=args.oos_validation,
+        oos_unlock_token=args.oos_unlock_token,
+        legacy_pool=args.legacy_pool,
+        write_quarterly_csv=args.write_quarterly_csv,
+        quarterly_output_dir=args.quarterly_output_dir,
     ))

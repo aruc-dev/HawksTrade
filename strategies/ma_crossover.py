@@ -120,7 +120,7 @@ class MACrossoverStrategy(BaseStrategy):
             bars_data=regime_bars,
             allow_warmup=bool(kwargs.get("allow_regime_warmup", False)),
         ):
-            log.info("[MACross] Crypto bear regime (BTC < EMA20), skipping scan.")
+            log.info("[MACross] Crypto regime filter blocked entries, skipping scan.")
             return []
 
         try:

@@ -25,6 +25,11 @@ class FakeMarker:
 
 
 class RunScanTests(unittest.TestCase):
+    def setUp(self):
+        closed_trades_patch = patch.object(run_scan, "get_closed_trades", return_value=[])
+        closed_trades_patch.start()
+        self.addCleanup(closed_trades_patch.stop)
+
     def _api_error(self, status_code, message):
         error = json.dumps({"code": status_code, "message": message})
         http_error = SimpleNamespace(
@@ -163,6 +168,38 @@ class RunScanTests(unittest.TestCase):
 
         self.assertEqual(seen_regime_bars, [None])
 
+    def test_crypto_prefetch_limit_uses_dynamic_required_bars(self):
+        seen_regime_bars = []
+
+        class FakeCrypto:
+            name = "ma_crossover"
+            asset_class = "crypto"
+
+            def scan(self, universe, **kwargs):
+                seen_regime_bars.append(kwargs.get("regime_bars"))
+                return []
+
+        def get_crypto_bars(symbols, timeframe="1Day", limit=60):
+            self.assertEqual(symbols, ["BTC/USD"])
+            self.assertEqual(timeframe, "1Day")
+            self.assertEqual(limit, 75)
+            return {"BTC/USD": [object()] * 75}
+
+        with (
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(run_scan.ac, "get_crypto_bars", side_effect=get_crypto_bars),
+            patch.object(run_scan.rm, "crypto_regime_required_bars", return_value=75),
+            patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "CRYPTO_STRATEGIES", [FakeCrypto()]),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+        ):
+            run_scan.run(run_stocks=False, run_crypto=True, dry_run=True)
+
+        self.assertEqual(len(seen_regime_bars), 1)
+        self.assertEqual(len(seen_regime_bars[0]["BTC/USD"]), 75)
+
     def test_momentum_receives_planned_stock_symbols_for_sector_filter(self):
         seen_existing_symbols = []
 
@@ -186,6 +223,37 @@ class RunScanTests(unittest.TestCase):
             patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
             patch.object(run_scan, "get_stock_universe", return_value=["NVDA", "JPM"]),
             patch.object(run_scan, "STOCK_STRATEGIES", [FakeMomentum()]),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "safe_reconcile", return_value={}),
+            patch.object(run_scan, "print_snapshot"),
+        ):
+            run_scan.run(run_stocks=True, run_crypto=False, dry_run=False)
+
+        self.assertEqual(seen_existing_symbols, [{"AAPL", "MSFT"}])
+
+    def test_relative_strength_receives_planned_stock_symbols_for_sector_filter(self):
+        seen_existing_symbols = []
+
+        class FakeRelativeStrength:
+            name = "relative_strength"
+            asset_class = "stocks"
+
+            def scan(self, universe, **kwargs):
+                seen_existing_symbols.append(set(kwargs.get("existing_symbols", [])))
+                return []
+
+        with (
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(
+                run_scan.ac,
+                "get_stock_bars",
+                return_value={"SPY": [object()] * 252, "QQQ": [object()] * 51},
+            ),
+            patch.object(run_scan, "get_open_symbols", side_effect=[["AAPL", "BTC/USD"], ["AAPL", "BTC/USD"]]),
+            patch.object(run_scan, "_pending_entry_symbols", return_value={"MSFT": "stock", "ETHUSD": "crypto"}),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "get_stock_universe", return_value=["NVDA", "JPM"]),
+            patch.object(run_scan, "STOCK_STRATEGIES", [FakeRelativeStrength()]),
             patch.object(run_scan, "get_open_trades", return_value=[]),
             patch.object(run_scan, "safe_reconcile", return_value={}),
             patch.object(run_scan, "print_snapshot"),
@@ -650,7 +718,72 @@ class RunScanTests(unittest.TestCase):
             dry_run=True,
             suggested_qty=7.5,
             atr_stop_price=95.25,
+            closed_trades_count=0,
         )
+
+    def test_entry_pipeline_passes_precomputed_closed_trade_count(self):
+        class FakeMomentum:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def scan(self, universe, **kwargs):
+                return [{"symbol": "AAPL", "action": "buy"}]
+
+        with (
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(
+                run_scan.ac,
+                "get_stock_bars",
+                return_value={"SPY": [object()] * 252, "QQQ": [object()] * 51},
+            ),
+            patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "get_stock_universe", return_value=["AAPL"]),
+            patch.object(run_scan, "STOCK_STRATEGIES", [FakeMomentum()]),
+            patch.object(
+                run_scan,
+                "get_closed_trades",
+                return_value=[
+                    {"strategy": "momentum"},
+                    {"strategy": "momentum"},
+                    {"strategy": "rsi_reversion"},
+                ],
+            ),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+            patch.object(run_scan.oe, "enter_position", return_value={"symbol": "AAPL", "status": "dry_run"}) as enter_position,
+        ):
+            run_scan.run(run_stocks=True, run_crypto=False, dry_run=True)
+
+        self.assertEqual(enter_position.call_args.kwargs["closed_trades_count"], 2)
+
+    def test_entry_pipeline_preserves_executor_fallback_when_closed_trade_precompute_fails(self):
+        class FakeMomentum:
+            name = "momentum"
+            asset_class = "stocks"
+
+            def scan(self, universe, **kwargs):
+                return [{"symbol": "AAPL", "action": "buy"}]
+
+        with (
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(
+                run_scan.ac,
+                "get_stock_bars",
+                return_value={"SPY": [object()] * 252, "QQQ": [object()] * 51},
+            ),
+            patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "get_stock_universe", return_value=["AAPL"]),
+            patch.object(run_scan, "STOCK_STRATEGIES", [FakeMomentum()]),
+            patch.object(run_scan, "get_closed_trades", side_effect=RuntimeError("csv unavailable")),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+            patch.object(run_scan.oe, "enter_position", return_value={"symbol": "AAPL", "status": "dry_run"}) as enter_position,
+        ):
+            run_scan.run(run_stocks=True, run_crypto=False, dry_run=True)
+
+        self.assertIsNone(enter_position.call_args.kwargs["closed_trades_count"])
 
     def test_run_respects_max_positions_with_planned_entries(self):
         class FakeMomentum:
@@ -706,7 +839,11 @@ class RunScanTests(unittest.TestCase):
         with (
             patch.object(run_scan.ProtectionManager, "from_config", return_value=AllowProtectionManager()),
             patch.object(run_scan.ac, "is_market_open", return_value=True),
-            patch.object(run_scan.ac, "get_crypto_bars", return_value={"BTC/USD": [object()] * 21}),
+            patch.object(
+                run_scan.ac,
+                "get_crypto_bars",
+                return_value={"BTC/USD": [object()] * run_scan.rm.crypto_regime_required_bars()},
+            ),
             patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
             patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
             patch.object(run_scan, "CRYPTO_STRATEGIES", [FakeCryptoStrategy()]),
@@ -728,10 +865,47 @@ class RunScanTests(unittest.TestCase):
             dry_run=True,
             suggested_qty=None,
             atr_stop_price=None,
+            closed_trades_count=0,
         )
         self.assertEqual(correlation.call_count, 2)
         self.assertEqual(correlation.call_args_list[0].args[1], [])
         self.assertEqual(correlation.call_args_list[1].args[1], ["SOLUSD"])
+
+    def test_crypto_entry_preserves_executor_fallback_when_closed_trade_precompute_fails(self):
+        class FakeCryptoStrategy:
+            name = "ma_crossover"
+            asset_class = "crypto"
+
+            def scan(self, universe, **kwargs):
+                return [{"symbol": "SOL/USD", "action": "buy"}]
+
+        with (
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(
+                run_scan.ac,
+                "get_crypto_bars",
+                return_value={"BTC/USD": [object()] * run_scan.rm.crypto_regime_required_bars()},
+            ),
+            patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "CRYPTO_STRATEGIES", [FakeCryptoStrategy()]),
+            patch.object(run_scan, "get_closed_trades", side_effect=RuntimeError("csv unavailable")),
+            patch.object(run_scan, "get_open_trades", return_value=[]),
+            patch.object(run_scan, "print_snapshot"),
+            patch.object(
+                run_scan,
+                "evaluate_crypto_correlation",
+                return_value=SimpleNamespace(allowed=True),
+            ),
+            patch.object(
+                run_scan.oe,
+                "enter_position",
+                return_value={"symbol": "SOL/USD", "status": "dry_run"},
+            ) as enter_position,
+        ):
+            run_scan.run(run_stocks=False, run_crypto=True, dry_run=True)
+
+        self.assertIsNone(enter_position.call_args.kwargs["closed_trades_count"])
 
     def test_pending_entry_lookup_failure_marks_scan_unhealthy_and_blocks_entries(self):
         marker = FakeMarker()
@@ -870,7 +1044,11 @@ class RunScanTests(unittest.TestCase):
         with (
             patch.dict(run_scan.CFG["trading"], {"max_positions": 10, "max_crypto_positions": 1, "min_crypto_positions": 0}),
             patch.object(run_scan.ac, "is_market_open", return_value=True),
-            patch.object(run_scan.ac, "get_crypto_bars", return_value={"BTC/USD": [object()] * 21}),
+            patch.object(
+                run_scan.ac,
+                "get_crypto_bars",
+                return_value={"BTC/USD": [object()] * run_scan.rm.crypto_regime_required_bars()},
+            ),
             patch.object(run_scan, "get_open_symbols", side_effect=[[], []]),
             patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
             patch.object(run_scan, "CRYPTO_STRATEGIES", [FakeCrypto()]),

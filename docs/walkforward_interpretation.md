@@ -26,6 +26,10 @@ base.
   stressed cost is the binding capital-scaling level. Baseline and severe remain
   diagnostic unless they are explicitly added to `blocking_levels`.
 - Per-window detail shows whether failures are regime-specific or broad.
+- Point-estimate columns explain what happened in the historical path. Gate
+  columns show the conservative bootstrap-bound metrics used for pass/fail
+  decisions. A window can show positive point returns and fail because the lower
+  confidence bound is negative.
 - Per-strategy attribution shows which sleeve contributed to the window result.
 - Data caveats matter. Missing historical symbols shrink the tested universe and
   should be treated as a bias note, especially in older windows.

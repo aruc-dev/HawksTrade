@@ -5,6 +5,7 @@ from unittest.mock import patch
 from strategies.momentum import (
     MomentumStrategy,
     _calc_atr,
+    _momentum_threshold,
 )
 
 
@@ -39,6 +40,10 @@ def _intraday_bar(volume, timestamp, close=110.0):
 
 
 class MomentumStrategyTests(unittest.TestCase):
+    def setUp(self):
+        self._scfg_patch = patch.dict("strategies.momentum.SCFG", {"min_momentum_atr_mult": 0.0})
+        self._scfg_patch.start()
+        self.addCleanup(self._scfg_patch.stop)
 
     # ── Fallback fetching ─────────────────────────────────────────────────────
 
@@ -136,6 +141,15 @@ class MomentumStrategyTests(unittest.TestCase):
         atr = _calc_atr(bars, period=14)
         self.assertGreater(atr, 0)
 
+    def test_momentum_threshold_uses_floor_when_atr_gate_is_lower(self):
+        self.assertEqual(_momentum_threshold(0.04, atr=1.0, price=100.0, atr_multiple=2.0), 0.04)
+
+    def test_momentum_threshold_raises_gate_in_high_volatility(self):
+        self.assertAlmostEqual(
+            _momentum_threshold(0.04, atr=6.0, price=100.0, atr_multiple=2.0),
+            0.12,
+        )
+
     # ── Enhancements (Smoothed, Alpha, Volume) ────────────────────────────────
 
     def test_momentum_smoothed_lookback(self):
@@ -203,6 +217,55 @@ class MomentumStrategyTests(unittest.TestCase):
                 signals = MomentumStrategy().scan(["AAPL"], regime_bars=regime_bars)
 
         self.assertEqual(signals, [])
+
+    def test_momentum_atr_scaled_gate_blocks_low_quality_high_volatility_move(self):
+        prices = [100.0] * 100 + [108.0, 108.0]
+        bars = [_bar(p, high=p + 5.0, low=p - 5.0, volume=1000) for p in prices[:-1]]
+        bars.append(_bar(prices[-1], high=prices[-1] + 5.0, low=prices[-1] - 5.0, volume=3000))
+        bars_resp = {"AAPL": bars}
+
+        with (
+            patch("strategies.momentum.ac.get_stock_bars", return_value=bars_resp),
+            patch("strategies.momentum.rm.market_regime_ok", return_value=True),
+            patch("strategies.momentum.rm.market_breadth_pct", return_value=0.6),
+            patch("strategies.momentum.ac.get_portfolio_value", return_value=10000.0),
+            patch("strategies.momentum.get_sector", return_value="Tech"),
+        ):
+            with patch.dict("strategies.momentum.SCFG", {
+                "enabled": True,
+                "top_n": 1,
+                "min_momentum_pct": 0.04,
+                "min_momentum_atr_mult": 2.0,
+                "min_breadth_coverage_pct": 0.0,
+            }):
+                signals = MomentumStrategy().scan(["AAPL"])
+
+        self.assertEqual(signals, [])
+
+    def test_scan_defers_atr_until_after_cheap_momentum_gate(self):
+        prices = [100.0] * 100 + [101.0, 101.0]
+        bars = [_bar(p, volume=3000) for p in prices]
+        bars_resp = {"AAPL": bars}
+
+        with (
+            patch("strategies.momentum.ac.get_stock_bars", return_value=bars_resp),
+            patch("strategies.momentum.rm.market_regime_ok", return_value=True),
+            patch("strategies.momentum.rm.market_breadth_pct", return_value=0.6),
+            patch("strategies.momentum.ac.get_portfolio_value", return_value=10000.0),
+            patch("strategies.momentum.get_sector", return_value="Tech"),
+            patch("strategies.momentum._calc_atr", return_value=2.0) as calc_atr,
+        ):
+            with patch.dict("strategies.momentum.SCFG", {
+                "enabled": True,
+                "top_n": 1,
+                "min_momentum_pct": 0.05,
+                "min_momentum_atr_mult": 0.0,
+                "min_breadth_coverage_pct": 0.0,
+            }):
+                signals = MomentumStrategy().scan(["AAPL"])
+
+        self.assertEqual(signals, [])
+        calc_atr.assert_not_called()
 
     def test_momentum_volume_confirmation_gate(self):
         prices = [100.0] * 100 + [110.0, 110.0]
@@ -515,6 +578,7 @@ class MomentumStrategyTests(unittest.TestCase):
                 "enabled": True,
                 "top_n": 1,
                 "min_momentum_pct": 0.01,
+                "min_momentum_atr_mult": 0.0,
                 "min_breadth_coverage_pct": 0.0,
                 "volume_confirmation_mode": "daily",
                 "max_stop_loss_pct": 0.05,
@@ -622,6 +686,7 @@ class MomentumStrategyTests(unittest.TestCase):
                 "risk_per_trade_pct": 0.01,
                 "enabled": True,
                 "min_momentum_pct": -1.0,
+                "min_momentum_atr_mult": 0.0,
                 "max_stop_loss_pct": None,
             }):
                 signals = MomentumStrategy().scan(["AAPL"])

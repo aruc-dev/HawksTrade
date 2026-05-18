@@ -11,10 +11,11 @@
 | Strategy | Asset | Status | File |
 |---|---|---|---|
 | Momentum | Stocks | **Enabled** | `momentum.py` |
-| RSI Reversion | Stocks | **Disabled by default** | `rsi_reversion.py` |
-| Gap-Up | Stocks | **Enabled** | `gap_up.py` |
-| MA Crossover | Crypto | **Enabled** | `ma_crossover.py` |
-| Range Breakout | Crypto | **Enabled** | `range_breakout.py`; high-water profit protection enabled |
+| Relative Strength | Stocks | **Enabled** | `relative_strength.py` |
+| RSI Reversion | Stocks | **Enabled as conditional bear/chop sleeve** | `rsi_reversion.py`; live entries require paper-readiness evidence |
+| Gap-Up | Stocks | **Disabled in default profile** | `gap_up.py`; run standalone validation before re-enabling |
+| MA Crossover | Crypto | **Enabled** | `ma_crossover.py`; live entries require paper-readiness evidence |
+| Range Breakout | Crypto | **Enabled** | `range_breakout.py`; high-water profit protection enabled; live entries require paper-readiness evidence |
 
 All strategies share a common global risk layer (8% max position size,
 3.5% stop-loss, 12% take-profit, max 10 open positions, 5% daily-loss halt)
@@ -29,12 +30,13 @@ when it is wider than the global stop.
 
 **Type:** Trend-following, swing trade.
 
-**Entry:** Ranks every stock in the scan universe by its 5-day price return. Buys
-up to the top two candidates that have gained at least 8%, subject to four layers of adaptive
+**Entry:** Ranks every stock in the scan universe by its 5-day smoothed alpha
+momentum. Buys up to the top two candidates that have gained at least 4%,
+subject to four layers of adaptive
 filtering:
 
 1. **Phase 1 — ATR Stop + 1% Risk Sizing**: Each signal carries an ATR-based stop
-   (`entry - 2 × ATR_14`). Position size is computed as `(equity × 1%) / (entry - atr_stop)`
+   (`entry - 1.2 × ATR_14`, capped at 5% below entry). Position size is computed as `(equity × 1%) / (entry - atr_stop)`
    so that every trade risks exactly 1% of capital, capped at 8% per-position max.
 2. **Phase 2 — Sector-Neutral Ranking**: Enforces `max_positions_per_sector: 1`
    using a static GICS sector map across both existing/pending positions and new
@@ -51,8 +53,8 @@ filtering:
 
 **Volume Confirmation (per-signal):** Momentum uses time-of-day normalized volume
 pace by default (`volume_confirmation_mode: pace`). Current regular-session volume
-must be at least `1.5x` the expected volume for the elapsed market minutes
-(`volume_pace_ratio: 1.5`), based on the candidate's 20-day average daily volume.
+must be at least `1.8x` the expected volume for the elapsed market minutes
+(`volume_pace_ratio: 1.8`), based on the candidate's 20-day average daily volume.
 If intraday bars are unavailable, the scan time is outside regular-session
 context, or no valid elapsed-session volume can be calculated, it falls back to
 the legacy daily-volume check
@@ -78,7 +80,7 @@ room while the global 3.5% stop remains the baseline fixed-percentage stop.
 | Parameter | Value |
 |---|---|
 | `top_n` | 2 |
-| `min_momentum_pct` | 8% (5-day return) |
+| `min_momentum_pct` | 4% (5-day smoothed return) |
 | `min_alpha_pct` | 0% excess return over SPY (disabled) |
 | `hold_days` (minimum) | 4 business days |
 | `max_hold_days` | 20 business days |
@@ -94,7 +96,7 @@ room while the global 3.5% stop remains the baseline fixed-percentage stop.
 | `min_breadth_coverage_pct` | 65% |
 | `yellow_max_positions` | 1 |
 | `volume_confirmation_mode` | `pace` |
-| `volume_pace_ratio` | 1.5x expected elapsed-session volume pace |
+| `volume_pace_ratio` | 1.8x expected elapsed-session volume pace |
 | `volume_pace_timeframe` | `1Min` |
 | `session_minutes` | 390 |
 | `volume_spike_ratio` | 2.0 legacy daily fallback |
@@ -106,7 +108,59 @@ room while the global 3.5% stop remains the baseline fixed-percentage stop.
 
 ---
 
-## 2. RSI Reversion *(Stocks — Disabled by default)*
+## 2. Relative Strength *(Stocks — Enabled)*
+
+**Type:** Medium-term benchmark-relative momentum, swing trade.
+
+**Entry:** Ranks stock candidates by 20-day return minus SPY's 20-day return.
+The default profile buys up to one sector-diversified candidate only when all of
+these conditions are true:
+
+1. Candidate 20-day excess return versus SPY is at least 5%.
+2. Candidate absolute 20-day return is at least 8%.
+3. Candidate 3-day return is no more than 3%, avoiding fresh short-term blow-offs.
+4. Price is above the 50-day SMA and no more than 30% above it.
+5. Stock regime is not red: SPY/QQQ regime passes and market breadth is at least 25%.
+6. Breadth coverage is at least 65% of the scan universe.
+7. Volume pace is at least 1.8x expected elapsed-session volume pace, with a 1.8x
+   daily-volume fallback when intraday bars are unavailable.
+
+**Stop and sizing:** Signals include a 1.2x ATR(14) stop capped at 5% below
+entry and ATR-risk quantity targeting 1% account risk before the global 8%
+max-position cap.
+
+**Exit:** The standard risk manager handles global stop-loss, take-profit, and
+custom ATR stops. The scan hold-exit pass enforces a 7-business-day hold cap;
+pre-hold high-water profit protection can still exit once peak gain reaches 6%
+and price falls 4% from that peak.
+
+**Key parameters:**
+
+| Parameter | Value |
+|---|---|
+| `top_n` | 1 |
+| `lookback_days` | 20 |
+| `benchmark_symbol` | SPY |
+| `min_rs_pct` | 5% excess return over SPY |
+| `min_abs_return_pct` | 8% absolute return |
+| `recent_lookback_days` | 3 |
+| `max_recent_return_pct` | 3% |
+| `hold_days` | 7 business days |
+| `atr_period` | 14 |
+| `atr_multiplier` | 1.2 ATR stop extension |
+| `max_stop_loss_pct` | 5% |
+| `max_positions_per_sector` | 1 |
+| `volume_confirmation_mode` | `pace` |
+| `volume_pace_ratio` | 1.8x expected elapsed-session volume pace |
+
+**Validation note:** This sleeve improved the default 12-month production gate
+point estimate and lower-bound return, but production validation remains
+blocking until the 12-month default lower bound and crypto lower-bound gates
+clear.
+
+---
+
+## 3. RSI Reversion *(Stocks — Enabled, conditional bear/chop sleeve)*
 
 **Type:** Mean reversion, swing trade.
 
@@ -142,6 +196,7 @@ absent; otherwise the ATR stop can widen the trade's breathing room.
 | Parameter | Value |
 |---|---|
 | `rsi_period` | 14 |
+| `market_regime_mode` | `bear_or_chop_only` |
 | `oversold_threshold` | 40 |
 | `overbought_threshold` | 50 (RSI neutral exit) |
 | `hold_days` | 10 business days |
@@ -163,18 +218,26 @@ absent; otherwise the ATR stop can widen the trade's breathing room.
 | `max_recent_drawdown_pct` | 10% |
 
 **Regime filters:**
+- Bear/chop mode: stand down when the stock market regime filter is bullish
+  (SPY or QQQ above SMA50); only scan when that regime check is not bullish.
 - Crash filter: skip if SPY is >20% below its 252-day peak.
 - VIX proxy: skip if SPY realised HV(20) > 200-day HV MA × `vix_multiplier` (default: 0.95).
 
-**Monitoring gate:** This strategy is disabled in the active default profile.
-Continue running `python3 scheduler/run_validation_gate.py --profile rsi` before
-enabling it or scaling its capital allocation. The gate requires cost-aware backtest performance
-plus at least 60 paper-trading days, 20 closed RSI trades, 48% win rate, 1.15
-profit factor, +2% aggregate paper return, and max drawdown no worse than 4%.
+**Monitoring gate:** RSI is included in the default validation and walk-forward
+profiles only through its conditional bear/chop regime filter. Continue running
+`python3 scheduler/run_validation_gate.py --profile rsi` before scaling its
+capital allocation. The gate requires cost-aware backtest performance plus at
+least 60 paper-trading days, 20 closed RSI trades, 48% win rate, 1.15 profit
+factor, +2% aggregate paper return, and max drawdown no worse than 4%.
+
+**Live readiness:** If this sleeve is enabled in live mode, runtime entries are
+blocked until the trade log shows at least 20 closed paper exits and 60 calendar
+days of RSI paper validation. Paper mode remains available for evidence
+collection.
 
 ---
 
-## 3. Gap-Up *(Stocks — Enabled)*
+## 4. Gap-Up *(Stocks — Disabled in Default Profile)*
 
 **Type:** Opening momentum, short swing trade.
 
@@ -216,12 +279,16 @@ from the global risk manager apply throughout.
 
 **Regime filter:** SPY > SMA50 (bull market required).
 
+**Default status:** Disabled in `config/config.yaml` and excluded from the
+default production/walk-forward strategy lists until its standalone bootstrap
+and minute-fill validation improve.
+
 **Monitoring gate:** Run `python3 scheduler/run_validation_gate.py --profile gap`
-before scaling capital allocated to this sleeve.
+before re-enabling or scaling capital allocated to this sleeve.
 
 ---
 
-## 4. MA Crossover *(Crypto — Enabled)*
+## 5. MA Crossover *(Crypto — Enabled)*
 
 **Type:** Trend-following, medium-term swing. Runs 24/7 on daily bars.
 
@@ -261,11 +328,19 @@ before scaling capital allocated to this sleeve.
 | `volume_spike_ratio` | 1.0 |
 | `vol_filter_period` | 10 |
 
-**Regime filter:** BTC/USD > 20-day EMA (crypto bull regime required).
+**Regime filter:** BTC/USD > 20-day EMA, and the EMA20 may not be falling more
+than 0.5% over five days.
+
+**Live readiness:** Live entries are blocked until the trade log shows at least
+25 closed paper exits and 90 calendar days of paper validation for this sleeve.
+Paper mode remains available for evidence collection.
+
+**Monitoring gate:** Run `python3 scheduler/run_validation_gate.py --profile ma`
+before scaling capital allocated to this sleeve.
 
 ---
 
-## 5. Range Breakout *(Crypto — Enabled)*
+## 6. Range Breakout *(Crypto — Enabled)*
 
 **Type:** Breakout, short swing trade. Runs 24/7 on daily bars.
 
@@ -276,7 +351,7 @@ before scaling capital allocated to this sleeve.
 4. Today's range ≥ 45% of the 10-day average range — market is not compressed.
 5. Close is at least 0.8% and no more than 8% beyond the breakout level — requires
    real follow-through without chasing stale vertical moves.
-6. Close is in the upper 30% of the day's range — avoids weak breakout closes.
+6. Close is in the upper 10% of the day's range — avoids weak breakout closes.
 7. RSI(14) ≤ 82 — avoids severely overextended breakout closes.
 
 **Sizing:** Each signal carries a 2 × ATR(14) stop and ATR-risk quantity targeting
@@ -303,7 +378,7 @@ Stop-loss and take-profit from the global risk manager apply throughout.
 | `breakout_pct` | 0.6% above prior 20-day high |
 | `min_breakout_extension_pct` | 0.8% above breakout level |
 | `max_breakout_extension_pct` | 8% above breakout level |
-| `min_close_location` | 70% of daily range |
+| `min_close_location` | 90% of daily range |
 | `volume_multiplier` | 2.5× |
 | `volume_avg_period` | 20 |
 | `trend_ema_period` | 50 |
@@ -318,7 +393,8 @@ Stop-loss and take-profit from the global risk manager apply throughout.
 | `timeframe` | 1Day |
 | `hold_days` | 14 calendar days |
 
-**Regime filter:** BTC/USD > 20-day EMA (crypto bull regime required).
+**Regime filter:** BTC/USD > 20-day EMA, and the EMA20 may not be falling more
+than 0.5% over five days.
 
 ---
 

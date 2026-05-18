@@ -312,7 +312,7 @@ def _row_is_recent(row: dict) -> bool:
 
 COLUMNS = [
     "timestamp", "mode", "symbol", "strategy", "asset_class",
-    "side", "qty", "entry_price", "exit_price", "stop_loss",
+    "side", "qty", "entry_price", "exit_price", "risk_tier", "stop_loss",
     "take_profit", "high_water_price", "pnl_pct", "exit_reason", "order_id", "status",
 ]
 
@@ -373,6 +373,20 @@ def _ensure_file(path: Path | None = None):
             writer = csv.DictWriter(f, fieldnames=COLUMNS)
             writer.writeheader()
         log.info(f"Trade log created: {trade_log_path}")
+        return
+
+    with open(trade_log_path, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        existing_header = reader.fieldnames or []
+        if existing_header == COLUMNS:
+            return
+        rows = list(reader)
+
+    with open(trade_log_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=COLUMNS)
+        writer.writeheader()
+        writer.writerows({col: row.get(col, "") for col in COLUMNS} for row in rows)
+    log.info(f"Trade log migrated to current header: {trade_log_path}")
 
 
 def _read_rows_unlocked(path: Path) -> list[dict]:
@@ -407,17 +421,22 @@ def get_open_trades() -> list:
     ]
 
 
-def get_closed_trades() -> list:
+def get_closed_trades(strategy: str | None = None) -> list:
     """Return exit-side (sell) closed trade rows from the trade log CSV.
 
     Only sell rows are returned so callers like kelly_position_size() see
     one row per completed round-trip — not two (the buy row is also marked
     closed by mark_trade_closed, which would otherwise double the sample).
+    When strategy is provided, only closed sell rows for that strategy are
+    returned.
     """
-    return [
+    rows = [
         row for row in read_trade_rows()
         if row.get("status") == "closed" and row.get("side") == "sell"
     ]
+    if strategy is None:
+        return rows
+    return [row for row in rows if row.get("strategy") == strategy]
 
 
 def mark_trade_closed(

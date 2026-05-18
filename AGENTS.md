@@ -210,11 +210,19 @@ Run these baseline checks before publishing code changes:
 ```bash
 python3 -m unittest discover -v
 python3 -W error::DeprecationWarning -m unittest discover
-python3 -m compileall core strategies scheduler tracking tests
+python3 -m compileall analysis core strategies scheduler tracking tests scripts
+python3 scripts/check_oos_lockup_leakage.py
 python3 scheduler/run_scan.py --dry-run
 python3 scheduler/run_risk_check.py --dry-run
 python3 scheduler/run_report.py
 ```
+
+Validation shorthand:
+- **baseline validation**: run the baseline validation tests above.
+- **strategy validation**: run baseline validation plus the
+  profit/trade-affecting validation ladder below.
+- **production validation**: run strategy validation plus the major strategy
+  release/material strategy-config validation set below.
 
 For profit/trade-affecting changes, add the strategy validation ladder. This
 includes changes to `strategies/`, entry/exit logic, risk/protection/order
@@ -230,8 +238,11 @@ python3 scheduler/run_walkforward.py --quick --no-write-report --no-artifacts
 
 For major strategy releases or material strategy/config changes, also run:
 ```bash
+python3 scheduler/run_backtest.py --days 30 --fund 10000 --end-date <last-pre-lockup-date>
 python3 scheduler/run_walkforward.py --profile master
 ```
+Use the explicit `--end-date` fallback only when the normal 30-day backtest is
+blocked because the entire current window is inside the active OOS lockup.
 
 Use `--profile master --oos-only` only for final capital-scaling validation.
 Do not tune against the locked OOS window.
@@ -253,6 +264,16 @@ Capital must not scale unless the master walk-forward passes at the configured
 stressed cost threshold. Baseline and severe rows are diagnostic unless the
 profile lists them under `blocking_levels`; the locked OOS window scales its
 minimum trade-count gate to its shorter duration.
+Backtest protection rows carry position-size-adjusted `portfolio_pnl_pct` for
+portfolio-wide realized-drawdown locks; symbol stop-loss, strategy stop-loss,
+and low-profit protections still use raw closed-trade `pnl_pct`.
+The active 90-day OOS lockup in `data/oos_lockup.json` is excluded from normal
+backtests. Run `python3 scheduler/run_backtest.py --oos-validation --output
+reports/oos_validation_<date>.md` only for the single-use final validation; do
+not tune against the locked window afterward.
+Before scaling any strategy allocation, also confirm sample-size risk tiers are
+not bypassed, bootstrap CI lower bounds pass the relevant gates, and the latest
+SPA/multiple-testing report for that strategy has `p < 0.20`.
 
 ---
 
@@ -292,11 +313,19 @@ Run these baseline checks before publishing code changes:
 ```bash
 python3 -m unittest discover -v
 python3 -W error::DeprecationWarning -m unittest discover
-python3 -m compileall core strategies scheduler tracking tests
+python3 -m compileall analysis core strategies scheduler tracking tests scripts
+python3 scripts/check_oos_lockup_leakage.py
 python3 scheduler/run_scan.py --dry-run
 python3 scheduler/run_risk_check.py --dry-run
 python3 scheduler/run_report.py
 ```
+
+Validation shorthand:
+- **baseline validation**: run the baseline validation tests above.
+- **strategy validation**: run baseline validation plus the
+  profit/trade-affecting validation ladder below.
+- **production validation**: run strategy validation plus the major strategy
+  release/material strategy-config validation set below.
 
 For profit/trade-affecting changes, add:
 ```bash
@@ -308,8 +337,22 @@ python3 scheduler/run_walkforward.py --quick --no-write-report --no-artifacts
 
 For major strategy releases or material strategy/config changes, also run:
 ```bash
+python3 scheduler/run_backtest.py --days 30 --fund 10000 --end-date <last-pre-lockup-date>
 python3 scheduler/run_walkforward.py --profile master
 ```
+Use the explicit `--end-date` fallback only when the normal 30-day backtest is
+blocked because the entire current window is inside the active OOS lockup.
+
+Use locked OOS only for final capital-scaling validation:
+```bash
+python3 scheduler/run_backtest.py --oos-validation --output reports/oos_validation_<date>.md
+```
+Do not tune against OOS.
+Backtest protection rows carry position-size-adjusted `portfolio_pnl_pct` for
+portfolio-wide realized-drawdown locks; symbol stop-loss, strategy stop-loss,
+and low-profit protections still use raw closed-trade `pnl_pct`.
+Do not bypass `validation.sample_size_scaling`; allocation increases also
+require passing bootstrap CI bounds and current SPA evidence (`p < 0.20`).
 
 For scripts, docs, dashboards, health checks, logging, tests, beads metadata, or
 other changes that do not affect profit, trades, strategies, strategy config,

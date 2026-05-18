@@ -24,21 +24,21 @@
 | baseline | tech_bear_2022 | Rate-hike technology bear market | 12/31/2022 | 180 | +1.18% | +2.40% | -4.25% | 1.19 | 30 | 33.3% | 0.33 | FAIL | annualized_return +2.40% < +4.00%; profit_factor 1.19 < 1.20; daily_sharpe 0.33 < 0.50 |
 | baseline | ai_reversal_2023 | SVB shock and AI-led reversal | 12/31/2023 | 180 | +3.77% | +7.79% | -1.49% | 2.15 | 32 | 50.0% | 1.77 | PASS |  |
 | baseline | election_chop_2024 | Pre-election range-bound chop | 09/30/2024 | 180 | -0.52% | -1.04% | -2.74% | 0.91 | 33 | 36.4% | -0.20 | FAIL | annualized_return -1.04% < +4.00%; profit_factor 0.91 < 1.20; daily_sharpe -0.20 < 0.50 |
-| baseline | current_regime_auto | Current regime excluding locked OOS | 03/17/2026 | 180 | +0.85% | +1.74% | -3.01% | 1.08 | 33 | 36.4% | 0.38 | FAIL | annualized_return +1.74% < +4.00%; profit_factor 1.08 < 1.20; daily_sharpe 0.38 < 0.50 |
+| baseline | current_regime_auto | Current regime excluding locked OOS | locked OOS window redacted | 180 | +0.85% | +1.74% | -3.01% | 1.08 | 33 | 36.4% | 0.38 | FAIL | annualized_return +1.74% < +4.00%; profit_factor 1.08 < 1.20; daily_sharpe 0.38 < 0.50 |
 | stressed | calm_bull_2019 | Calm bull, low volatility | 12/31/2019 | 180 | +1.57% | +3.20% | -2.01% | 1.41 | 23 | 47.8% | 0.80 | FAIL | trades 23 < 25 |
 | stressed | covid_crash_2020 | COVID crash and V-recovery | 09/30/2020 | 180 | +9.48% | +20.16% | -1.71% | 2.84 | 38 | 65.8% | 2.82 | PASS |  |
 | stressed | stimulus_bull_2021 | Stimulus-driven late-cycle bull | 12/31/2021 | 180 | +0.94% | +1.91% | -2.32% | 1.18 | 31 | 35.5% | 0.40 | PASS |  |
 | stressed | tech_bear_2022 | Rate-hike technology bear market | 12/31/2022 | 180 | +0.87% | +1.78% | -4.27% | 1.14 | 30 | 33.3% | 0.26 | PASS |  |
 | stressed | ai_reversal_2023 | SVB shock and AI-led reversal | 12/31/2023 | 180 | +3.33% | +6.87% | -1.54% | 2.04 | 31 | 45.2% | 1.59 | PASS |  |
 | stressed | election_chop_2024 | Pre-election range-bound chop | 09/30/2024 | 180 | -0.90% | -1.82% | -3.04% | 0.85 | 33 | 36.4% | -0.36 | FAIL | annualized_return -1.82% < +0.00%; profit_factor 0.85 < 1.00; daily_sharpe -0.36 < 0.20 |
-| stressed | current_regime_auto | Current regime excluding locked OOS | 03/17/2026 | 180 | +0.62% | +1.27% | -3.13% | 1.04 | 33 | 33.3% | 0.29 | PASS |  |
+| stressed | current_regime_auto | Current regime excluding locked OOS | locked OOS window redacted | 180 | +0.62% | +1.27% | -3.13% | 1.04 | 33 | 33.3% | 0.29 | PASS |  |
 | severe | calm_bull_2019 | Calm bull, low volatility | 12/31/2019 | 180 | +1.25% | +2.56% | -2.12% | 1.29 | 23 | 47.8% | 0.64 | FAIL | trades 23 < 25 |
 | severe | covid_crash_2020 | COVID crash and V-recovery | 09/30/2020 | 180 | +7.20% | +15.13% | -1.87% | 2.34 | 34 | 55.9% | 2.57 | PASS |  |
 | severe | stimulus_bull_2021 | Stimulus-driven late-cycle bull | 12/31/2021 | 180 | +1.06% | +2.16% | -1.88% | 1.20 | 30 | 36.7% | 0.43 | PASS |  |
 | severe | tech_bear_2022 | Rate-hike technology bear market | 12/31/2022 | 180 | +0.85% | +1.74% | -4.29% | 1.13 | 29 | 31.0% | 0.25 | PASS |  |
 | severe | ai_reversal_2023 | SVB shock and AI-led reversal | 12/31/2023 | 180 | +2.53% | +5.19% | -1.64% | 1.76 | 30 | 43.3% | 1.20 | PASS |  |
 | severe | election_chop_2024 | Pre-election range-bound chop | 09/30/2024 | 180 | -1.39% | -2.79% | -3.48% | 0.78 | 33 | 36.4% | -0.56 | FAIL | annualized_return -2.79% < -2.00%; profit_factor 0.78 < 0.90 |
-| severe | current_regime_auto | Current regime excluding locked OOS | 03/17/2026 | 180 | +0.14% | +0.28% | -3.28% | 0.96 | 33 | 33.3% | 0.09 | PASS |  |
+| severe | current_regime_auto | Current regime excluding locked OOS | locked OOS window redacted | 180 | +0.14% | +0.28% | -3.28% | 0.96 | 33 | 33.3% | 0.09 | PASS |  |
 
 ## Per-Strategy Attribution (stressed cost)
 

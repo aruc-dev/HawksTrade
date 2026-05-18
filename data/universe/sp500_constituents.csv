@@ -1,0 +1,124 @@
+symbol,added_date,removed_date,ipo_date,first_liquid_date,delisted_date,source,notes
+AAPL,1982-11-30,,,,,index,current S&P 500
+ABBV,2012-12-31,,,,,index,current S&P 500
+ABNB,,,2020-12-10,2021-03-10,,non_index,IPO inclusion after 90-day grace
+ADBE,1997-05-05,,,,,index,current S&P 500
+AMD,2017-03-20,,,,,index,current S&P 500
+AMAT,1995-03-16,,,,,index,current S&P 500
+AMGN,1992-01-02,,,,,index,current S&P 500
+AMT,2007-11-19,,,,,index,current S&P 500
+AMZN,2005-11-18,,,,,index,current S&P 500
+ANET,2018-08-28,,,,,index,current S&P 500
+ARM,,,2023-09-14,2023-12-13,,non_index,IPO inclusion after 90-day grace
+ASML,,,1995-03-15,1995-06-13,,non_index,ADR liquidity inclusion
+AVGO,2014-05-08,,,,,index,current S&P 500
+AXP,1976-06-30,,,,,index,current S&P 500
+BA,1957-03-04,,,,,index,current S&P 500
+BABA,,,2014-09-19,2014-12-18,,non_index,ADR liquidity inclusion
+BITO,,,2021-10-19,2022-01-17,,non_index,ETF inclusion after 90-day grace
+BLK,2011-04-04,,,,,index,current S&P 500
+BMY,1957-03-04,,,,,index,current S&P 500
+CAT,1957-03-04,,,,,index,current S&P 500
+CCI,2012-03-14,,,,,index,current S&P 500
+C,1988-05-31,,,,,index,current S&P 500
+CMCSA,2002-11-19,,,,,index,current S&P 500
+COIN,,,2021-04-14,2021-07-13,,non_index,IPO inclusion after 90-day grace
+COP,1957-03-04,,,,,index,current S&P 500
+COST,1993-10-01,,,,,index,current S&P 500
+CRM,2008-09-15,,,,,index,current S&P 500
+CRWD,2024-06-24,,,,,index,S&P 500 addition
+CVX,1957-03-04,,,,,index,current S&P 500
+DASH,,,2020-12-09,2021-03-09,,non_index,IPO inclusion after 90-day grace
+DDOG,2024-07-08,,,,,index,S&P 500 addition
+DE,1957-03-04,,,,,index,current S&P 500
+DIS,1976-06-30,,,,,index,current S&P 500
+DUK,1976-06-30,,,,,index,current S&P 500
+EEM,,,2003-04-11,2003-07-10,,non_index,ETF inclusion after 90-day grace
+EFA,,,2001-08-14,2001-11-12,,non_index,ETF inclusion after 90-day grace
+ELV,2002-07-25,,,,,index,current S&P 500
+ETN,2012-11-30,,,,,index,current S&P 500
+FCX,2006-01-27,,,,,index,current S&P 500
+FDX,1980-12-31,,,,,index,current S&P 500
+GD,1957-03-04,,,,,index,current S&P 500
+GE,1957-03-04,,,,,index,current S&P 500
+GILD,2004-07-01,,,,,index,current S&P 500
+GOOGL,2006-04-03,,,,,index,current S&P 500
+GS,2002-07-22,,,,,index,current S&P 500
+HAL,1957-03-04,,,,,index,current S&P 500
+HD,1988-03-31,,,,,index,current S&P 500
+HON,1964-03-31,,,,,index,current S&P 500
+HOOD,,,2021-07-29,2021-10-27,,non_index,IPO inclusion after 90-day grace
+IBIT,,,2024-01-11,2024-04-10,,non_index,ETF inclusion after 90-day grace
+IGV,,,2001-07-10,2001-10-08,,non_index,ETF inclusion after 90-day grace
+INTC,1976-12-31,,,,,index,current S&P 500
+ISRG,2008-06-02,,,,,index,current S&P 500
+JD,,,2014-05-22,2014-08-20,,non_index,ADR liquidity inclusion
+JNJ,1973-06-30,,,,,index,current S&P 500
+JPM,1975-06-30,,,,,index,current S&P 500
+KO,1957-03-04,,,,,index,current S&P 500
+KRE,,,2006-06-22,2006-09-20,,non_index,ETF inclusion after 90-day grace
+LLY,1970-12-31,,,,,index,current S&P 500
+LMT,1984-07-31,,,,,index,current S&P 500
+LRCX,2012-06-05,,,,,index,current S&P 500
+MA,2008-07-18,,,,,index,current S&P 500
+MCD,1970-06-30,,,,,index,current S&P 500
+MDB,,,2017-10-19,2018-01-17,,non_index,IPO inclusion after 90-day grace
+MDT,1986-10-31,,,,,index,current S&P 500
+MRK,1957-03-04,,,,,index,current S&P 500
+MRVL,2021-12-20,,,,,index,current S&P 500
+MS,1993-07-29,,,,,index,current S&P 500
+MSFT,1994-06-01,,,,,index,current S&P 500
+MSTR,,,1998-06-11,1998-09-09,,non_index,public company; not index member in baseline ledger
+MU,1994-09-27,,,,,index,current S&P 500
+NEE,1976-06-30,,,,,index,current S&P 500
+NET,,,2019-09-13,2019-12-12,,non_index,IPO inclusion after 90-day grace
+NKE,1988-11-30,,,,,index,current S&P 500
+NOC,1985-06-30,,,,,index,current S&P 500
+NOW,2019-11-21,,,,,index,current S&P 500
+NVDA,2001-11-30,,,,,index,current S&P 500
+ORCL,1989-08-31,,,,,index,current S&P 500
+OXY,1982-12-31,,,,,index,current S&P 500
+PANW,2023-06-20,,,,,index,S&P 500 addition
+PDD,,,2018-07-26,2018-10-24,,non_index,ADR liquidity inclusion
+PEP,1957-03-04,,,,,index,current S&P 500
+PFE,1957-03-04,,,,,index,current S&P 500
+PG,1957-03-04,,,,,index,current S&P 500
+PINS,,,2019-04-18,2019-07-17,,non_index,IPO inclusion after 90-day grace
+PLD,2003-07-17,,,,,index,current S&P 500
+PYPL,2015-07-20,,,,,index,current S&P 500
+QCOM,1999-07-22,,,,,index,current S&P 500
+QQQ,,,1999-03-10,1999-06-08,,non_index,ETF inclusion after 90-day grace
+RBLX,,,2021-03-10,2021-06-08,,non_index,direct listing inclusion after 90-day grace
+REGN,2013-05-01,,,,,index,current S&P 500
+RTX,1957-03-04,,,,,index,current S&P 500
+SAP,,,1995-09-18,1995-12-17,,non_index,ADR liquidity inclusion
+SBUX,2000-06-07,,,,,index,current S&P 500
+SCHW,1997-06-02,,,,,index,current S&P 500
+SHOP,,,2015-05-21,2015-08-19,,non_index,IPO inclusion after 90-day grace
+SLB,1957-03-04,,,,,index,current S&P 500
+SMCI,2024-03-18,,,,,index,S&P 500 addition
+SMH,,,2000-05-05,2000-08-03,,non_index,ETF inclusion after 90-day grace
+SNAP,,,2017-03-02,2017-05-31,,non_index,IPO inclusion after 90-day grace
+SNOW,,,2020-09-16,2020-12-15,,non_index,IPO inclusion after 90-day grace
+SO,1957-03-04,,,,,index,current S&P 500
+SPOT,,,2018-04-03,2018-07-02,,non_index,direct listing inclusion after 90-day grace
+SPY,,,1993-01-29,1993-04-29,,non_index,ETF inclusion after 90-day grace
+SQ,,,2015-11-19,2016-02-17,,non_index,IPO inclusion after 90-day grace
+T,1957-03-04,,,,,index,current S&P 500
+TGT,1976-12-31,,,,,index,current S&P 500
+TM,,,1999-09-29,1999-12-28,,non_index,ADR liquidity inclusion
+TMUS,2019-07-15,,,,,index,current S&P 500
+TSLA,2020-12-21,,,,,index,S&P 500 addition
+TSM,,,1997-10-09,1998-01-07,,non_index,ADR liquidity inclusion
+TXN,1960-12-31,,,,,index,current S&P 500
+UBER,2023-12-18,,,,,index,S&P 500 addition
+UNH,1994-07-01,,,,,index,current S&P 500
+UPS,2002-07-22,,,,,index,current S&P 500
+V,2009-12-21,,,,,index,current S&P 500
+VRT,2025-03-24,,,,,index,S&P 500 addition
+VZ,1983-11-30,,,,,index,current S&P 500
+WFC,1976-06-30,,,,,index,current S&P 500
+WMT,1982-08-31,,,,,index,current S&P 500
+XLF,,,1998-12-16,1999-03-16,,non_index,ETF inclusion after 90-day grace
+XLK,,,1998-12-16,1999-03-16,,non_index,ETF inclusion after 90-day grace
+ZS,,,2018-03-16,2018-06-14,,non_index,IPO inclusion after 90-day grace

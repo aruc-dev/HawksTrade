@@ -272,6 +272,33 @@ class WalkForwardTests(unittest.TestCase):
         self.assertIn("daily_sharpe", failures[-1])
         self.assertIn("annualized_return_pct", stats)
 
+    def test_profile_window_failures_records_bootstrap_gate_metrics(self):
+        thresholds = WalkForwardThresholds(
+            min_return_pct=0.0,
+            max_drawdown_pct=0.10,
+            min_profit_factor=1.0,
+            min_trades=5,
+            min_pass_rate=1.0,
+            min_daily_sharpe=0.2,
+        )
+        stats = _stats(return_pct=0.04, profit_factor=2.0, daily_sharpe=1.0, trades=12)
+        stats["bootstrap"] = {
+            "block": {
+                "return_pct": {"p05": -0.01},
+                "max_drawdown": {"p05": -0.03},
+                "daily_sharpe": {"p05": -0.4},
+            },
+            "trade": {
+                "profit_factor": {"p05": 0.7},
+            },
+        }
+
+        failures = profile_window_failures(stats, thresholds, window_days=180)
+
+        self.assertIn("annualized_return_gate_pct", stats)
+        self.assertEqual(stats["gate_profit_factor"], 0.7)
+        self.assertTrue(any("profit_factor 0.70 < 1.00" in failure for failure in failures))
+
     def test_run_profile_iterates_cost_levels_writes_report_and_artifacts(self):
         cfg = {
             "validation": {
@@ -314,6 +341,7 @@ class WalkForwardTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             self.assertIn("Per-Strategy Attribution", output)
+            self.assertIn("Gate Ann.", output)
             self.assertTrue(report_path.exists())
             self.assertEqual(len(list(artifacts_dir.glob("*.json"))), 4)
             self.assertEqual(run_backtest.call_count, 4)

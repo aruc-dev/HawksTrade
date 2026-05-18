@@ -167,7 +167,8 @@ Run these baseline checks before publishing code changes:
 ```bash
 python3 -m unittest discover -v
 python3 -W error::DeprecationWarning -m unittest discover
-python3 -m compileall core strategies scheduler tracking tests
+python3 -m compileall analysis core strategies scheduler tracking tests scripts
+python3 scripts/check_oos_lockup_leakage.py
 python3 scheduler/run_scan.py --dry-run
 python3 scheduler/run_risk_check.py --dry-run
 python3 scheduler/run_report.py
@@ -179,6 +180,13 @@ For every code change, run unit tests before committing:
 ```bash
 python3 -m unittest discover -v
 ```
+
+Validation shorthand:
+- **baseline validation**: run the baseline validation tests above.
+- **strategy validation**: run baseline validation plus the
+  profit/trade-affecting validation ladder below.
+- **production validation**: run strategy validation plus the major strategy
+  release/material strategy-config validation set below.
 
 For profit/trade-affecting changes, also run:
 ```bash
@@ -195,14 +203,25 @@ P&L, drawdown, or position count.
 
 For major strategy releases or material strategy/config changes, also run:
 ```bash
+python3 scheduler/run_backtest.py --days 30 --fund 10000 --end-date <last-pre-lockup-date>
 python3 scheduler/run_walkforward.py --profile master
 ```
+Use the explicit `--end-date` fallback only when the normal 30-day backtest is
+blocked because the entire current window is inside the active OOS lockup.
 
 Use locked OOS only for final capital-scaling validation:
 ```bash
 python3 scheduler/run_walkforward.py --profile master --oos-only --no-write-report --no-artifacts
+python3 scheduler/run_backtest.py --oos-validation --output reports/oos_validation_<date>.md
 ```
-Do not tune against OOS.
+Do not tune against OOS. The active 90-day lockup in `data/oos_lockup.json` is
+excluded from normal backtests; `--oos-validation` is a single-use final
+validation workflow and must not be repeated after strategy tuning.
+
+Before scaling any strategy allocation, confirm:
+- the strategy is not bypassing `validation.sample_size_scaling` risk tiers
+- bootstrap confidence intervals pass using lower-bound planning metrics
+- the latest SPA/multiple-testing report for that strategy shows `p < 0.20`
 
 For scripts, docs, dashboards, health checks, logging, tests, beads metadata, or
 other changes that do not affect profit, trades, strategies, strategy config,

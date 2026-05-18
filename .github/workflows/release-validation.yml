@@ -1,0 +1,54 @@
+name: Release Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      backtest_end_date:
+        description: "30-day backtest end date: MM/DD/YYYY, auto, or none"
+        required: true
+        default: "auto"
+      run_operational_gates:
+        description: "Run Alpaca-dependent dry-run scan/risk/report gates"
+        required: true
+        type: boolean
+        default: true
+      run_ec2_health:
+        description: "Run EC2 systemd and Linux health checks on the runner"
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  release-validation:
+    name: Release Validation
+    runs-on: ubuntu-latest
+
+    env:
+      ALPACA_PAPER_API_KEY: ${{ secrets.ALPACA_PAPER_API_KEY }}
+      ALPACA_PAPER_SECRET_KEY: ${{ secrets.ALPACA_PAPER_SECRET_KEY }}
+      HAWKSTRADE_HEALTH_ALERT_WEBHOOK_URL: ${{ secrets.HAWKSTRADE_HEALTH_ALERT_WEBHOOK_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run release validation
+        shell: bash
+        run: |
+          args=(--backtest-end-date "${{ inputs.backtest_end_date }}")
+          if [[ "${{ inputs.run_operational_gates }}" != "true" ]]; then
+            args+=(--skip-operational)
+          fi
+          if [[ "${{ inputs.run_ec2_health }}" == "true" ]]; then
+            args+=(--include-ec2-health)
+          fi
+          python3 scripts/run_release_validation.py "${args[@]}"

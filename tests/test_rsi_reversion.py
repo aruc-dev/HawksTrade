@@ -39,7 +39,7 @@ class RSIReversionScanTests(unittest.TestCase):
             patch("strategies.rsi_reversion._calc_rsi", return_value=25.0),
             patch("strategies.rsi_reversion._bollinger_pct_b", return_value=0.10),
             patch("strategies.rsi_reversion._calc_atr", return_value=2.0),
-            patch.dict("strategies.rsi_reversion.SCFG", {"enabled": True}),
+            patch.dict("strategies.rsi_reversion.SCFG", {"enabled": True, "market_regime_mode": "normal"}),
         ):
             signals = RSIReversionStrategy().scan(["AAPL"], allow_regime_warmup=True)
 
@@ -48,6 +48,91 @@ class RSIReversionScanTests(unittest.TestCase):
         # Default atr_multiplier=0.8: atr_stop = 96 - 0.8*2 = 94.4;
         # risk_per_share = 1.6; risk_dollars = 100 -> qty = 62.5.
         self.assertAlmostEqual(signals[0]["atr_risk_qty"], 62.5, places=4)
+
+    def test_bear_or_chop_mode_stands_down_in_bull_regime(self):
+        bars = _make_bars()
+
+        def _get_stock_bars(symbols, timeframe="1Day", limit=210):
+            if symbols == ["SPY", "QQQ"]:
+                return {
+                    "SPY": [_bar(100) for _ in range(30)],
+                    "QQQ": [_bar(100) for _ in range(30)],
+                }
+            return {"AAPL": bars}
+
+        with (
+            patch("strategies.rsi_reversion.ac.get_stock_bars", side_effect=_get_stock_bars),
+            patch("strategies.rsi_reversion.ac.get_portfolio_value") as get_portfolio_value,
+            patch("strategies.rsi_reversion.rm.market_regime_ok", return_value=True) as market_regime_ok,
+            patch("strategies.rsi_reversion._calc_rsi", return_value=25.0),
+            patch("strategies.rsi_reversion._bollinger_pct_b", return_value=0.10),
+            patch("strategies.rsi_reversion._calc_atr", return_value=2.0),
+            patch.dict(
+                "strategies.rsi_reversion.SCFG",
+                {"enabled": True, "market_regime_mode": "bear_or_chop_only"},
+            ),
+        ):
+            signals = RSIReversionStrategy().scan(["AAPL"], allow_regime_warmup=True)
+
+        self.assertEqual(signals, [])
+        get_portfolio_value.assert_not_called()
+        self.assertEqual(set(market_regime_ok.call_args.kwargs["bars_data"]), {"SPY", "QQQ"})
+
+    def test_bear_or_chop_mode_allows_non_bull_regime(self):
+        bars = _make_bars()
+
+        def _get_stock_bars(symbols, timeframe="1Day", limit=210):
+            if symbols == ["SPY", "QQQ"]:
+                return {
+                    "SPY": [_bar(100) for _ in range(30)],
+                    "QQQ": [_bar(100) for _ in range(30)],
+                }
+            return {"AAPL": bars}
+
+        with (
+            patch("strategies.rsi_reversion.ac.get_stock_bars", side_effect=_get_stock_bars),
+            patch("strategies.rsi_reversion.ac.get_portfolio_value", return_value=10000.0),
+            patch("strategies.rsi_reversion.rm.market_regime_ok", return_value=False),
+            patch("strategies.rsi_reversion._calc_rsi", return_value=25.0),
+            patch("strategies.rsi_reversion._bollinger_pct_b", return_value=0.10),
+            patch("strategies.rsi_reversion._calc_atr", return_value=2.0),
+            patch.dict(
+                "strategies.rsi_reversion.SCFG",
+                {"enabled": True, "market_regime_mode": "bear_or_chop_only"},
+            ),
+        ):
+            signals = RSIReversionStrategy().scan(["AAPL"], allow_regime_warmup=True)
+
+        self.assertEqual(len(signals), 1)
+
+    def test_bear_or_chop_mode_stands_down_when_regime_data_is_insufficient(self):
+        bars = _make_bars()
+
+        def _get_stock_bars(symbols, timeframe="1Day", limit=210):
+            if symbols == ["SPY", "QQQ"]:
+                return {
+                    "SPY": [_bar(100) for _ in range(30)],
+                    "QQQ": [_bar(100) for _ in range(30)],
+                }
+            return {"AAPL": bars}
+
+        with (
+            patch("strategies.rsi_reversion.ac.get_stock_bars", side_effect=_get_stock_bars),
+            patch("strategies.rsi_reversion.ac.get_portfolio_value") as get_portfolio_value,
+            patch("strategies.rsi_reversion.rm.market_regime_ok") as market_regime_ok,
+            patch("strategies.rsi_reversion._calc_rsi", return_value=25.0),
+            patch("strategies.rsi_reversion._bollinger_pct_b", return_value=0.10),
+            patch("strategies.rsi_reversion._calc_atr", return_value=2.0),
+            patch.dict(
+                "strategies.rsi_reversion.SCFG",
+                {"enabled": True, "market_regime_mode": "bear_or_chop_only"},
+            ),
+        ):
+            signals = RSIReversionStrategy().scan(["AAPL"])
+
+        self.assertEqual(signals, [])
+        market_regime_ok.assert_not_called()
+        get_portfolio_value.assert_not_called()
 
     def test_scan_skips_signal_when_atr_risk_qty_below_notional_minimum(self):
         # price≈96, atr=20 and 6% stop cap → risk_per_share≈5.76,
@@ -65,7 +150,7 @@ class RSIReversionScanTests(unittest.TestCase):
             patch("strategies.rsi_reversion._calc_rsi", return_value=25.0),
             patch("strategies.rsi_reversion._bollinger_pct_b", return_value=0.10),
             patch("strategies.rsi_reversion._calc_atr", return_value=20.0),
-            patch.dict("strategies.rsi_reversion.SCFG", {"enabled": True}),
+            patch.dict("strategies.rsi_reversion.SCFG", {"enabled": True, "market_regime_mode": "normal"}),
         ):
             signals = RSIReversionStrategy().scan(["AAPL"], allow_regime_warmup=True)
 
@@ -87,7 +172,12 @@ class RSIReversionScanTests(unittest.TestCase):
             patch("strategies.rsi_reversion._calc_atr", return_value=20.0),
             patch.dict(
                 "strategies.rsi_reversion.SCFG",
-                {"enabled": True, "max_entry_atr_pct": 0, "max_stop_loss_pct": 0.06},
+                {
+                    "enabled": True,
+                    "market_regime_mode": "normal",
+                    "max_entry_atr_pct": 0,
+                    "max_stop_loss_pct": 0.06,
+                },
             ),
         ):
             signals = RSIReversionStrategy().scan(["AAPL"], allow_regime_warmup=True)
@@ -111,7 +201,7 @@ class RSIReversionScanTests(unittest.TestCase):
             patch("strategies.rsi_reversion._calc_atr", return_value=7.0),
             patch.dict(
                 "strategies.rsi_reversion.SCFG",
-                {"enabled": True, "max_entry_atr_pct": 0.06},
+                {"enabled": True, "market_regime_mode": "normal", "max_entry_atr_pct": 0.06},
             ),
         ):
             signals = RSIReversionStrategy().scan(["AAPL"], allow_regime_warmup=True)
@@ -133,7 +223,7 @@ class RSIReversionScanTests(unittest.TestCase):
             patch("strategies.rsi_reversion._calc_rsi", return_value=25.0),
             patch("strategies.rsi_reversion._bollinger_pct_b", return_value=0.10),
             patch("strategies.rsi_reversion._calc_atr", return_value=2.0),
-            patch.dict("strategies.rsi_reversion.SCFG", {"enabled": True}),
+            patch.dict("strategies.rsi_reversion.SCFG", {"enabled": True, "market_regime_mode": "normal"}),
         ):
             signals = RSIReversionStrategy().scan(["AAPL"], allow_regime_warmup=True)
 
@@ -153,7 +243,10 @@ class RSIReversionScanTests(unittest.TestCase):
             patch("strategies.rsi_reversion._calc_rsi", return_value=25.0),
             patch("strategies.rsi_reversion._bollinger_pct_b", return_value=0.10),
             patch("strategies.rsi_reversion._calc_atr", return_value=2.0),
-            patch.dict("strategies.rsi_reversion.SCFG", {"enabled": True, "volume_spike_ratio": 1.3}),
+            patch.dict(
+                "strategies.rsi_reversion.SCFG",
+                {"enabled": True, "market_regime_mode": "normal", "volume_spike_ratio": 1.3},
+            ),
         ):
             signals = RSIReversionStrategy().scan(["AAPL"], allow_regime_warmup=True)
 
@@ -165,7 +258,10 @@ class RSIReversionScanTests(unittest.TestCase):
             patch("strategies.rsi_reversion._calc_rsi", return_value=25.0),
             patch("strategies.rsi_reversion._bollinger_pct_b", return_value=0.10),
             patch("strategies.rsi_reversion._calc_atr", return_value=2.0),
-            patch.dict("strategies.rsi_reversion.SCFG", {"enabled": True, "volume_spike_ratio": 1.5}),
+            patch.dict(
+                "strategies.rsi_reversion.SCFG",
+                {"enabled": True, "market_regime_mode": "normal", "volume_spike_ratio": 1.5},
+            ),
         ):
             signals = RSIReversionStrategy().scan(["AAPL"], allow_regime_warmup=True)
 
@@ -189,7 +285,10 @@ class RSIReversionScanTests(unittest.TestCase):
             patch("strategies.rsi_reversion._calc_rsi", return_value=25.0),
             patch("strategies.rsi_reversion._bollinger_pct_b", return_value=0.10),
             patch("strategies.rsi_reversion._calc_atr", return_value=2.0),
-            patch.dict("strategies.rsi_reversion.SCFG", {"enabled": True, "min_recovery_bars": 2}),
+            patch.dict(
+                "strategies.rsi_reversion.SCFG",
+                {"enabled": True, "market_regime_mode": "normal", "min_recovery_bars": 2},
+            ),
         ):
             signals = RSIReversionStrategy().scan(["AAPL"], allow_regime_warmup=True)
 
@@ -206,7 +305,10 @@ class RSIReversionScanTests(unittest.TestCase):
             patch("strategies.rsi_reversion._calc_rsi", return_value=25.0),
             patch("strategies.rsi_reversion._bollinger_pct_b", return_value=0.10),
             patch("strategies.rsi_reversion._calc_atr", return_value=2.0),
-            patch.dict("strategies.rsi_reversion.SCFG", {"enabled": True, "min_recovery_bars": 2}),
+            patch.dict(
+                "strategies.rsi_reversion.SCFG",
+                {"enabled": True, "market_regime_mode": "normal", "min_recovery_bars": 2},
+            ),
         ):
             signals = RSIReversionStrategy().scan(["AAPL"], allow_regime_warmup=True)
 
@@ -230,7 +332,10 @@ class RSIReversionScanTests(unittest.TestCase):
             patch("strategies.rsi_reversion._calc_rsi", return_value=25.0),
             patch("strategies.rsi_reversion._bollinger_pct_b", return_value=0.10),
             patch("strategies.rsi_reversion._calc_atr", return_value=2.0),
-            patch.dict("strategies.rsi_reversion.SCFG", {"enabled": True, "min_close_location": 0.60}),
+            patch.dict(
+                "strategies.rsi_reversion.SCFG",
+                {"enabled": True, "market_regime_mode": "normal", "min_close_location": 0.60},
+            ),
         ):
             signals = RSIReversionStrategy().scan(["AAPL"], allow_regime_warmup=True)
 
@@ -287,7 +392,7 @@ class RSIReversionScanTests(unittest.TestCase):
             patch("strategies.rsi_reversion.ac.get_stock_bars", side_effect=_get_stock_bars),
             patch("strategies.rsi_reversion.ac.get_portfolio_value", return_value=10000.0),
             patch("strategies.rsi_reversion._calc_rsi", return_value=25.0),
-            patch.dict("strategies.rsi_reversion.SCFG", {"enabled": True}),
+            patch.dict("strategies.rsi_reversion.SCFG", {"enabled": True, "market_regime_mode": "normal"}),
         ):
             signals = RSIReversionStrategy().scan(["AAPL"], allow_regime_warmup=True)
 
@@ -307,7 +412,7 @@ class RSIReversionScanTests(unittest.TestCase):
             patch("strategies.rsi_reversion.ac.get_stock_bars", side_effect=_get_stock_bars),
             patch("strategies.rsi_reversion.ac.get_portfolio_value", return_value=10000.0),
             patch("strategies.rsi_reversion._calc_rsi", return_value=25.0),
-            patch.dict("strategies.rsi_reversion.SCFG", {"enabled": True}),
+            patch.dict("strategies.rsi_reversion.SCFG", {"enabled": True, "market_regime_mode": "normal"}),
         ):
             signals = RSIReversionStrategy().scan(["AAPL"], allow_regime_warmup=True)
 
@@ -331,7 +436,7 @@ class RSIReversionScanTests(unittest.TestCase):
             patch("strategies.rsi_reversion._calc_rsi", return_value=25.0),
             patch("strategies.rsi_reversion._bollinger_pct_b", return_value=0.10),
             patch("strategies.rsi_reversion._calc_atr", return_value=2.0),
-            patch.dict("strategies.rsi_reversion.SCFG", {"enabled": True}),
+            patch.dict("strategies.rsi_reversion.SCFG", {"enabled": True, "market_regime_mode": "normal"}),
         ):
             RSIReversionStrategy().scan(["AAPL"], allow_regime_warmup=True)
 

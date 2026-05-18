@@ -17,17 +17,26 @@ class V4ImprovementsTests(unittest.TestCase):
     # ── crypto_regime_ok (backtest path) ─────────────────────────────────────
 
     def test_crypto_regime_ok_bull(self):
-        # BTC > EMA20
+        # BTC > EMA20 with a non-deteriorating EMA slope.
         mock_bars = {
-            "BTC/USD": [MagicMock(close=100) for _ in range(20)] + [MagicMock(close=110)]
+            "BTC/USD": [MagicMock(close=100) for _ in range(25)] + [MagicMock(close=110)]
         }
         self.assertTrue(rm.crypto_regime_ok(bars_data=mock_bars))
 
     def test_crypto_regime_ok_bear(self):
         # BTC < EMA20
         mock_bars = {
-            "BTC/USD": [MagicMock(close=100) for _ in range(20)] + [MagicMock(close=90)]
+            "BTC/USD": [MagicMock(close=100) for _ in range(25)] + [MagicMock(close=90)]
         }
+        self.assertFalse(rm.crypto_regime_ok(bars_data=mock_bars))
+
+    def test_crypto_regime_ok_blocks_deteriorating_ema_slope(self):
+        mock_bars = {
+            "BTC/USD": [MagicMock(close=150) for _ in range(20)]
+            + [MagicMock(close=100) for _ in range(5)]
+            + [MagicMock(close=130)]
+        }
+
         self.assertFalse(rm.crypto_regime_ok(bars_data=mock_bars))
 
     def test_crypto_regime_ok_backtest_insufficient_data_returns_true(self):

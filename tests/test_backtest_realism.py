@@ -9,6 +9,7 @@ import pandas as pd
 
 from scheduler.run_backtest import (
     BacktestSimulator,
+    _backtest_protection_rows,
     _backtest_execution_notes,
     _format_execution_notes,
     _make_bar_fetcher,
@@ -224,6 +225,46 @@ class GapUpIntradayTests(unittest.TestCase):
 
 
 class TradeReplayTests(unittest.TestCase):
+    def test_backtest_closed_trade_records_portfolio_impact_for_protections(self):
+        sim = BacktestSimulator(initial_fund=10000.0)
+        frame = _frame(periods=2)
+        sim.historical_data = {"AAPL": frame}
+        sim.current_date = frame.index[0]
+        buy_req = type("Req", (), {
+            "symbol": "AAPL",
+            "qty": "4",
+            "side": type("Side", (), {"value": "buy"})(),
+            "strategy": "momentum",
+        })()
+        sell_req = type("Req", (), {
+            "symbol": "AAPL",
+            "qty": "4",
+            "side": type("Side", (), {"value": "sell"})(),
+            "strategy": "momentum",
+        })()
+
+        sim.submit_order(buy_req)
+        sim.current_date = frame.index[1]
+        sim.submit_order(sell_req)
+
+        trade = sim.trades_log[0]
+        self.assertIn("portfolio_pnl_pct", trade)
+        self.assertAlmostEqual(trade["portfolio_pnl_pct"], trade["pnl"] / 10000.0)
+        self.assertLess(abs(trade["portfolio_pnl_pct"]), abs(trade["pnl_pct"]))
+
+    def test_backtest_protection_rows_include_portfolio_impact(self):
+        rows = _backtest_protection_rows([
+            {
+                "symbol": "AAPL",
+                "strategy": "momentum",
+                "exit_date": "2026-01-05",
+                "pnl_pct": -0.05,
+                "portfolio_pnl_pct": -0.002,
+            }
+        ])
+
+        self.assertEqual(rows[0]["portfolio_pnl_pct"], -0.002)
+
     def test_matching_trade_replay_passes(self):
         rows = [{"symbol": "AAPL", "exit_date": "2026-01-05", "exit_price": 101.0, "pnl_pct": 0.01}]
 

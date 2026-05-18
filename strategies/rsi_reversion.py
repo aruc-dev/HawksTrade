@@ -40,6 +40,7 @@ import numpy as np
 from strategies.base_strategy import BaseStrategy
 from strategies.atr_sizing import atr_stop_and_qty
 from core import alpaca_client as ac
+from core import risk_manager as rm
 from core.config_loader import get_config
 
 CFG = get_config()
@@ -147,6 +148,12 @@ def _in_high_volatility_regime(
         return True
 
 
+def _has_minimum_regime_bars(bars_data, symbols: tuple[str, ...], min_bars: int) -> bool:
+    if not isinstance(bars_data, dict):
+        return False
+    return all(len(bars_data.get(symbol) or []) >= min_bars for symbol in symbols)
+
+
 def _calc_rsi(closes: pd.Series, period: int = 14) -> float:
     """Compute RSI for a price series, return the latest value."""
     delta  = closes.diff()
@@ -248,6 +255,7 @@ class RSIReversionStrategy(BaseStrategy):
             if max_loss_exit_pct > 0
             else "max-loss disabled"
         )
+        market_regime_mode = str(SCFG.get("market_regime_mode", "normal")).strip().lower()
 
         log.info(
             f"[RSI] Scanning {len(universe)} symbols "
@@ -264,19 +272,44 @@ class RSIReversionStrategy(BaseStrategy):
 
         regime_bars = kwargs.get("regime_bars")
 
-        # Pre-fetch SPY once and share between both regime filters to avoid double API call.
-        if regime_bars is None or "SPY" not in (regime_bars or {}):
+        # Pre-fetch regime symbols once and share between regime filters to avoid duplicate API calls.
+        required_regime_symbols = ["SPY"]
+        if market_regime_mode in {"bear_or_chop_only", "bear_only"}:
+            required_regime_symbols.append("QQQ")
+        supplied_regime_bars = regime_bars if isinstance(regime_bars, dict) else {}
+        missing_regime_symbols = [
+            symbol for symbol in required_regime_symbols
+            if symbol not in supplied_regime_bars
+        ]
+        if missing_regime_symbols:
             try:
-                raw_spy = ac.get_stock_bars(["SPY"], timeframe="1Day", limit=255)
-                spy_bars = raw_spy.get("SPY")
-                if spy_bars:
-                    combined = dict(regime_bars) if regime_bars else {}
-                    combined["SPY"] = spy_bars
-                    regime_bars = combined
+                raw_regime_bars = ac.get_stock_bars(missing_regime_symbols, timeframe="1Day", limit=255)
+                combined = dict(supplied_regime_bars)
+                for symbol in missing_regime_symbols:
+                    bars = raw_regime_bars.get(symbol)
+                    if bars:
+                        combined[symbol] = bars
+                regime_bars = combined
             except Exception as e:
-                log.warning(f"[RSI] Failed to pre-fetch SPY for regime filters: {e}")
+                log.warning(f"[RSI] Failed to pre-fetch stock regime bars: {e}")
 
         allow_regime_warmup = bool(kwargs.get("allow_regime_warmup", False))
+
+        if market_regime_mode in {"bear_or_chop_only", "bear_only"}:
+            if not allow_regime_warmup and not _has_minimum_regime_bars(regime_bars, ("SPY", "QQQ"), 51):
+                log.warning("[RSI] Insufficient SPY/QQQ regime bars for bear/chop sleeve — standing down (fail closed).")
+                return []
+            if rm.market_regime_ok(
+                bars_data=regime_bars,
+                allow_warmup=allow_regime_warmup,
+            ):
+                log.info("[RSI] Bull market regime — bear/chop sleeve standing down.")
+                return []
+        elif market_regime_mode not in {"", "normal", "all"}:
+            log.warning(
+                "[RSI] Unknown market_regime_mode=%s; using normal RSI regime filters.",
+                market_regime_mode,
+            )
 
         if _in_severe_crash(bars_data=regime_bars, allow_warmup=allow_regime_warmup):
             log.info("[RSI] Severe crash (SPY >20% below 252d peak) — skipping scan.")

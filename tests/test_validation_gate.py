@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from scheduler.run_validation_gate import (
+    evaluate_backtest_gate,
     evaluate_slippage_sensitivity_gate,
     evaluate_rsi_forward_gate,
     reliability_warnings,
@@ -80,6 +81,7 @@ class ValidationGateTests(unittest.TestCase):
         self.assertFalse(record["passed"])
         self.assertIn("sensitivity floor", record["failures"][0])
         self.assertEqual(run_backtest.call_args.kwargs["cost_model"]["slippage_bps"], 30.0)
+        self.assertFalse(run_backtest.call_args.kwargs["write_quarterly_csv"])
 
     def test_slippage_sensitivity_gate_adds_reliability_warning(self):
         gate = {"name": "default_12m_costed", "days": 365}
@@ -105,6 +107,89 @@ class ValidationGateTests(unittest.TestCase):
 
         self.assertTrue(record["passed"])
         self.assertIn("reliability floor 30", record["warnings"][0])
+
+    def test_backtest_gate_exposes_bootstrap_gate_bounds(self):
+        gate = {
+            "name": "default_12m_costed",
+            "days": 365,
+            "min_return_pct": 0.0,
+            "min_profit_factor": 1.0,
+            "min_daily_sharpe": 0.0,
+        }
+        result_payload = {
+            "stats": {
+                "return_pct": 0.08,
+                "max_drawdown": -0.01,
+                "profit_factor": 2.0,
+                "daily_sharpe": 1.2,
+                "trades": 50,
+                "win_rate": 0.6,
+                "bootstrap": {
+                    "block": {
+                        "return_pct": {"p05": -0.02},
+                        "max_drawdown": {"p05": -0.04},
+                        "daily_sharpe": {"p05": -0.5},
+                    },
+                    "trade": {
+                        "profit_factor": {"p05": 0.8},
+                    },
+                },
+            },
+        }
+
+        with patch("scheduler.run_validation_gate.run_backtest", return_value=result_payload) as run_backtest:
+            record = evaluate_backtest_gate(gate, {}, 10000)
+
+        self.assertFalse(record["passed"])
+        self.assertFalse(run_backtest.call_args.kwargs["write_quarterly_csv"])
+        self.assertTrue(record["uses_bootstrap_bounds"])
+        self.assertEqual(record["gate_stats"]["return_pct"], -0.02)
+        self.assertEqual(record["gate_stats"]["profit_factor"], 0.8)
+        self.assertTrue(any("profit_factor 0.80 < 1.00" in failure for failure in record["failures"]))
+
+    def test_non_required_backtest_gate_skips_locked_oos_window(self):
+        gate = {"name": "crypto_recent_30d_watch", "days": 30, "required": False}
+        error = ValueError(
+            "Backtest window falls entirely inside the locked OOS range "
+            "2026-02-15..2026-05-15; use --oos-validation for the one-shot validation workflow."
+        )
+
+        with patch("scheduler.run_validation_gate.run_backtest", side_effect=error):
+            record = evaluate_backtest_gate(gate, {}, 10000)
+
+        self.assertTrue(record["passed"])
+        self.assertTrue(record["skipped"])
+        self.assertFalse(record["failures"])
+        self.assertIn("OOS lockup skipped", record["warnings"][0])
+
+    def test_required_backtest_gate_fails_locked_oos_window(self):
+        gate = {"name": "required_recent", "days": 30, "required": True}
+        error = ValueError(
+            "Backtest window falls entirely inside the locked OOS range "
+            "2026-02-15..2026-05-15; use --oos-validation for the one-shot validation workflow."
+        )
+
+        with patch("scheduler.run_validation_gate.run_backtest", side_effect=error):
+            record = evaluate_backtest_gate(gate, {}, 10000)
+
+        self.assertFalse(record["passed"])
+        self.assertTrue(record["skipped"])
+        self.assertIn("locked OOS range", record["failures"][0])
+
+    def test_slippage_sensitivity_skips_locked_oos_window(self):
+        gate = {"name": "crypto_recent_30d_watch", "days": 30, "required": False}
+        error = ValueError(
+            "Backtest window falls entirely inside the locked OOS range "
+            "2026-02-15..2026-05-15; use --oos-validation for the one-shot validation workflow."
+        )
+
+        with patch("scheduler.run_validation_gate.run_backtest", side_effect=error):
+            record = evaluate_slippage_sensitivity_gate(gate, {}, 10000, 30.0)
+
+        self.assertEqual(record["name"], "crypto_recent_30d_watch_slippage_30bps")
+        self.assertTrue(record["passed"])
+        self.assertTrue(record["skipped"])
+        self.assertIn("OOS lockup skipped", record["warnings"][0])
 
     def test_rsi_forward_gate_requires_paper_history(self):
         criteria = {
@@ -219,6 +304,47 @@ class ValidationGateTests(unittest.TestCase):
         self.assertIn("Range Breakout enablement gates:", output)
         gate.assert_called_once()
 
+    def test_ma_profile_runs_configured_backtest_gates(self):
+        cfg = {
+            "validation": {
+                "cost_model": {},
+                "ma_crossover_enablement": {
+                    "backtest_windows": [
+                        {
+                            "name": "ma_crossover_12m_costed",
+                            "days": 365,
+                            "strategies": ["ma_crossover"],
+                            "required": True,
+                        }
+                    ]
+                },
+            },
+        }
+        record = {
+            "name": "ma_crossover_12m_costed",
+            "required": True,
+            "passed": True,
+            "failures": [],
+            "stats": {
+                "return_pct": 0.04,
+                "max_drawdown": -0.01,
+                "trades": 22,
+                "win_rate": 0.50,
+                "profit_factor": 1.8,
+                "daily_sharpe": 1.2,
+            },
+        }
+
+        with (
+            patch("scheduler.run_validation_gate.get_config", return_value=cfg),
+            patch("scheduler.run_validation_gate.evaluate_backtest_gate", return_value=record) as gate,
+        ):
+            exit_code, output = run_validation_gate(profile="ma")
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("MA Crossover enablement gates:", output)
+        gate.assert_called_once()
+
     def test_production_profile_adds_slippage_sensitivity_only_when_requested(self):
         cfg = {
             "validation": {
@@ -273,6 +399,7 @@ class ValidationGateTests(unittest.TestCase):
             )
 
         self.assertEqual(exit_code, 0)
+        self.assertIn("trade count and win-rate gates use point estimates", output)
         self.assertIn("Production slippage sensitivity", output)
         gate.assert_called_once()
         self.assertEqual(sensitivity.call_count, 2)

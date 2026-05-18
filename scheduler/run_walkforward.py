@@ -23,6 +23,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
 from core.config_loader import get_config  # noqa: E402
+from analysis.bootstrap import gate_bounds  # noqa: E402
 from scheduler.run_backtest import run_backtest  # noqa: E402
 
 
@@ -118,26 +119,31 @@ def _annualized_return(return_pct: float, window_days: int) -> float:
 
 def window_failures(stats: dict, thresholds: WalkForwardThresholds) -> list[str]:
     failures: list[str] = []
-    if stats["return_pct"] < thresholds.min_return_pct:
+    bounds = gate_bounds(stats)
+    stats["gate_return_pct"] = bounds["return_pct"]
+    stats["gate_max_drawdown"] = bounds["max_drawdown"]
+    stats["gate_profit_factor"] = bounds["profit_factor"]
+    stats["gate_daily_sharpe"] = bounds["daily_sharpe"]
+    if bounds["return_pct"] < thresholds.min_return_pct:
         failures.append(
-            f"return {_format_pct(stats['return_pct'])} < {_format_pct(thresholds.min_return_pct)}"
+            f"return {_format_pct(bounds['return_pct'])} < {_format_pct(thresholds.min_return_pct)}"
         )
-    if stats["max_drawdown"] < -thresholds.max_drawdown_pct:
+    if bounds["max_drawdown"] < -thresholds.max_drawdown_pct:
         failures.append(
-            f"drawdown {_format_pct(stats['max_drawdown'])} exceeds -{thresholds.max_drawdown_pct:.2%}"
+            f"drawdown {_format_pct(bounds['max_drawdown'])} exceeds -{thresholds.max_drawdown_pct:.2%}"
         )
-    if stats["profit_factor"] < thresholds.min_profit_factor:
+    if bounds["profit_factor"] < thresholds.min_profit_factor:
         failures.append(
-            f"profit_factor {_format_ratio(stats['profit_factor'])} < {thresholds.min_profit_factor:.2f}"
+            f"profit_factor {_format_ratio(bounds['profit_factor'])} < {thresholds.min_profit_factor:.2f}"
         )
     if int(stats["trades"]) < thresholds.min_trades:
         failures.append(f"trades {stats['trades']} < {thresholds.min_trades}")
     if (
         thresholds.min_daily_sharpe is not None
-        and stats["daily_sharpe"] < thresholds.min_daily_sharpe
+        and bounds["daily_sharpe"] < thresholds.min_daily_sharpe
     ):
         failures.append(
-            f"daily_sharpe {stats['daily_sharpe']:.2f} < {thresholds.min_daily_sharpe:.2f}"
+            f"daily_sharpe {bounds['daily_sharpe']:.2f} < {thresholds.min_daily_sharpe:.2f}"
         )
     return failures
 
@@ -150,28 +156,35 @@ def profile_window_failures(
 ) -> list[str]:
     annualized = _annualized_return(float(stats["return_pct"]), window_days)
     stats["annualized_return_pct"] = annualized
+    bounds = gate_bounds(stats)
+    bound_return = _annualized_return(float(bounds["return_pct"]), window_days)
+    stats["gate_return_pct"] = bounds["return_pct"]
+    stats["gate_max_drawdown"] = bounds["max_drawdown"]
+    stats["gate_profit_factor"] = bounds["profit_factor"]
+    stats["gate_daily_sharpe"] = bounds["daily_sharpe"]
+    stats["annualized_return_gate_pct"] = bound_return
     failures: list[str] = []
-    if annualized < thresholds.min_return_pct:
+    if bound_return < thresholds.min_return_pct:
         failures.append(
             "annualized_return "
-            f"{_format_pct(annualized)} < {_format_pct(thresholds.min_return_pct)}"
+            f"{_format_pct(bound_return)} < {_format_pct(thresholds.min_return_pct)}"
         )
-    if stats["max_drawdown"] < -thresholds.max_drawdown_pct:
+    if bounds["max_drawdown"] < -thresholds.max_drawdown_pct:
         failures.append(
-            f"drawdown {_format_pct(stats['max_drawdown'])} exceeds -{thresholds.max_drawdown_pct:.2%}"
+            f"drawdown {_format_pct(bounds['max_drawdown'])} exceeds -{thresholds.max_drawdown_pct:.2%}"
         )
-    if stats["profit_factor"] < thresholds.min_profit_factor:
+    if bounds["profit_factor"] < thresholds.min_profit_factor:
         failures.append(
-            f"profit_factor {_format_ratio(stats['profit_factor'])} < {thresholds.min_profit_factor:.2f}"
+            f"profit_factor {_format_ratio(bounds['profit_factor'])} < {thresholds.min_profit_factor:.2f}"
         )
     if int(stats["trades"]) < thresholds.min_trades:
         failures.append(f"trades {stats['trades']} < {thresholds.min_trades}")
     if (
         thresholds.min_daily_sharpe is not None
-        and stats["daily_sharpe"] < thresholds.min_daily_sharpe
+        and bounds["daily_sharpe"] < thresholds.min_daily_sharpe
     ):
         failures.append(
-            f"daily_sharpe {stats['daily_sharpe']:.2f} < {thresholds.min_daily_sharpe:.2f}"
+            f"daily_sharpe {bounds['daily_sharpe']:.2f} < {thresholds.min_daily_sharpe:.2f}"
         )
     return failures
 
@@ -551,8 +564,10 @@ def _render_profile_report(
         "",
         "## Per-Window Detail",
         "",
-        "| Cost | Window | Regime | End Date | Days | Return | Annualized | Max DD | PF | Trades | Win | Sharpe | Result | Notes |",
-        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|",
+        "Point estimates are shown first. Gate columns show the bootstrap-bound metrics used for pass/fail decisions when confidence intervals are present.",
+        "",
+        "| Cost | Window | Regime | End Date | Days | Return | Annualized | Max DD | PF | Trades | Win | Sharpe | Gate Ann. | Gate DD | Gate PF | Gate Sharpe | Result | Notes |",
+        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|",
     ])
 
     for record in records:
@@ -567,7 +582,12 @@ def _render_profile_report(
             f"{_format_pct(stats['annualized_return_pct'])} | "
             f"{_format_pct(stats['max_drawdown'])} | "
             f"{_format_ratio(stats['profit_factor'])} | {stats['trades']} | "
-            f"{stats['win_rate']:.1%} | {stats['daily_sharpe']:.2f} | {result} | {notes} |"
+            f"{stats['win_rate']:.1%} | {stats['daily_sharpe']:.2f} | "
+            f"{_format_pct(stats.get('annualized_return_gate_pct', stats['annualized_return_pct']))} | "
+            f"{_format_pct(stats.get('gate_max_drawdown', stats['max_drawdown']))} | "
+            f"{_format_ratio(stats.get('gate_profit_factor', stats['profit_factor']))} | "
+            f"{stats.get('gate_daily_sharpe', stats['daily_sharpe']):.2f} | "
+            f"{result} | {notes} |"
         )
 
     attribution_level = binding_level if any(
