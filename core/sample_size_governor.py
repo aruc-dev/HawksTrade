@@ -52,8 +52,8 @@ def _strategy_closed_count(strategy: str, rows: Iterable[dict]) -> int:
         1
         for row in rows
         if row.get("strategy") == strategy
-        and row.get("status", "closed") == "closed"
-        and row.get("side", "sell") == "sell"
+        and row.get("status") == "closed"
+        and row.get("side") == "sell"
     )
 
 

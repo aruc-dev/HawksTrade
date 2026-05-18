@@ -90,6 +90,9 @@ class SampleSizeGovernorTests(unittest.TestCase):
             {"strategy": "gap_up", "side": "buy", "status": "closed"},
             {"strategy": "gap_up", "side": "sell", "status": "submitted"},
             {"strategy": "gap_up", "side": "sell", "status": "closed"},
+            {"strategy": "gap_up", "side": "sell"},
+            {"strategy": "gap_up", "status": "closed"},
+            {"strategy": "gap_up"},
         ]
 
         self.assertEqual(closed_trade_count("gap_up", rows), 1)

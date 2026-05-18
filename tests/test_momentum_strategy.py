@@ -242,6 +242,31 @@ class MomentumStrategyTests(unittest.TestCase):
 
         self.assertEqual(signals, [])
 
+    def test_scan_defers_atr_until_after_cheap_momentum_gate(self):
+        prices = [100.0] * 100 + [101.0, 101.0]
+        bars = [_bar(p, volume=3000) for p in prices]
+        bars_resp = {"AAPL": bars}
+
+        with (
+            patch("strategies.momentum.ac.get_stock_bars", return_value=bars_resp),
+            patch("strategies.momentum.rm.market_regime_ok", return_value=True),
+            patch("strategies.momentum.rm.market_breadth_pct", return_value=0.6),
+            patch("strategies.momentum.ac.get_portfolio_value", return_value=10000.0),
+            patch("strategies.momentum.get_sector", return_value="Tech"),
+            patch("strategies.momentum._calc_atr", return_value=2.0) as calc_atr,
+        ):
+            with patch.dict("strategies.momentum.SCFG", {
+                "enabled": True,
+                "top_n": 1,
+                "min_momentum_pct": 0.05,
+                "min_momentum_atr_mult": 0.0,
+                "min_breadth_coverage_pct": 0.0,
+            }):
+                signals = MomentumStrategy().scan(["AAPL"])
+
+        self.assertEqual(signals, [])
+        calc_atr.assert_not_called()
+
     def test_momentum_volume_confirmation_gate(self):
         prices = [100.0] * 100 + [110.0, 110.0]
         bars = [_bar(p, volume=1000) for p in prices[:-1]] + [_bar(prices[-1], volume=1100)]

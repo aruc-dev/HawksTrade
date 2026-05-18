@@ -400,12 +400,11 @@ class MomentumStrategy(BaseStrategy):
                 
                 momentum = (avg_now - avg_then) / avg_then
                 price_now = float(closes.iloc[-1])
-                atr = _calc_atr(bars, period=atr_period) if len(bars) >= atr_period + 1 else 0.0
                 momentum_gate = _momentum_threshold(
                     base_min_momentum_pct,
-                    atr,
+                    0.0,
                     price_now,
-                    min_momentum_atr_mult,
+                    0.0,
                 )
 
                 # 2. Alpha (Recommendation 2)
@@ -452,6 +451,21 @@ class MomentumStrategy(BaseStrategy):
                         f"failed ({volume_ratio:.2f}x < {volume_required:.2f}x)"
                     )
                     continue
+
+                atr = _calc_atr(bars, period=atr_period) if len(bars) >= atr_period + 1 else 0.0
+                if min_momentum_atr_mult > 0:
+                    momentum_gate = _momentum_threshold(
+                        base_min_momentum_pct,
+                        atr,
+                        price_now,
+                        min_momentum_atr_mult,
+                    )
+                    if momentum < momentum_gate:
+                        log.debug(
+                            f"[Momentum] {symbol} skipped: momentum {momentum:.1%} < "
+                            f"threshold {momentum_gate:.1%}"
+                        )
+                        continue
 
                 scores.append({
                     "symbol":             symbol,
