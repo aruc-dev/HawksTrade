@@ -271,8 +271,8 @@ class OrderExecutorTests(unittest.TestCase):
 
         with (
             patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
-            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 2}),
-            patch.object(order_executor.rm, "cap_position_qty", return_value=2),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 4}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=4),
             patch.object(order_executor.ac, "place_limit_order", return_value=order),
             self.assertLogs("core.order_executor", level="INFO") as logs,
         ):
@@ -280,7 +280,7 @@ class OrderExecutorTests(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertEqual(result["status"], "submitted")
-        self.assertEqual(result["qty"], 0.5)
+        self.assertEqual(result["qty"], 1.0)
         self.assertEqual(result["risk_tier"], "exploration:0")
         self.assertTrue(any("Entry order submitted for MSFT" in message for message in logs.output))
         self.assertFalse(any("WARNING:core.order_executor:Entry order submitted for MSFT" in message for message in logs.output))
@@ -288,9 +288,24 @@ class OrderExecutorTests(unittest.TestCase):
         rows = [row for row in trade_log.read_trade_rows() if row["symbol"] == "MSFT"]
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["status"], "submitted")
-        self.assertEqual(rows[0]["qty"], "0.5")
+        self.assertEqual(rows[0]["qty"], "1.0")
         self.assertEqual(rows[0]["risk_tier"], "exploration:0")
         self.assertFalse(any(row["symbol"] == "MSFT" for row in trade_log.get_open_trades()))
+
+    def test_enter_position_blocks_when_scaled_notional_below_minimum(self):
+        with (
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 2}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=2),
+            patch.object(order_executor.ac, "place_limit_order") as place_limit_order,
+            self.assertLogs("core.order_executor", level="INFO") as logs,
+        ):
+            result = order_executor.enter_position("MSFT", "gap_up", dry_run=False)
+
+        self.assertIsNone(result)
+        place_limit_order.assert_not_called()
+        self.assertTrue(any("scaled notional $50.00 is below min trade value $100.00" in message for message in logs.output))
+        self.assertFalse(any(row["symbol"] == "MSFT" for row in trade_log.read_trade_rows()))
 
     def test_closed_trades_for_strategy_supports_legacy_getter_without_strategy_kwarg(self):
         def legacy_getter(*args, **kwargs):
@@ -363,8 +378,8 @@ class OrderExecutorTests(unittest.TestCase):
 
         with (
             patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
-            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 2}),
-            patch.object(order_executor.rm, "cap_position_qty", return_value=2),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 4}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=4),
             patch.object(order_executor.ac, "get_open_orders", return_value=[pending_order]),
             patch.object(order_executor.ac, "place_limit_order") as place_limit_order,
             self.assertLogs("core.order_executor", level="WARNING") as logs,
@@ -380,8 +395,8 @@ class OrderExecutorTests(unittest.TestCase):
     def test_enter_position_blocks_when_governor_account_lookup_fails(self):
         with (
             patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
-            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 2}),
-            patch.object(order_executor.rm, "cap_position_qty", return_value=2),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 4}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=4),
             patch.object(order_executor.ac, "get_account", side_effect=RuntimeError("account timeout")),
             patch.object(order_executor.ac, "place_limit_order") as place_limit_order,
         ):
@@ -398,8 +413,8 @@ class OrderExecutorTests(unittest.TestCase):
         with (
             patch.dict(order_executor.CFG, {"order_governor": {"enabled": False}}),
             patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
-            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 2}),
-            patch.object(order_executor.rm, "cap_position_qty", return_value=2),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 8}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=8),
             patch.object(order_executor.ac, "get_account", side_effect=AssertionError("account lookup should not run")),
             patch.object(order_executor.ac, "get_open_orders", side_effect=AssertionError("order lookup should not run")),
             patch.object(order_executor.ac, "place_limit_order", return_value=order) as place_limit_order,
@@ -454,8 +469,8 @@ class OrderExecutorTests(unittest.TestCase):
 
         with (
             patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
-            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 2}),
-            patch.object(order_executor.rm, "cap_position_qty", return_value=2),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 8}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=8),
             patch.object(order_executor.ac, "place_limit_order", return_value=order),
         ):
             result = order_executor.enter_position("MSFT", "gap_up", dry_run=False)
@@ -481,8 +496,8 @@ class OrderExecutorTests(unittest.TestCase):
 
         with (
             patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
-            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 1}),
-            patch.object(order_executor.rm, "cap_position_qty", return_value=1),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 4}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=4),
             patch.object(order_executor.ac, "place_limit_order", return_value=order),
         ):
             result = order_executor.enter_position(
@@ -504,8 +519,8 @@ class OrderExecutorTests(unittest.TestCase):
 
         with (
             patch.object(order_executor.ac, "get_crypto_latest_price", return_value=100),
-            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 1}),
-            patch.object(order_executor.rm, "cap_position_qty", return_value=1),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 4}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=4),
             patch.object(order_executor.ac, "place_limit_order", return_value=order),
         ):
             result = order_executor.enter_position(
@@ -528,8 +543,8 @@ class OrderExecutorTests(unittest.TestCase):
 
         with (
             patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
-            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 2}),
-            patch.object(order_executor.rm, "cap_position_qty", return_value=2),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 4}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=4),
             patch.object(order_executor.ac, "place_limit_order", return_value=order),
         ):
             result = order_executor.enter_position("MSFT", "gap_up", dry_run=False)
@@ -558,8 +573,8 @@ class OrderExecutorTests(unittest.TestCase):
         with (
             patch.dict(os.environ, {"HAWKSTRADE_RUN_ID": "run-retry"}),
             patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
-            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 2}),
-            patch.object(order_executor.rm, "cap_position_qty", return_value=2),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 8}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=8),
             patch.object(order_executor.ac, "place_limit_order", side_effect=_place_limit_order),
         ):
             first = order_executor.enter_position("MSFT", "gap_up", dry_run=False)

@@ -32,8 +32,10 @@ def render_catalog_report() -> str:
     lines = [
         "# Multiple-Testing Correction Catalog",
         "",
-        "The Phase 1 SPA workflow uses `scheduler/run_backtest.py --grid <strategy>` ",
-        "to emit daily return matrices, then `scheduler/run_spa_analysis.py` to compute p-values.",
+        (
+            "The Phase 1 SPA workflow uses `scheduler/run_backtest.py --grid <strategy>` "
+            "to emit daily return matrices, then `scheduler/run_spa_analysis.py` to compute p-values."
+        ),
         "",
         "| Strategy | Enabled | Variants |",
         "|---|---:|---:|",

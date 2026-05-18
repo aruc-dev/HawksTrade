@@ -66,6 +66,13 @@ def _current_run_id() -> str:
     return os.getenv("HAWKSTRADE_RUN_ID") or "manual"
 
 
+def _min_trade_value_usd() -> float:
+    try:
+        return max(0.0, float(CFG.get("trading", {}).get("min_trade_value_usd", 0) or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _create_order_intent(symbol: str, side: str, strategy: str, asset_class: str, qty, limit_price=None) -> dict | None:
     if MODE == "backtest":
         return None
@@ -490,8 +497,21 @@ def enter_position(
             base_position_cap_pct=base_position_cap_pct,
             base_cap_qty=check["qty"],
         )
-        if capped_qty <= 0:
+        if not math.isfinite(capped_qty) or capped_qty <= 0:
             log.info(f"Entry blocked for {symbol}: capped quantity is zero.")
+            return None
+        min_trade_value = _min_trade_value_usd()
+        scaled_notional = capped_qty * price
+        if min_trade_value > 0 and scaled_notional + 1e-9 < min_trade_value:
+            log.info(
+                "Entry blocked for %s: scaled notional $%.2f is below min trade value $%.2f "
+                "(qty=%s price=%.4f).",
+                symbol,
+                scaled_notional,
+                min_trade_value,
+                capped_qty,
+                price,
+            )
             return None
         if sizing.capped:
             log.info(f"Entry size capped for {symbol}: requested={sizing.requested_qty} capped={capped_qty}")

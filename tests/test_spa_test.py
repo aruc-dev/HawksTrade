@@ -83,6 +83,11 @@ class SPATests(unittest.TestCase):
 
         self.assertIn("momentum", report)
         self.assertIn("Variants", report)
+        self.assertIn(
+            "The Phase 1 SPA workflow uses `scheduler/run_backtest.py --grid <strategy>` "
+            "to emit daily return matrices, then `scheduler/run_spa_analysis.py` to compute p-values.\n",
+            report,
+        )
 
 
 if __name__ == "__main__":
