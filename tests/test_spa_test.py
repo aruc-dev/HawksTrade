@@ -55,7 +55,9 @@ class SPATests(unittest.TestCase):
         catalog = strategy_search_space_catalog()
 
         self.assertIn("momentum", catalog)
-        self.assertGreaterEqual(len(catalog["momentum"]), 20)
+        self.assertEqual(len(catalog["momentum"]), 81)
+        self.assertEqual(len(catalog["relative_strength"]), 81)
+        self.assertEqual(len(catalog["gap_up"]), 27)
 
     def test_returns_matrix_from_csv_and_report(self):
         with tempfile.TemporaryDirectory() as tmpdir:

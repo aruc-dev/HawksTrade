@@ -24,7 +24,8 @@ selection bias.
 
 | Strategy | Grid Size | Primary Parameters |
 |---|---:|---|
-| `momentum` | 27 | `top_n`, `min_momentum_pct`, `atr_multiplier` |
+| `momentum` | 81 | `top_n`, `min_momentum_pct`, `min_momentum_atr_mult`, `atr_multiplier` |
+| `relative_strength` | 81 | `top_n`, `min_rs_pct`, `min_abs_return_pct`, `lookback_days` |
 | `gap_up` | 27 | `min_gap_pct`, `volume_multiplier`, `hold_days` |
 | `ma_crossover` | 27 | `fast_ema`, `slow_ema`, `hold_days` |
 | `range_breakout` | 27 | `breakout_pct`, `volume_multiplier`, `hold_days` |

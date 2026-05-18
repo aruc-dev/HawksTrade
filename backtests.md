@@ -145,7 +145,7 @@ The latest implementation was also checked with:
 ```bash
 python3 -m unittest discover -v
 python3 -W error::DeprecationWarning -m unittest discover
-python3 -m compileall core strategies scheduler tracking tests
+python3 -m compileall analysis core strategies scheduler tracking tests
 python3 scheduler/run_scan.py --dry-run
 python3 scheduler/run_risk_check.py --dry-run
 python3 scheduler/run_report.py

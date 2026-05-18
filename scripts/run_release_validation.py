@@ -61,6 +61,7 @@ def build_release_validation_plan(args: argparse.Namespace) -> list[ValidationGa
                 py,
                 "-m",
                 "compileall",
+                "analysis",
                 "core",
                 "strategies",
                 "scheduler",

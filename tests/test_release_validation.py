@@ -40,6 +40,8 @@ class ReleaseValidationPlanTests(unittest.TestCase):
         )
 
         commands = [gate.command for gate in gates]
+        compileall = next(gate.command for gate in gates if gate.name == "compileall")
+        self.assertIn("analysis", compileall)
         self.assertIn((sys.executable, "scheduler/run_validation_gate.py", "--profile", "production"), commands)
         self.assertIn(
             (
