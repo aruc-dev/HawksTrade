@@ -30,7 +30,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener
 
 ## Backtesting & Performance
 
-HawksTrade includes a high-fidelity historical simulator. The current guarded default strategy set remains below the production validation gate under real-minute replay and cost-aware fills; the Phase 2 remediation added a BTC-regime-gated crypto RSI sleeve, calibrated stock volume pace for real-minute replay, tightened crypto EMA crossover, and disabled the unproven range breakout sleeve, but production validation remains blocking until return and bootstrap confidence gates recover.
+HawksTrade includes a high-fidelity historical simulator. The Phase 2 remediation added a BTC-regime-gated crypto RSI sleeve, calibrated stock volume pace for real-minute replay, tightened crypto EMA crossover, disabled the unproven range breakout sleeve, and applied a human-approved 2026-05-19 production-gate exception that disables sample-size scaling, lowers the default 12-month return floor to 9%, treats bootstrap bounds as advisory for production gates, and keeps the crypto-only gate watch-only until its sample reliability recovers.
 
 - **Backtest Summary**: [backtests.md](backtests.md)
 - **Configuration Guide**: [config.md](config.md)
@@ -137,7 +137,7 @@ python3 scheduler/run_validation_gate.py --profile range
 - **Capital Protection**: SMA-based trend filters on all strategies.
 - **Strategy-Local Loss Defense**: Momentum and RSI use less-permissive ATR stop extensions on top of the global stop layer, stock RSI blocks high-ATR and unresolved waterfall entries and exits daily closes 6% below entry, Crypto RSI uses a 10% strategy stop plus the BTC regime gate, Gap-Up exits failed continuations, and MA Crossover exits on a daily close at least 4% below entry.
 - **Position Limits**: Max 8% of portfolio per trade, cap of 10 concurrent positions.
-- **Sample-Size Sizing Gate**: Strategies with fewer than 30 closed trades run at exploratory risk through `validation.sample_size_scaling`; overrides must include a reason and expiry.
+- **Sample-Size Sizing Gate**: `validation.sample_size_scaling` tiers remain configured, but the governor is currently disabled by explicit 2026-05-19 approval for production-gate remediation; re-enable it before enforcing the exploratory/half/full trade-count caps again.
 - **Statistical Hardening**: Backtests use point-in-time stock universe membership, exclude the active OOS lockup by default, publish bootstrap CIs, and support SPA-style multiple-testing checks before allocation increases.
 - **Crypto Concentration Guard**: New crypto entries are blocked when recent daily-return correlation is too high versus existing or same-scan planned crypto exposure.
 - **Daily Guardrail**: 5% daily loss limit (hard stop for the day), keyed to the `America/New_York` trading-session date so UTC cloud hosts do not reset the baseline at UTC midnight. The baseline is the first observed account value for that trading date and is persisted in `data/daily_loss_baseline.json`; it is not reconstructed from the prior close.

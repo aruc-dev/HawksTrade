@@ -351,8 +351,17 @@ Do not tune against OOS.
 Backtest protection rows carry position-size-adjusted `portfolio_pnl_pct` for
 portfolio-wide realized-drawdown locks; symbol stop-loss, strategy stop-loss,
 and low-profit protections still use raw closed-trade `pnl_pct`.
-Do not bypass `validation.sample_size_scaling`; allocation increases also
-require passing bootstrap CI bounds and current SPA evidence (`p < 0.20`).
+`validation.sample_size_scaling` tiers remain configured, but the governor is
+currently disabled by explicit 2026-05-19 human approval for production-gate
+remediation. Re-enable it before expecting exploratory/half/full trade-count
+caps to apply again; allocation increases still require bootstrap CI bounds and
+current SPA evidence (`p < 0.20`) unless the human explicitly relaxes those
+gates too.
+The 2026-05-19 production-gate exception also sets
+`validation.production_gate.use_bootstrap_bounds=false`, so production gates
+use point estimates while printing bootstrap bounds as advisory diagnostics.
+The crypto-only production window is watch-only until its trade sample and
+confidence bounds recover.
 
 For scripts, docs, dashboards, health checks, logging, tests, beads metadata, or
 other changes that do not affect profit, trades, strategies, strategy config,

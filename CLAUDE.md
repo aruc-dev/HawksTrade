@@ -272,9 +272,15 @@ Backtest protection rows carry position-size-adjusted `portfolio_pnl_pct` for
 portfolio-wide realized-drawdown locks; symbol stop-loss, strategy stop-loss,
 and low-profit protections still use raw closed-trade `pnl_pct`.
 Do not edit live `risk_per_trade_pct` or `trading.max_position_pct` to bypass
-sample-size discipline. Strategies below 30 closed trades are automatically
-capped by `validation.sample_size_scaling`; temporary exceptions must use an
-expiring override with a human-readable reason.
+sample-size discipline. `validation.sample_size_scaling` tiers remain available
+for trade-count caps, but the governor is currently disabled by explicit
+2026-05-19 human approval for production-gate remediation. Re-enable it before
+expecting exploratory/half/full caps to apply again.
+The same 2026-05-19 production-gate exception sets
+`validation.production_gate.use_bootstrap_bounds=false`, so production gates use
+point estimates while printing bootstrap bounds as advisory diagnostics. The
+crypto-only production window is watch-only until its trade sample and
+confidence bounds recover.
 Before scaling live allocation for any strategy, the latest SPA/multiple-testing
 report for that strategy must show `p < 0.20` against the configured parameter
 grid in `analysis/spa_test.py`.

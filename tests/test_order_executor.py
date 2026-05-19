@@ -12,6 +12,13 @@ from tracking import order_intents, trade_log
 
 
 class OrderExecutorTests(unittest.TestCase):
+    def sample_size_enabled(self):
+        validation = dict(order_executor.CFG.get("validation", {}))
+        scaling = dict(validation.get("sample_size_scaling", {}))
+        scaling["enabled"] = True
+        validation["sample_size_scaling"] = scaling
+        return patch.dict(order_executor.CFG, {"validation": validation})
+
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmpdir.cleanup)
@@ -276,6 +283,7 @@ class OrderExecutorTests(unittest.TestCase):
         order = SimpleNamespace(id="entry-submitted", status="pending_new", filled_qty="0")
 
         with (
+            self.sample_size_enabled(),
             patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
             patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 4}),
             patch.object(order_executor.rm, "cap_position_qty", return_value=4),
@@ -300,6 +308,7 @@ class OrderExecutorTests(unittest.TestCase):
 
     def test_enter_position_blocks_when_scaled_notional_below_minimum(self):
         with (
+            self.sample_size_enabled(),
             patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
             patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 2}),
             patch.object(order_executor.rm, "cap_position_qty", return_value=2),
@@ -317,6 +326,7 @@ class OrderExecutorTests(unittest.TestCase):
         order = SimpleNamespace(id="entry-scaled", status="filled", filled_qty="1.0")
 
         with (
+            self.sample_size_enabled(),
             patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
             patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 4}),
             patch.object(order_executor.rm, "cap_position_qty", return_value=4),
@@ -352,6 +362,7 @@ class OrderExecutorTests(unittest.TestCase):
         order = SimpleNamespace(id="entry-scaled", status="filled", filled_qty="2.0")
 
         with (
+            self.sample_size_enabled(),
             patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
             patch.object(
                 order_executor.rm,
@@ -646,6 +657,7 @@ class OrderExecutorTests(unittest.TestCase):
         )
 
         with (
+            self.sample_size_enabled(),
             patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
             patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 4}),
             patch.object(order_executor.rm, "cap_position_qty", return_value=4),

@@ -25,7 +25,8 @@ from scheduler.run_backtest import run_backtest  # noqa: E402
 
 GATE_BOUNDS_NOTE = (
     "Gate bounds use bootstrap confidence bounds for return, drawdown, profit factor, "
-    "and Sharpe when present; trade count and win-rate gates use point estimates."
+    "and Sharpe when present unless a gate explicitly sets use_bootstrap_bounds=false; "
+    "trade count and win-rate gates use point estimates."
 )
 
 
@@ -47,10 +48,25 @@ def _format_ratio(value: float) -> str:
     return f"{value:.2f}"
 
 
+def _point_bounds(stats: dict) -> dict:
+    return {
+        "return_pct": stats.get("return_pct", 0.0),
+        "max_drawdown": stats.get("max_drawdown", 0.0),
+        "profit_factor": stats.get("profit_factor", 0.0),
+        "daily_sharpe": stats.get("daily_sharpe", 0.0),
+    }
+
+
+def _configured_gate_bounds(stats: dict, gate: dict) -> dict:
+    if gate.get("use_bootstrap_bounds", True) is False:
+        return _point_bounds(stats)
+    return gate_bounds(stats)
+
+
 def threshold_failures(stats: dict, gate: dict) -> list[str]:
     """Return human-readable threshold failures for a backtest gate."""
     failures: list[str] = []
-    bounds = gate_bounds(stats)
+    bounds = _configured_gate_bounds(stats, gate)
 
     min_return = gate.get("min_return_pct")
     if min_return is not None and bounds["return_pct"] < float(min_return):
@@ -166,8 +182,11 @@ def evaluate_backtest_gate(
             raise
         return _oos_blocked_record(gate, oos_message)
     stats = result["stats"]
-    bounds = gate_bounds(stats)
+    bootstrap_bounds = gate_bounds(stats)
+    bounds = _configured_gate_bounds(stats, gate)
     failures = threshold_failures(stats, gate)
+    has_bootstrap_bounds = _has_bootstrap_bounds(stats)
+    uses_bootstrap_bounds = has_bootstrap_bounds and gate.get("use_bootstrap_bounds", True) is not False
     required = bool(gate.get("required", True))
     return {
         "name": gate["name"],
@@ -177,7 +196,9 @@ def evaluate_backtest_gate(
         "warnings": reliability_warnings(stats, min_reliable_trades),
         "stats": stats,
         "gate_stats": bounds,
-        "uses_bootstrap_bounds": _has_bootstrap_bounds(stats),
+        "bootstrap_gate_stats": bootstrap_bounds,
+        "has_bootstrap_bounds": has_bootstrap_bounds,
+        "uses_bootstrap_bounds": uses_bootstrap_bounds,
     }
 
 
@@ -260,11 +281,14 @@ def evaluate_slippage_sensitivity_gate(
     stats = result["stats"]
     failures: list[str] = []
     soft_min_return = _float_value(cost_model.get("sensitivity_soft_min_return_pct"), math.nan)
-    bounds = gate_bounds(stats)
+    bootstrap_bounds = gate_bounds(stats)
+    bounds = _configured_gate_bounds(stats, gate)
     if math.isfinite(soft_min_return) and bounds["return_pct"] < soft_min_return:
         failures.append(
             f"return {_format_pct(bounds['return_pct'])} < sensitivity floor {_format_pct(soft_min_return)}"
         )
+    has_bootstrap_bounds = _has_bootstrap_bounds(stats)
+    uses_bootstrap_bounds = has_bootstrap_bounds and gate.get("use_bootstrap_bounds", True) is not False
     return {
         "name": f"{gate['name']}{name_suffix}",
         "required": False,
@@ -273,7 +297,9 @@ def evaluate_slippage_sensitivity_gate(
         "warnings": reliability_warnings(stats, min_reliable_trades),
         "stats": stats,
         "gate_stats": bounds,
-        "uses_bootstrap_bounds": _has_bootstrap_bounds(stats),
+        "bootstrap_gate_stats": bootstrap_bounds,
+        "has_bootstrap_bounds": has_bootstrap_bounds,
+        "uses_bootstrap_bounds": uses_bootstrap_bounds,
         "slippage_level": slippage_level,
     }
 
@@ -427,6 +453,15 @@ def _render_backtest_record(record: dict) -> str:
             f"pf={_format_ratio(float(gate_stats.get('profit_factor', stats['profit_factor'])))}, "
             f"sharpe={float(gate_stats.get('daily_sharpe', stats['daily_sharpe'])):.2f}"
         )
+    elif record.get("has_bootstrap_bounds"):
+        gate_stats = record.get("bootstrap_gate_stats") or {}
+        line += (
+            " | bootstrap_bounds_advisory: "
+            f"return={_format_pct(float(gate_stats.get('return_pct', stats['return_pct'])))}, "
+            f"drawdown={_format_pct(float(gate_stats.get('max_drawdown', stats['max_drawdown'])))}, "
+            f"pf={_format_ratio(float(gate_stats.get('profit_factor', stats['profit_factor'])))}, "
+            f"sharpe={float(gate_stats.get('daily_sharpe', stats['daily_sharpe'])):.2f}"
+        )
     return line
 
 
@@ -466,8 +501,13 @@ def run_validation_gate(
     if profile in {"production", "all"}:
         lines.append("Production gates:")
         lines.append(GATE_BOUNDS_NOTE)
-        production_windows = validation_cfg.get("production_gate", {}).get("windows", [])
-        for gate in production_windows:
+        production_gate_cfg = validation_cfg.get("production_gate", {})
+        production_gate_defaults = {
+            key: value for key, value in production_gate_cfg.items() if key != "windows"
+        }
+        production_windows = production_gate_cfg.get("windows", [])
+        production_gates = [{**production_gate_defaults, **gate} for gate in production_windows]
+        for gate in production_gates:
             record = evaluate_backtest_gate(
                 gate,
                 cost_model,
@@ -483,7 +523,7 @@ def run_validation_gate(
             if not levels:
                 key = "sensitivity_multipliers" if _uses_slippage_model(cost_model) else "sensitivity_levels_bps"
                 lines.append(f"WARN No {key} configured.")
-            for gate in production_windows:
+            for gate in production_gates:
                 for slippage_level in levels:
                     record = evaluate_slippage_sensitivity_gate(
                         gate,

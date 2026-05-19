@@ -49,6 +49,35 @@ class ValidationGateTests(unittest.TestCase):
 
         self.assertEqual(threshold_failures(stats, {"min_profit_factor": 2.0}), [])
 
+    def test_threshold_failures_can_use_point_estimates_with_bootstrap_advisory(self):
+        stats = {
+            "return_pct": 0.09,
+            "max_drawdown": -0.02,
+            "profit_factor": 1.8,
+            "daily_sharpe": 1.2,
+            "trades": 80,
+            "win_rate": 0.5,
+            "bootstrap": {
+                "block": {
+                    "return_pct": {"p05": 0.003},
+                    "max_drawdown": {"p05": -0.06},
+                    "daily_sharpe": {"p05": 0.1},
+                },
+                "trade": {
+                    "profit_factor": {"p05": 1.1},
+                },
+            },
+        }
+        gate = {
+            "min_return_pct": 0.09,
+            "max_drawdown_pct": 0.06,
+            "min_profit_factor": 1.5,
+            "min_daily_sharpe": 1.0,
+            "use_bootstrap_bounds": False,
+        }
+
+        self.assertEqual(threshold_failures(stats, gate), [])
+
     def test_reliability_warnings_flag_low_trade_count_without_failure(self):
         warnings = reliability_warnings({"trades": 12}, min_reliable_trades=30)
 
@@ -168,9 +197,49 @@ class ValidationGateTests(unittest.TestCase):
         self.assertFalse(record["passed"])
         self.assertFalse(run_backtest.call_args.kwargs["write_quarterly_csv"])
         self.assertTrue(record["uses_bootstrap_bounds"])
+        self.assertTrue(record["has_bootstrap_bounds"])
         self.assertEqual(record["gate_stats"]["return_pct"], -0.02)
+        self.assertEqual(record["bootstrap_gate_stats"]["return_pct"], -0.02)
         self.assertEqual(record["gate_stats"]["profit_factor"], 0.8)
         self.assertTrue(any("profit_factor 0.80 < 1.00" in failure for failure in record["failures"]))
+
+    def test_backtest_gate_can_make_bootstrap_bounds_advisory(self):
+        gate = {
+            "name": "default_12m_costed",
+            "days": 365,
+            "min_return_pct": 0.05,
+            "min_profit_factor": 1.0,
+            "use_bootstrap_bounds": False,
+        }
+        result_payload = {
+            "stats": {
+                "return_pct": 0.08,
+                "max_drawdown": -0.01,
+                "profit_factor": 2.0,
+                "daily_sharpe": 1.2,
+                "trades": 50,
+                "win_rate": 0.6,
+                "bootstrap": {
+                    "block": {
+                        "return_pct": {"p05": -0.02},
+                        "max_drawdown": {"p05": -0.04},
+                        "daily_sharpe": {"p05": -0.5},
+                    },
+                    "trade": {
+                        "profit_factor": {"p05": 0.8},
+                    },
+                },
+            },
+        }
+
+        with patch("scheduler.run_validation_gate.run_backtest", return_value=result_payload):
+            record = evaluate_backtest_gate(gate, {}, 10000)
+
+        self.assertTrue(record["passed"])
+        self.assertFalse(record["uses_bootstrap_bounds"])
+        self.assertTrue(record["has_bootstrap_bounds"])
+        self.assertEqual(record["gate_stats"]["return_pct"], 0.08)
+        self.assertEqual(record["bootstrap_gate_stats"]["return_pct"], -0.02)
 
     def test_non_required_backtest_gate_skips_locked_oos_window(self):
         gate = {"name": "crypto_recent_30d_watch", "days": 30, "required": False}

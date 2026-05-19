@@ -118,7 +118,7 @@ class TestGetConfig(unittest.TestCase):
         self.assertTrue(cfg["broker_stops"]["enabled"])
         self.assertFalse(cfg["broker_stops"]["submit_in_paper"])
         self.assertEqual(cfg["validation"]["min_reliable_trades"], 30)
-        self.assertTrue(cfg["validation"]["sample_size_scaling"]["enabled"])
+        self.assertFalse(cfg["validation"]["sample_size_scaling"]["enabled"])
         self.assertEqual(
             cfg["validation"]["sample_size_scaling"]["tiers"][0],
             {"name": "exploration", "min_trades": 0, "risk_multiplier": 0.25, "position_cap_pct": 0.02},
@@ -263,6 +263,7 @@ class TestGetConfig(unittest.TestCase):
             window["name"]: window
             for window in validation["production_gate"]["windows"]
         }
+        self.assertFalse(validation["production_gate"]["use_bootstrap_bounds"])
         self.assertEqual(
             production_windows["default_12m_costed"]["strategies"],
             ["momentum", "relative_strength", "rsi_reversion", "crypto_rsi_reversion", "ma_crossover"],
@@ -274,8 +275,11 @@ class TestGetConfig(unittest.TestCase):
         self.assertEqual(production_windows["default_12m_costed"]["end_date"], "04/29/2026")
         self.assertEqual(production_windows["default_6m_costed"]["end_date"], "04/29/2026")
         self.assertEqual(production_windows["crypto_12m_costed"]["end_date"], "04/29/2026")
+        self.assertEqual(production_windows["default_12m_costed"]["min_return_pct"], 0.09)
         self.assertEqual(production_windows["default_12m_costed"]["max_drawdown_pct"], 0.06)
+        self.assertTrue(production_windows["default_6m_costed"]["required"])
         self.assertEqual(production_windows["default_6m_costed"]["max_drawdown_pct"], 0.04)
+        self.assertFalse(production_windows["crypto_12m_costed"]["required"])
 
         gap_windows = {
             window["name"]: window
