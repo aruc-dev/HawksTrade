@@ -23,7 +23,19 @@ class CryptoStrategySymbolTests(unittest.TestCase):
             patch("strategies.ma_crossover.ac.get_crypto_bars", return_value={"BTC/USD": bars}),
             patch("strategies.ma_crossover.ac.get_portfolio_value", return_value=10000.0),
             patch("strategies.ma_crossover.rm.crypto_regime_ok", return_value=True),
-            patch.dict("strategies.ma_crossover.SCFG", {"volume_spike_ratio": 0}),
+            patch.dict("strategies.ma_crossover.SCFG", {
+                "fast_ema": 3,
+                "slow_ema": 5,
+                "atr_period": 3,
+                "volume_spike_ratio": 0,
+                "volume_avg_period": 1,
+                "vol_filter_period": 1,
+                "trend_return_lookback_days": 1,
+                "min_trend_return_pct": 0,
+                "min_price_above_slow_pct": 0,
+                "rsi_entry_min": 0,
+                "rsi_entry_max": 100,
+            }),
         ):
             signals = MACrossoverStrategy().scan(["BTCUSD"])
 
@@ -35,7 +47,11 @@ class CryptoStrategySymbolTests(unittest.TestCase):
 
         with (
             patch("strategies.ma_crossover.ac.get_crypto_bars", return_value={"BTC/USD": bars}),
-            patch.dict("strategies.ma_crossover.SCFG", {"max_loss_exit_pct": 0.0}),
+            patch.dict("strategies.ma_crossover.SCFG", {
+                "fast_ema": 3,
+                "slow_ema": 5,
+                "max_loss_exit_pct": 0.0,
+            }),
         ):
             should_exit, reason = MACrossoverStrategy().should_exit("BTCUSD", entry_price=100)
 
@@ -47,7 +63,11 @@ class CryptoStrategySymbolTests(unittest.TestCase):
 
         with (
             patch("strategies.ma_crossover.ac.get_crypto_bars", return_value={"BTC/USD": bars}),
-            patch.dict("strategies.ma_crossover.SCFG", {"max_loss_exit_pct": 0.06}),
+            patch.dict("strategies.ma_crossover.SCFG", {
+                "fast_ema": 3,
+                "slow_ema": 5,
+                "max_loss_exit_pct": 0.06,
+            }),
         ):
             should_exit, reason = MACrossoverStrategy().should_exit("BTC/USD", entry_price=100)
 

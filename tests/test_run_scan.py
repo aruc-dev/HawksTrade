@@ -81,6 +81,12 @@ class RunScanTests(unittest.TestCase):
         self.assertTrue(run_scan._asset_class_matches("crypto", "crypto"))
         self.assertFalse(run_scan._asset_class_matches("crypto", "stock"))
 
+    def test_default_crypto_strategy_list_includes_crypto_rsi_reversion(self):
+        self.assertIn(
+            "crypto_rsi_reversion",
+            [strategy.name for strategy in run_scan.CRYPTO_STRATEGIES],
+        )
+
     def test_already_holding_normalizes_crypto_symbols(self):
         self.assertTrue(run_scan._already_holding("BTC/USD", ["BTCUSD"]))
         self.assertTrue(run_scan._already_holding("ETHUSD", ["ETH/USD"]))
@@ -1552,7 +1558,7 @@ class RunScanTests(unittest.TestCase):
 
         with (
             patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
-            patch.object(run_scan, "get_trade_age_days", return_value=17),  # > hold_days=16
+            patch.object(run_scan, "get_trade_age_days", return_value=15),  # > hold_days=14
             patch.object(run_scan, "_latest_price_for_trade", return_value=48000),  # flat/losing
             patch.object(run_scan, "_estimate_peak_price_since_entry", return_value=51000),
             patch.object(run_scan.oe, "exit_position") as exit_position,
@@ -1571,7 +1577,7 @@ class RunScanTests(unittest.TestCase):
 
         with (
             patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
-            patch.object(run_scan, "get_trade_age_days", return_value=15),  # < hold_days=16
+            patch.object(run_scan, "get_trade_age_days", return_value=13),  # < hold_days=14
             patch.object(run_scan, "_latest_price_for_trade", return_value=48000),
             patch.object(run_scan, "_estimate_peak_price_since_entry", return_value=51000),
             patch.object(run_scan.oe, "exit_position") as exit_position,

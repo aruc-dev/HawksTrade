@@ -4,7 +4,7 @@
 
 **Automated swing trading bot for US stocks and crypto, powered by Alpaca Markets.**
 
-Ships with 6 independent strategies, enables the guarded core set by default,
+Ships with 7 independent strategies, enables the guarded core set by default,
 enforces strict risk rules, and is designed to be operated autonomously by an AI agent.
 
 ---
@@ -30,7 +30,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener
 
 ## Backtesting & Performance
 
-HawksTrade includes a high-fidelity historical simulator. The current guarded default strategy set produced a **+9.55% 12-month costed point return** through the OOS lockup boundary on $10,000 starting capital, with the configured 8% max-position risk cap enforced. Production validation remains blocking until bootstrap confidence gates improve and the crypto sleeve clears its lower-bound gate.
+HawksTrade includes a high-fidelity historical simulator. The current guarded default strategy set remains below the production validation gate under real-minute replay and cost-aware fills; the Phase 2 remediation added a BTC-regime-gated crypto RSI sleeve, calibrated stock volume pace for real-minute replay, tightened crypto EMA crossover, and disabled the unproven range breakout sleeve, but production validation remains blocking until return and bootstrap confidence gates recover.
 
 - **Backtest Summary**: [backtests.md](backtests.md)
 - **Configuration Guide**: [config.md](config.md)
@@ -42,31 +42,32 @@ HawksTrade includes a high-fidelity historical simulator. The current guarded de
 
 | Strategy | Market | Key Parameters | Approach |
 |----------|--------|----------------|----------|
-| **Momentum** | US Stocks | Top 2 sector-diversified names by 5-day alpha momentum in green regimes, 4% momentum floor, optional ATR-scaled momentum gate, 1.8x elapsed-session volume pace, 65% breadth coverage, 1.2x ATR stop extension capped at 5%, profit-aware exit | Captures high-conviction rallies with a lower recent-window threshold while keeping concurrent momentum exposure capped and yellow regimes limited to one signal. |
-| **Relative Strength** | US Stocks | Top 1 stock by 20-day return minus SPY, minimum 5% RS, minimum 8% absolute return, max 3% recent 3-day gain, 1.8x elapsed-session volume pace, 7-day hold, ATR stop capped at 5% | Adds a stricter medium-term leadership sleeve that avoids fresh short-term blow-offs and shares stock breadth, sector, volume, and ATR-risk controls. |
+| **Momentum** | US Stocks | Top 2 sector-diversified names by 5-day alpha momentum in green regimes, 4% momentum floor, optional ATR-scaled momentum gate, 0.1x Alpaca real-minute replay volume pace, 65% breadth coverage, 1.2x ATR stop extension capped at 5%, profit-aware exit | Captures high-conviction rallies with a lower recent-window threshold while keeping concurrent momentum exposure capped and yellow regimes limited to one signal. |
+| **Relative Strength** | US Stocks | Top 1 stock by 20-day return minus SPY, minimum 5% RS, minimum 8% absolute return, max 3% recent 3-day gain, 0.1x Alpaca real-minute replay volume pace, 7-day hold, ATR stop capped at 5% | Adds a stricter medium-term leadership sleeve that avoids fresh short-term blow-offs and shares stock breadth, sector, volume, and ATR-risk controls. |
 | **RSI Reversion** | US Stocks | Enabled only in bear/chop regimes; RSI < 40, %B < 20%, SMA-200 within +/-15%, 0.7x volume confirmation, 1-bar recovery, 5-day drawdown <= 10%, ATR/price <= 5%, 0.8x ATR stop capped at 6%, and profit protection | Mean reversion with crash, realised-volatility, tail-loss, and high-water trailing guards. |
 | **Gap-Up** | US Stocks | Disabled in the default profile; true 5-15% opening gap, 1.3x opening-volume pace, 65% breadth guard, prior close above SMA-200, <=35% SMA-200 extension, top-1 ranked signal, 2-day hold, failed-gap exit | Opening momentum sleeve kept behind its standalone validation gate until bootstrap and minute-fill evidence improve. |
-| **EMA Crossover** | Crypto | 6/18 EMA, latest completed cross only, top-1 ranked signal, RSI 35-75, slope + volatility filters, 3-day drawdown guard, price/EMA confirmation, 2% daily-close max-loss exit, 16-day hold cap | Bullish EMA crossover with BTC regime gate and tighter same-scan concentration control. |
-| **Range Breakout** | Crypto | Enabled; 20-day high close breakout, 2.5x volume, rising EMA-50, RSI, 0.8%-8% breakout-extension, upper-10% close guard, and profit protection | Ranked Donchian-style breakout sleeve with failed-breakout, trend-loss, and high-water trailing exits. |
+| **Crypto RSI Reversion** | Crypto | BTC regime gate, daily RSI < 35, Bollinger %B < 40%, max 3 signals, 10% strategy stop, 3-day hold cap, mean/RSI recovery exits | Short-lived pullback sleeve added as a diversified crypto mean-reversion candidate; kept under sample-size scaling and live-readiness gates. |
+| **EMA Crossover** | Crypto | 8/26 EMA, latest completed cross only, top-1 ranked signal, RSI 35-65, +2% 3-day follow-through, price at least 1% above slow EMA, volatility filters, 4% daily-close max-loss exit, 14-day hold cap | Bullish EMA crossover with BTC regime gate and tighter same-scan concentration control. |
+| **Range Breakout** | Crypto | Disabled in the default profile pending stronger real-minute/costed evidence; 20-day high close breakout, 2.5x volume, rising EMA-50, RSI, breakout-extension, close-location guard, and profit protection | Donchian-style breakout sleeve retained for research but removed from guarded default execution. |
 
 **Crypto Universe**: `BTC/USD`, `ETH/USD`, `SOL/USD`, `LINK/USD`, `XRP/USD`, `ADA/USD`, `AVAX/USD`, `DOGE/USD`, `LTC/USD`, `DOT/USD`, `UNI/USD`, `AAVE/USD`.
 
 ### Market Regime Filters
 
 - **Stock Regime Guards**: Momentum uses the SPY/QQQ SMA-50 regime gate. RSI Reversion has separate crash and realised-volatility filters. Gap-Up has its own SPY SMA-50 gate but is disabled in the default profile.
-- **BTC EMA-20 (Crypto)**: EMA Crossover and Range Breakout are gated by BTC/USD trading above its 20-day EMA, with the EMA not falling more than 0.5% over the last 5 days.
+- **BTC EMA-20 (Crypto)**: Crypto RSI Reversion, EMA Crossover, and the disabled Range Breakout research sleeve are gated by BTC/USD trading above its 20-day EMA, with the EMA not falling more than 0.5% over the last 5 days.
 
 Live/paper scans fail closed when regime data is unavailable or insufficient, blocking new entries until the bot can confirm market conditions. Backtests still allow early warmup periods with insufficient bars so simulations can start before every long-window filter is populated.
 
 ### Strategy Position Sizing
 
-Momentum, Relative Strength, RSI Reversion, Gap-Up, EMA Crossover, and Range Breakout emit ATR-risk quantities that target 1% account risk per trade before the global 8% max-position cap is applied. Momentum still has a Half-Kelly fallback in the executor if a signal does not include ATR sizing, but the current strategy path provides ATR-risk sizing by default.
+Momentum, Relative Strength, RSI Reversion, Gap-Up, and EMA Crossover emit ATR-risk quantities that target 1% account risk per trade before the global 8% max-position cap is applied. Crypto RSI Reversion emits a strategy stop and uses the executor's global cap plus sample-size scaling. Range Breakout still emits ATR-risk quantities when explicitly re-enabled for research. Momentum still has a Half-Kelly fallback in the executor if a signal does not include ATR sizing, but the current strategy path provides ATR-risk sizing by default.
 
 ### Momentum Exit Policy
 
 Momentum uses `exit_policy: profit_trailing` by default. The trailing stop can exit before the 4-trading-day minimum hold once a position reaches a 6% peak gain and then falls 4% from that peak. Live and paper runners enforce that profit protection during the 15-minute risk check and the scan hold-exit pass. After the minimum hold, flat or losing trades are exited and profitable trades can continue under the same trailing stop. Backtests can compare policies with:
 
-Range Breakout also uses high-water profit protection. RSI Reversion has the same protection available when enabled. Once an open position reaches the configured `trail_activation_pct`, the scan hold-exit pass and risk check can exit it if price falls by `trailing_stop_pct` from the observed peak, before the strategy hold cap.
+The disabled Range Breakout research sleeve also has high-water profit protection when explicitly re-enabled. RSI Reversion has the same protection available when enabled. Once an open position reaches the configured `trail_activation_pct`, the scan hold-exit pass and risk check can exit it if price falls by `trailing_stop_pct` from the observed peak, before the strategy hold cap.
 
 ```bash
 python3 scheduler/run_backtest.py --days 365 --exit-policy fixed_hold
@@ -78,17 +79,16 @@ Use `--no-screener` to backtest only the fixed configured stock universe, or `--
 
 ```bash
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
-  --strategies momentum,relative_strength,rsi_reversion,ma_crossover,range_breakout \
+  --strategies momentum,relative_strength,rsi_reversion,crypto_rsi_reversion,ma_crossover \
   --set strategies.momentum.top_n=2 \
   --set strategies.momentum.min_momentum_pct=0.04 \
   --set strategies.momentum.min_momentum_atr_mult=0.0 \
   --set strategies.momentum.volume_confirmation_mode=pace \
-  --set strategies.momentum.volume_pace_ratio=1.8 \
+  --set strategies.momentum.volume_pace_ratio=0.1 \
   --set strategies.momentum.min_breadth_coverage_pct=0.65 \
-  --set strategies.ma_crossover.fast_ema=6 \
-  --set strategies.ma_crossover.slow_ema=18 \
-  --set strategies.ma_crossover.max_signals=1 \
-  --set strategies.range_breakout.volume_multiplier=2.5
+  --set strategies.ma_crossover.fast_ema=8 \
+  --set strategies.ma_crossover.slow_ema=26 \
+  --set strategies.ma_crossover.max_signals=1
 ```
 
 Before scaling live capital, run the cost-aware validation gate. It applies the
@@ -118,9 +118,8 @@ RSI Reversion is enabled in the active default profile only as a conditional bea
 python3 scheduler/run_validation_gate.py --profile rsi
 ```
 
-Gap-Up is disabled in the active default profile and Range Breakout remains
-enabled. Continue using their dedicated gates before re-enabling or scaling
-either sleeve:
+Gap-Up and Range Breakout are disabled in the active default profile. Continue
+using their dedicated gates before re-enabling or scaling either sleeve:
 
 ```bash
 python3 scheduler/run_validation_gate.py --profile gap
@@ -136,7 +135,7 @@ python3 scheduler/run_validation_gate.py --profile range
 
 - **Asymmetric Reward**: 3.5% stop-loss / 12% take-profit.
 - **Capital Protection**: SMA-based trend filters on all strategies.
-- **Strategy-Local Loss Defense**: Momentum and RSI use less-permissive ATR stop extensions on top of the global stop layer, RSI blocks high-ATR and unresolved waterfall entries and exits daily closes 6% below entry, Gap-Up exits failed continuations, and MA Crossover exits on a daily close at least 2% below entry.
+- **Strategy-Local Loss Defense**: Momentum and RSI use less-permissive ATR stop extensions on top of the global stop layer, stock RSI blocks high-ATR and unresolved waterfall entries and exits daily closes 6% below entry, Crypto RSI uses a 10% strategy stop plus the BTC regime gate, Gap-Up exits failed continuations, and MA Crossover exits on a daily close at least 4% below entry.
 - **Position Limits**: Max 8% of portfolio per trade, cap of 10 concurrent positions.
 - **Sample-Size Sizing Gate**: Strategies with fewer than 30 closed trades run at exploratory risk through `validation.sample_size_scaling`; overrides must include a reason and expiry.
 - **Statistical Hardening**: Backtests use point-in-time stock universe membership, exclude the active OOS lockup by default, publish bootstrap CIs, and support SPA-style multiple-testing checks before allocation increases.

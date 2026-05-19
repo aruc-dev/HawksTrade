@@ -171,9 +171,12 @@ class TestGetConfig(unittest.TestCase):
         self.assertTrue(strategies["momentum"]["enabled"])
         self.assertTrue(strategies["relative_strength"]["enabled"])
         self.assertTrue(strategies["rsi_reversion"]["enabled"])
+        self.assertTrue(strategies["crypto_rsi_reversion"]["enabled"])
         self.assertTrue(strategies["ma_crossover"]["enabled"])
-        self.assertTrue(strategies["range_breakout"]["enabled"])
+        self.assertFalse(strategies["range_breakout"]["enabled"])
         self.assertFalse(strategies["gap_up"]["enabled"])
+        self.assertEqual(strategies["crypto_rsi_reversion"]["live_readiness"]["min_closed_paper_trades"], 25)
+        self.assertEqual(strategies["crypto_rsi_reversion"]["live_readiness"]["min_paper_days"], 90)
         self.assertEqual(strategies["ma_crossover"]["live_readiness"]["min_closed_paper_trades"], 25)
         self.assertEqual(strategies["ma_crossover"]["live_readiness"]["min_paper_days"], 90)
         self.assertEqual(strategies["range_breakout"]["live_readiness"]["min_closed_paper_trades"], 25)
@@ -182,7 +185,7 @@ class TestGetConfig(unittest.TestCase):
         self.assertEqual(strategies["momentum"]["min_momentum_pct"], 0.04)
         self.assertEqual(strategies["momentum"]["min_momentum_atr_mult"], 0.0)
         self.assertEqual(strategies["momentum"]["volume_confirmation_mode"], "pace")
-        self.assertEqual(strategies["momentum"]["volume_pace_ratio"], 1.8)
+        self.assertEqual(strategies["momentum"]["volume_pace_ratio"], 0.1)
         self.assertEqual(strategies["momentum"]["volume_pace_timeframe"], "1Min")
         self.assertEqual(strategies["momentum"]["session_minutes"], 390)
         self.assertEqual(strategies["momentum"]["volume_spike_ratio"], 2.0)
@@ -196,7 +199,7 @@ class TestGetConfig(unittest.TestCase):
         self.assertEqual(strategies["relative_strength"]["min_abs_return_pct"], 0.08)
         self.assertEqual(strategies["relative_strength"]["max_recent_return_pct"], 0.03)
         self.assertEqual(strategies["relative_strength"]["volume_confirmation_mode"], "pace")
-        self.assertEqual(strategies["relative_strength"]["volume_pace_ratio"], 1.8)
+        self.assertEqual(strategies["relative_strength"]["volume_pace_ratio"], 0.1)
         self.assertEqual(strategies["relative_strength"]["volume_spike_ratio"], 1.8)
         self.assertEqual(strategies["relative_strength"]["max_positions_per_sector"], 1)
         self.assertEqual(strategies["relative_strength"]["hold_days"], 7)
@@ -216,20 +219,25 @@ class TestGetConfig(unittest.TestCase):
         self.assertEqual(strategies["rsi_reversion"]["trailing_stop_pct"], 0.04)
         self.assertEqual(strategies["rsi_reversion"]["recent_drawdown_lookback_days"], 5)
         self.assertEqual(strategies["rsi_reversion"]["max_recent_drawdown_pct"], 0.10)
+        self.assertTrue(strategies["crypto_rsi_reversion"]["use_regime_filter"])
+        self.assertEqual(strategies["crypto_rsi_reversion"]["oversold_threshold"], 35)
+        self.assertEqual(strategies["crypto_rsi_reversion"]["max_bollinger_pct_b"], 0.40)
+        self.assertEqual(strategies["crypto_rsi_reversion"]["max_loss_exit_pct"], 0.10)
+        self.assertEqual(strategies["crypto_rsi_reversion"]["hold_days"], 3)
         self.assertEqual(strategies["gap_up"]["min_gap_pct"], 0.05)
         self.assertEqual(strategies["gap_up"]["hold_days"], 2)
         self.assertEqual(strategies["gap_up"]["volume_multiplier"], 1.3)
         self.assertEqual(strategies["gap_up"]["min_breadth_pct"], 0.65)
         self.assertTrue(strategies["gap_up"]["require_prior_close_above_trend"])
         self.assertEqual(strategies["gap_up"]["max_trend_extension_pct"], 0.35)
-        self.assertEqual(strategies["ma_crossover"]["fast_ema"], 6)
-        self.assertEqual(strategies["ma_crossover"]["slow_ema"], 18)
+        self.assertEqual(strategies["ma_crossover"]["fast_ema"], 8)
+        self.assertEqual(strategies["ma_crossover"]["slow_ema"], 26)
         self.assertEqual(strategies["ma_crossover"]["entry_cross_lookback_days"], 1)
-        self.assertEqual(strategies["ma_crossover"]["min_trend_return_pct"], -0.02)
-        self.assertEqual(strategies["ma_crossover"]["min_price_above_slow_pct"], 0.005)
-        self.assertEqual(strategies["ma_crossover"]["hold_days"], 16)
-        self.assertEqual(strategies["ma_crossover"]["max_loss_exit_pct"], 0.02)
-        self.assertEqual(strategies["ma_crossover"]["rsi_entry_max"], 75)
+        self.assertEqual(strategies["ma_crossover"]["min_trend_return_pct"], 0.02)
+        self.assertEqual(strategies["ma_crossover"]["min_price_above_slow_pct"], 0.01)
+        self.assertEqual(strategies["ma_crossover"]["max_loss_exit_pct"], 0.04)
+        self.assertEqual(strategies["ma_crossover"]["hold_days"], 14)
+        self.assertEqual(strategies["ma_crossover"]["rsi_entry_max"], 65)
         self.assertEqual(strategies["ma_crossover"]["volume_spike_ratio"], 1.0)
         self.assertEqual(strategies["ma_crossover"]["max_signals"], 1)
         self.assertEqual(strategies["range_breakout"]["breakout_pct"], 0.006)
@@ -245,11 +253,11 @@ class TestGetConfig(unittest.TestCase):
         validation = cfg["validation"]
         self.assertEqual(
             validation["walkforward"]["profiles"]["master"]["strategies"],
-            ["momentum", "relative_strength", "rsi_reversion", "ma_crossover", "range_breakout"],
+            ["momentum", "relative_strength", "rsi_reversion", "crypto_rsi_reversion", "ma_crossover"],
         )
         self.assertEqual(
             validation["walkforward"]["profiles"]["quick"]["strategies"],
-            ["momentum", "relative_strength", "rsi_reversion", "ma_crossover", "range_breakout"],
+            ["momentum", "relative_strength", "rsi_reversion", "crypto_rsi_reversion", "ma_crossover"],
         )
         production_windows = {
             window["name"]: window
@@ -257,11 +265,11 @@ class TestGetConfig(unittest.TestCase):
         }
         self.assertEqual(
             production_windows["default_12m_costed"]["strategies"],
-            ["momentum", "relative_strength", "rsi_reversion", "ma_crossover", "range_breakout"],
+            ["momentum", "relative_strength", "rsi_reversion", "crypto_rsi_reversion", "ma_crossover"],
         )
         self.assertEqual(
             production_windows["default_6m_costed"]["strategies"],
-            ["momentum", "relative_strength", "rsi_reversion", "ma_crossover", "range_breakout"],
+            ["momentum", "relative_strength", "rsi_reversion", "crypto_rsi_reversion", "ma_crossover"],
         )
         self.assertEqual(production_windows["default_12m_costed"]["end_date"], "04/29/2026")
         self.assertEqual(production_windows["default_6m_costed"]["end_date"], "04/29/2026")

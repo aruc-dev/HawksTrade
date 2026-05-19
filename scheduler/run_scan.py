@@ -53,6 +53,7 @@ from strategies.momentum import MomentumStrategy
 from strategies.relative_strength import RelativeStrengthStrategy
 from strategies.rsi_reversion import RSIReversionStrategy
 from strategies.gap_up import GapUpStrategy
+from strategies.crypto_rsi_reversion import CryptoRSIReversionStrategy
 from strategies.ma_crossover import MACrossoverStrategy
 from strategies.range_breakout import RangeBreakoutStrategy
 from screener.universe_builder import UniverseBuilder
@@ -147,7 +148,7 @@ POLICY_AWARE_HOLD_STRATEGIES = _configured_policy_aware_hold_strategies(CFG)
 # ── Strategy Registry ─────────────────────────────────────────────────────────
 
 STOCK_STRATEGIES  = [MomentumStrategy(), RelativeStrengthStrategy(), RSIReversionStrategy(), GapUpStrategy()]
-CRYPTO_STRATEGIES = [MACrossoverStrategy(), RangeBreakoutStrategy()]
+CRYPTO_STRATEGIES = [CryptoRSIReversionStrategy(), MACrossoverStrategy(), RangeBreakoutStrategy()]
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

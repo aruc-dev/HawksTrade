@@ -14,8 +14,9 @@
 | Relative Strength | Stocks | **Enabled** | `relative_strength.py` |
 | RSI Reversion | Stocks | **Enabled as conditional bear/chop sleeve** | `rsi_reversion.py`; live entries require paper-readiness evidence |
 | Gap-Up | Stocks | **Disabled in default profile** | `gap_up.py`; run standalone validation before re-enabling |
+| Crypto RSI Reversion | Crypto | **Enabled** | `crypto_rsi_reversion.py`; live entries require paper-readiness evidence |
 | MA Crossover | Crypto | **Enabled** | `ma_crossover.py`; live entries require paper-readiness evidence |
-| Range Breakout | Crypto | **Enabled** | `range_breakout.py`; high-water profit protection enabled; live entries require paper-readiness evidence |
+| Range Breakout | Crypto | **Disabled in default profile** | `range_breakout.py`; high-water profit protection enabled when explicitly re-enabled; live entries require paper-readiness evidence |
 
 All strategies share a common global risk layer (8% max position size,
 3.5% stop-loss, 12% take-profit, max 10 open positions, 5% daily-loss halt)
@@ -53,8 +54,10 @@ filtering:
 
 **Volume Confirmation (per-signal):** Momentum uses time-of-day normalized volume
 pace by default (`volume_confirmation_mode: pace`). Current regular-session volume
-must be at least `1.8x` the expected volume for the elapsed market minutes
-(`volume_pace_ratio: 1.8`), based on the candidate's 20-day average daily volume.
+must be at least `0.1x` the expected volume for the elapsed market minutes
+(`volume_pace_ratio: 0.1`), based on the candidate's 20-day average daily volume.
+The lower threshold is calibrated for Alpaca real-minute replay, where observed
+minute-volume pace is much lower than consolidated daily volume.
 If intraday bars are unavailable, the scan time is outside regular-session
 context, or no valid elapsed-session volume can be calculated, it falls back to
 the legacy daily-volume check
@@ -96,7 +99,7 @@ room while the global 3.5% stop remains the baseline fixed-percentage stop.
 | `min_breadth_coverage_pct` | 65% |
 | `yellow_max_positions` | 1 |
 | `volume_confirmation_mode` | `pace` |
-| `volume_pace_ratio` | 1.8x expected elapsed-session volume pace |
+| `volume_pace_ratio` | 0.1x expected elapsed-session volume pace |
 | `volume_pace_timeframe` | `1Min` |
 | `session_minutes` | 390 |
 | `volume_spike_ratio` | 2.0 legacy daily fallback |
@@ -122,7 +125,7 @@ these conditions are true:
 4. Price is above the 50-day SMA and no more than 30% above it.
 5. Stock regime is not red: SPY/QQQ regime passes and market breadth is at least 25%.
 6. Breadth coverage is at least 65% of the scan universe.
-7. Volume pace is at least 1.8x expected elapsed-session volume pace, with a 1.8x
+7. Volume pace is at least 0.1x expected elapsed-session volume pace, with a 1.8x
    daily-volume fallback when intraday bars are unavailable.
 
 **Stop and sizing:** Signals include a 1.2x ATR(14) stop capped at 5% below
@@ -151,7 +154,7 @@ and price falls 4% from that peak.
 | `max_stop_loss_pct` | 5% |
 | `max_positions_per_sector` | 1 |
 | `volume_confirmation_mode` | `pace` |
-| `volume_pace_ratio` | 1.8x expected elapsed-session volume pace |
+| `volume_pace_ratio` | 0.1x expected elapsed-session volume pace |
 
 **Validation note:** This sleeve improved the default 12-month production gate
 point estimate and lower-bound return, but production validation remains
@@ -288,42 +291,86 @@ before re-enabling or scaling capital allocated to this sleeve.
 
 ---
 
-## 5. MA Crossover *(Crypto — Enabled)*
+## 5. Crypto RSI Reversion *(Crypto — Enabled)*
 
-**Type:** Trend-following, medium-term swing. Runs 24/7 on daily bars.
+**Type:** Mean reversion, short-hold crypto swing trade. Runs 24/7 on daily bars.
 
-**Entry:** Seven conditions must all be true:
-1. 6-EMA crosses above 18-EMA on the latest completed daily transition.
-2. 21-EMA is sloping upward over the last 5 bars — no crossovers into a flat trend.
-3. Today's price range ≥ 50% of the 10-day average range — market is moving.
-4. RSI(14) between 35 and 75 — not entering an already-overbought or deeply-oversold
-   state.
-5. Volume Confirmation: Entry-bar volume ≥ 100% of its 20-day average (`volume_spike_ratio: 1.0`).
-6. 3-day return ≥ -2% — avoids buying a fresh cross that is still sliding.
-7. Close ≥ 0.5% above the slow EMA — avoids underpowered crosses.
+**Entry:** All of the following must be true:
+1. BTC regime gate is open unless explicitly disabled for research.
+2. Daily RSI(14) is below 35.
+3. Bollinger %B is below 40%.
+4. Price has stopped falling enough to satisfy `min_recovery_pct`.
+5. The crypto position and correlation guards allow a new entry.
 
 **Exit:** Whichever fires first:
-- Latest daily close is at least 2% below entry (`max_loss_exit_pct`) — strategy-level capital preservation exit.
-- 9-EMA crosses back below 21-EMA (bearish crossover).
-- RSI(14) > 75 (`rsi_exit_max`) — overbought target reached.
-- Hard cap at 16 calendar days (`hold_days`).
+- Latest daily close is at least 10% below entry (`max_loss_exit_pct`).
+- Price recovers to the Bollinger mean target with at least the configured profit floor.
+- RSI(14) recovers above 55.
+- Hard cap at 3 calendar days (`hold_days`).
 
 **Key parameters:**
 
 | Parameter | Value |
 |---|---|
-| `fast_ema` | 6 |
-| `slow_ema` | 18 |
+| `timeframe` | 1Day |
+| `use_regime_filter` | true |
+| `rsi_period` | 14 |
+| `oversold_threshold` | 35 |
+| `overbought_threshold` | 55 |
+| `bb_period` | 20 |
+| `bb_std` | 2.0 |
+| `max_bollinger_pct_b` | 40% |
+| `min_recovery_pct` | 0% |
+| `hold_days` | 3 calendar days |
+| `max_loss_exit_pct` | 10% below entry on latest daily close |
+| `profit_floor_pct` | 3% |
+| `max_signals` | 3 |
+
+**Regime filter:** BTC/USD > 20-day EMA, and the EMA20 may not be falling more
+than 0.5% over five days.
+
+**Live readiness:** Live entries are blocked until the trade log shows at least
+25 closed paper exits and 90 calendar days of paper validation for this sleeve.
+Paper mode remains available for evidence collection.
+
+---
+
+## 6. MA Crossover *(Crypto — Enabled)*
+
+**Type:** Trend-following, medium-term swing. Runs 24/7 on daily bars.
+
+**Entry:** Seven conditions must all be true:
+1. 8-EMA crosses above 26-EMA on the latest completed daily transition.
+2. The slow EMA is sloping upward over the last 5 bars — no crossovers into a flat trend.
+3. Today's price range ≥ 50% of the 10-day average range — market is moving.
+4. RSI(14) between 35 and 65 — not entering an already-overbought or deeply-oversold
+   state.
+5. Volume Confirmation: Entry-bar volume ≥ 100% of its 20-day average (`volume_spike_ratio: 1.0`).
+6. 3-day return ≥ +2% — requires follow-through before accepting a fresh cross.
+7. Close ≥ 1.0% above the slow EMA — avoids underpowered crosses.
+
+**Exit:** Whichever fires first:
+- Latest daily close is at least 4% below entry (`max_loss_exit_pct`) — strategy-level capital preservation exit.
+- 8-EMA crosses back below 26-EMA (bearish crossover).
+- RSI(14) > 75 (`rsi_exit_max`) — overbought target reached.
+- Hard cap at 14 calendar days (`hold_days`).
+
+**Key parameters:**
+
+| Parameter | Value |
+|---|---|
+| `fast_ema` | 8 |
+| `slow_ema` | 26 |
 | `timeframe` | 1Day |
 | `entry_cross_lookback_days` | 1 |
 | `trend_return_lookback_days` | 3 |
-| `min_trend_return_pct` | -2% |
-| `min_price_above_slow_pct` | 0.5% |
+| `min_trend_return_pct` | +2% |
+| `min_price_above_slow_pct` | 1.0% |
 | `max_signals` | 1 top-ranked candidate per scan |
-| `hold_days` | 16 calendar days |
-| `max_loss_exit_pct` | 2% below entry on latest daily close |
+| `hold_days` | 14 calendar days |
+| `max_loss_exit_pct` | 4% below entry on latest daily close |
 | `rsi_entry_min` | 35 |
-| `rsi_entry_max` | 75 |
+| `rsi_entry_max` | 65 |
 | `rsi_exit_max` | 75 |
 | `volume_spike_ratio` | 1.0 |
 | `vol_filter_period` | 10 |
@@ -340,7 +387,7 @@ before scaling capital allocated to this sleeve.
 
 ---
 
-## 6. Range Breakout *(Crypto — Enabled)*
+## 7. Range Breakout *(Crypto — Disabled in Default Profile)*
 
 **Type:** Breakout, short swing trade. Runs 24/7 on daily bars.
 

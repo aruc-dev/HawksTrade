@@ -1,9 +1,9 @@
 # HawksTrade Configuration Guide
 
-> **Updated:** May 17, 2026
+> **Updated:** May 19, 2026
 > **Primary config file:** `config/config.yaml`
 > **Local config:** `config/config.local.yaml` — if present, deep-merged over `config/config.yaml`. Include only the keys you want to override. Gitignored; use for per-machine settings without modifying the committed file.
-> **Current profile:** guarded paper trading profile with a positive 12-month point result; production validation remains blocking until bootstrap confidence gates improve.
+> **Current profile:** guarded paper trading profile with improved real-minute point estimates; production validation remains blocking until bootstrap confidence gates improve.
 
 This guide explains the available user-facing configuration sections and the currently recommended defaults. Do not switch `mode` to `live` or change risk parameters unless you explicitly intend to accept the added trading risk.
 
@@ -23,22 +23,25 @@ The latest validated default configuration is:
 | Trading mode | `mode: paper` | Paper trading should remain the default until live trading is explicitly approved. |
 | Intraday trading | `intraday.enabled: false` | The system is validated as a swing-trading bot. |
 | Screener | `screener.enabled: true` | The tightened screener improved 12-month return versus the old screener and recent fixed-universe test. |
-| Momentum | enabled, `top_n: 2`, `min_momentum_pct: 0.04`, `volume_confirmation_mode: pace`, `volume_pace_ratio: 1.8`, `min_breadth_coverage_pct: 0.65` | Allows a second green-regime stock candidate while keeping yellow regimes capped at one signal and requiring stronger live volume participation. |
+| Momentum | enabled, `top_n: 2`, `min_momentum_pct: 0.04`, `volume_confirmation_mode: pace`, `volume_pace_ratio: 0.1`, `min_breadth_coverage_pct: 0.65` | Allows a second green-regime stock candidate while keeping yellow regimes capped at one signal and using a volume-pace threshold calibrated to Alpaca real-minute replay. |
 | Relative Strength | enabled, `top_n: 1`, `min_rs_pct: 0.05`, `min_abs_return_pct: 0.08`, `max_recent_return_pct: 0.03`, `hold_days: 7` | Adds a medium-term stock leadership sleeve while avoiding fresh short-term blow-offs and preserving sector/ATR controls. |
 | RSI Reversion | enabled, `oversold_threshold: 40`, `max_entry_atr_pct: 0.05`, `max_recent_drawdown_pct: 0.10` | Active mean-reversion stock sleeve with crash, realised-volatility, high-ATR, recent-waterfall, and max-loss guards. |
 | Gap-Up | disabled in the default profile, `require_prior_close_above_trend: true` | Opening-momentum sleeve remains available for standalone validation but is excluded from default trading until bootstrap and minute-fill evidence improve. |
-| MA Crossover | enabled, `hold_days: 16`, `max_loss_exit_pct: 0.02` | Positive crypto contribution with recent-window weakness reduced while avoiding the older large-loss tail seen with a 3% exit. |
+| Crypto RSI Reversion | enabled, `oversold_threshold: 35`, `max_bollinger_pct_b: 0.40`, `hold_days: 3`, `max_loss_exit_pct: 0.10` | Adds a BTC-regime-gated crypto pullback sleeve while sample-size and live-readiness gates keep it exploratory. |
+| MA Crossover | enabled, `fast_ema: 8`, `slow_ema: 26`, `hold_days: 14`, `max_loss_exit_pct: 0.04` | Keeps the crypto trend sleeve but requires stronger follow-through and price/EMA confirmation under real-minute validation. |
 | Crypto regime filter | `EMA20` + 5-day slope guard | Crypto entries require BTC/USD above EMA20 and the EMA20 not falling more than 0.5% over five days. |
-| Range Breakout | enabled | Crypto Donchian breakout sleeve with volume, trend, RSI, 0.8%-8% extension, upper-10% close-location, and failed-breakout guards. |
+| Range Breakout | disabled in the default profile | Crypto Donchian breakout sleeve is retained for research but excluded from guarded execution until real-minute/costed evidence improves. |
 | Momentum exit policy | `profit_trailing` | Exits flat/losing trades after the minimum hold while allowing winners to run under trailing protection. |
 
-Latest current-config 12-month costed point result:
+Latest production-gate point results:
 
-| Final Value | Return | Trades | Win Rate | Max Drawdown | Profit Factor | Sharpe |
-|---:|---:|---:|---:|---:|---:|---:|
-| $10,955.00 | +9.55% | 147 | 51.0% | -1.04% | 2.45 | 3.52 |
+| Gate | Return | Trades | Win Rate | Max Drawdown | Profit Factor | Sharpe |
+|---|---:|---:|---:|---:|---:|---:|
+| `default_12m_costed` | +2.49% | 80 | 51.2% | -0.48% | 1.78 | 1.76 |
+| `default_6m_costed` | +1.32% | 52 | 48.1% | -0.41% | 1.61 | 1.78 |
+| `crypto_12m_costed` | +0.39% | 20 | 55.0% | -0.58% | 1.32 | 0.54 |
 
-These results enforce `trading.max_position_pct: 0.08` for all entries, including momentum/Kelly sizing, with the default production strategy set and 10 bps slippage plus 5 bps fees per side. Production validation remains blocking: the default 12-month return lower bound improved but is still below the required +10%, and the crypto 12-month gate still fails its return/profit-factor lower bounds. Stop-loss, take-profit, daily-loss halt, and mode remain unchanged.
+These results enforce `trading.max_position_pct: 0.08` for all entries, including momentum/Kelly sizing, with the default production strategy set and 10 bps slippage plus 5 bps fees per side. Production validation remains blocking: return, profit-factor, and Sharpe lower bounds still miss required floors. Stop-loss, take-profit, daily-loss halt, and mode remain unchanged.
 
 See [backtests.md](backtests.md) for the full comparison.
 
@@ -373,7 +376,7 @@ momentum:
   max_stop_loss_pct: 0.05
   risk_per_trade_pct: 0.01
   volume_confirmation_mode: "pace"
-  volume_pace_ratio: 1.8
+  volume_pace_ratio: 0.1
   volume_pace_timeframe: "1Min"
   session_minutes: 390
   volume_spike_ratio: 2.0
@@ -381,7 +384,7 @@ momentum:
 
 Recommended: enabled.
 
-Momentum is the primary stock contributor. The default profile uses `top_n: 2`, `min_momentum_pct: 0.04`, `volume_confirmation_mode: pace`, `volume_pace_ratio: 1.8`, and `min_breadth_coverage_pct: 0.65` to require stronger same-session participation while keeping yellow regimes capped at one position and sector concentration capped. Momentum emits ATR-risk sizing, but `max_stop_loss_pct: 0.05` caps the strategy stop so high-volatility entries cannot widen beyond 5% below entry. If intraday bars are unavailable, pace mode falls back to the legacy `volume_spike_ratio: 2.0` full-day ratio.
+Momentum is the primary stock contributor. The default profile uses `top_n: 2`, `min_momentum_pct: 0.04`, `volume_confirmation_mode: pace`, `volume_pace_ratio: 0.1`, and `min_breadth_coverage_pct: 0.65` while keeping yellow regimes capped at one position and sector concentration capped. The volume-pace threshold is calibrated to Alpaca real-minute replay, where observed minute-volume pace is much lower than consolidated daily volume. Momentum emits ATR-risk sizing, but `max_stop_loss_pct: 0.05` caps the strategy stop so high-volatility entries cannot widen beyond 5% below entry. If intraday bars are unavailable, pace mode falls back to the legacy `volume_spike_ratio: 2.0` full-day ratio.
 
 ### Relative Strength
 
@@ -401,7 +404,7 @@ relative_strength:
   atr_multiplier: 1.2
   max_stop_loss_pct: 0.05
   volume_confirmation_mode: "pace"
-  volume_pace_ratio: 1.8
+  volume_pace_ratio: 0.1
 ```
 
 Recommended: enabled.
@@ -412,6 +415,33 @@ and 8% absolute return, then applies a 3-day blow-off cap so the sleeve prefers
 established leaders that are not already extended in the immediate short term.
 It shares the Momentum breadth, sector-neutral, volume-pace, and ATR-risk sizing
 controls, and exits through the standard hold/risk layers with a 7-day hold.
+
+### Crypto RSI Reversion
+
+```yaml
+crypto_rsi_reversion:
+  enabled: true
+  asset_class: crypto
+  use_regime_filter: true
+  rsi_period: 14
+  oversold_threshold: 35
+  overbought_threshold: 55
+  bb_period: 20
+  bb_std: 2.0
+  max_bollinger_pct_b: 0.40
+  min_recovery_pct: 0.0
+  hold_days: 3
+  max_loss_exit_pct: 0.10
+  profit_floor_pct: 0.03
+  max_signals: 3
+```
+
+Recommended: enabled only under the default sample-size and live-readiness gates.
+
+This sleeve buys short-lived crypto pullbacks when daily RSI and Bollinger %B are
+oversold and the BTC regime gate is open. It exits on a 10% strategy stop, mean
+target, RSI recovery, or 3-day hold cap. Its current production sample remains
+small, so it should stay exploratory until closed paper evidence improves.
 
 ### RSI Reversion
 
@@ -482,27 +512,30 @@ do not re-enable it without rerunning the gap validation profile.
 ma_crossover:
   enabled: true
   asset_class: crypto
-  fast_ema: 6
-  slow_ema: 18
+  fast_ema: 8
+  slow_ema: 26
   timeframe: "1Day"
   trend_return_lookback_days: 3
-  min_trend_return_pct: -0.02
-  min_price_above_slow_pct: 0.005
-  hold_days: 16
-  max_loss_exit_pct: 0.02
-  rsi_entry_max: 75
+  min_trend_return_pct: 0.02
+  min_price_above_slow_pct: 0.01
+  hold_days: 14
+  max_loss_exit_pct: 0.04
+  rsi_entry_max: 65
   volume_spike_ratio: 1.0
 ```
 
 Recommended: enabled.
 
-This strategy contributed positively in the latest recommended 12-month backtest. The 16-day hold cap improved costed 12-month MA contribution versus 12 days without worsening the observed worst trade. The strategy-level max-loss exit closes the position when the latest daily close is at least 2% below entry; the 2% setting kept the recent crypto sleeve positive while avoiding the -18.65% tail observed with a looser 3% setting.
+This strategy remains enabled after Phase 2 remediation, but now requires an 8/26
+EMA cross, +2% 3-day follow-through, close at least 1% above the slow EMA, and
+RSI no higher than 65 at entry. The strategy-level max-loss exit closes the
+position when the latest daily close is at least 4% below entry.
 
 ### Range Breakout
 
 ```yaml
 range_breakout:
-  enabled: true
+  enabled: false
   asset_class: crypto
   live_readiness:
     enabled: true
@@ -532,15 +565,17 @@ range_breakout:
   trend_exit_enabled: true
 ```
 
-Recommended: enabled in the all-strategy profile, with continued monitoring.
+Recommended: keep disabled in the default profile, with continued monitoring in
+research or standalone validation.
 
 The implementation uses confirmed daily 20-day Donchian high breakouts, ranked
 signal selection, ATR-risk sizing, breakout-extension and upper-10% close-location quality
 guards, and explicit failed-breakout exits before the 14-day hold cap. Its
-12-month all-enabled contribution was positive, but sample size remains low.
-Live entries are therefore gated until the trade log shows 25 closed paper exits
-for `range_breakout` spanning at least 90 paper-validation days. Paper and
-backtest runs are not blocked by this runtime gate.
+historical 12-month all-enabled contribution was positive, but sample size
+remains low and the sleeve is excluded from the current production default. Live
+entries are gated until the trade log shows 25 closed paper exits for
+`range_breakout` spanning at least 90 paper-validation days. Paper and backtest
+runs are not blocked by this runtime gate when explicitly re-enabled.
 
 ---
 
@@ -580,10 +615,10 @@ Use `--strategies` and repeated `--set` arguments to test configuration variants
 
 ```bash
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
-  --strategies momentum,relative_strength,rsi_reversion,ma_crossover,range_breakout \
+  --strategies momentum,relative_strength,rsi_reversion,crypto_rsi_reversion,ma_crossover \
   --set strategies.momentum.top_n=1 \
   --set strategies.momentum.min_momentum_pct=0.10 \
-  --set strategies.momentum.volume_spike_ratio=1.8 \
+  --set strategies.momentum.volume_pace_ratio=0.1 \
   --set strategies.momentum.min_breadth_coverage_pct=0.75
 ```
 
@@ -644,8 +679,8 @@ should be treated as directional.
 The production profile validates the current costed production gate rather than
 the older core-only subset. It includes the default strategy set used in
 `validation.production_gate.windows[*].strategies`, currently excluding `gap_up`
-until its standalone gate passes and including `relative_strength` plus
-`range_breakout`, and applies the
+and `range_breakout` until their standalone evidence improves and including
+`relative_strength`, `crypto_rsi_reversion`, and `ma_crossover`, and applies the
 moderate-risk drawdown thresholds defined in `config/config.yaml`: 6% for the
 12-month default gate and 4% for the 6-month default gate. The latest 30-day
 crypto sleeve is watch-only: it reports weak short-window behavior without

@@ -220,7 +220,7 @@ strategies:
   momentum:
     enabled: true
     asset_class: stocks          # stocks | crypto | both
-    description: "Adaptive momentum: top-2 green-regime ranking with a 4% momentum floor, optional ATR-scaled momentum gate, reduced ATR stop extension, 1% risk sizing, sector-neutral ranking, breadth coverage guard, breadth-tiered regime, and time-of-day normalized volume-pace entry"
+    description: "Adaptive momentum: top-2 green-regime ranking with a 4% momentum floor, optional ATR-scaled momentum gate, reduced ATR stop extension, 1% risk sizing, sector-neutral ranking, breadth coverage guard, breadth-tiered regime, and real-minute calibrated volume-pace entry"
     top_n: 2                     # Pick the two strongest sector-diversified momentum stocks in green regimes
     hold_days: 4                 # Minimum hold before profit-aware exit checks
     exit_policy: "profit_trailing" # fixed_hold | profit_trailing | risk_only_baseline
@@ -245,7 +245,7 @@ strategies:
     min_breadth_coverage_pct: 0.65 # Require valid SMA50 coverage for at least 65% of the scan universe
     yellow_max_positions: 1        # Max positions in Yellow regime (breadth 25–50%)
     volume_confirmation_mode: "pace" # "pace" compares current session volume to expected volume for elapsed market minutes; "daily" uses legacy full-day ratio
-    volume_pace_ratio: 1.8         # Current session volume pace must exceed this multiple of the 20-day average daily pace
+    volume_pace_ratio: 0.1         # Real-minute replay feed calibration; Alpaca minute volume is a subset of consolidated daily volume.
     volume_pace_timeframe: "1Min"  # Intraday bars used to calculate current session volume pace
     session_minutes: 390           # Regular US equity session length used for volume-pace normalization
     volume_spike_ratio: 2.0        # Legacy daily fallback: latest daily volume must exceed this multiple of the 20-day average
@@ -281,7 +281,7 @@ strategies:
     min_breadth_coverage_pct: 0.65
     yellow_max_positions: 1
     volume_confirmation_mode: "pace"
-    volume_pace_ratio: 1.8
+    volume_pace_ratio: 0.1
     volume_pace_timeframe: "1Min"
     session_minutes: 390
     volume_spike_ratio: 1.8
@@ -352,28 +352,51 @@ strategies:
     trend_exit_enabled: true     # Exit if completed close loses the SMA trend filter
     weight: 0.8
 
-  ma_crossover:
+  crypto_rsi_reversion:
     enabled: true
     asset_class: crypto
-    description: "Enter when 6-EMA crosses above 18-EMA with slope, shallow drawdown guard, price/EMA confirmation, volatility, volume, and RSI filters. Exit on daily close max-loss, bearish cross, RSI target, or 16-day hold cap. Uses 2xATR stop extension and 1%-risk position sizing."
+    description: "Short-hold crypto RSI mean reversion: buys daily RSI/%B pullbacks only when the BTC regime gate is open, then exits on mean target, RSI recovery, a 10% strategy stop, or a 3-day time cap."
     live_readiness:
       enabled: true
       min_closed_paper_trades: 25
       min_paper_days: 90
-    fast_ema: 6
-    slow_ema: 18
+    timeframe: "1Day"
+    use_regime_filter: true
+    rsi_period: 14
+    oversold_threshold: 35
+    overbought_threshold: 55
+    bb_period: 20
+    bb_std: 2.0
+    max_bollinger_pct_b: 0.40
+    min_recovery_pct: 0.0
+    hold_days: 3
+    max_loss_exit_pct: 0.10
+    profit_floor_pct: 0.03
+    max_signals: 3
+    weight: 0.8
+
+  ma_crossover:
+    enabled: true
+    asset_class: crypto
+    description: "Enter when 8-EMA crosses above 26-EMA with stronger follow-through, price/EMA confirmation, volatility, volume, and RSI filters. Exit on daily close max-loss, bearish cross, RSI target, or 14-day hold cap. Uses 2xATR stop extension and 1%-risk position sizing."
+    live_readiness:
+      enabled: true
+      min_closed_paper_trades: 25
+      min_paper_days: 90
+    fast_ema: 8
+    slow_ema: 26
     timeframe: "1Day"            # "1Hour" | "4Hour" | "1Day"
     entry_cross_lookback_days: 1  # Require the bullish cross on the latest completed daily transition
     trend_return_lookback_days: 3 # Require recent follow-through before accepting a new cross
-    min_trend_return_pct: -0.02   # Block crosses after >2% 3-day drawdown
-    min_price_above_slow_pct: 0.005 # Require close at least 0.5% above slow EMA to avoid underpowered crosses
-    hold_days: 16
-    max_loss_exit_pct: 0.02      # Strategy-level exit if latest daily close is at least 2% below entry
+    min_trend_return_pct: 0.02    # Require at least +2% 3-day follow-through before accepting a new cross
+    min_price_above_slow_pct: 0.01 # Require close at least 1.0% above slow EMA to avoid underpowered crosses
+    hold_days: 14
+    max_loss_exit_pct: 0.04      # Strategy-level exit if latest daily close is at least 4% below entry
     atr_period: 14
     atr_multiplier: 2.0
     risk_per_trade_pct: 0.01     # Risk 1% of equity per trade for ATR-based sizing
     rsi_entry_min: 35            # RSI must be at least this to avoid entering oversold chop
-    rsi_entry_max: 75            # RSI must be below this to avoid buying overbought
+    rsi_entry_max: 65            # RSI must be below this to avoid buying overbought
     rsi_exit_max: 75             # Exit if RSI rises above this (overbought target)
     volume_spike_ratio: 1.0      # Entry bar volume must exceed this multiple of the 20-day average
     volume_avg_period: 20        # Period for volume average
@@ -382,9 +405,9 @@ strategies:
     weight: 1.0
 
   range_breakout:
-    enabled: true
+    enabled: false
     asset_class: crypto
-    description: "Enter long on confirmed daily close breakout above the configured Donchian high with volume, trend, volatility, RSI, breakout-extension, and close-location guards. Exit failed breakouts early before the hold cap."
+    description: "Disabled in the default profile until real-minute/costed validation improves; enters long on confirmed daily close breakouts above the configured Donchian high with volume, trend, volatility, RSI, breakout-extension, and close-location guards."
     live_readiness:
       enabled: true
       min_closed_paper_trades: 25
@@ -460,7 +483,7 @@ validation:
       master:
         window_days: 180
         screener: true
-        strategies: [momentum, relative_strength, rsi_reversion, ma_crossover, range_breakout]
+        strategies: [momentum, relative_strength, rsi_reversion, crypto_rsi_reversion, ma_crossover]
         windows:
           - end_date: "12/31/2019"
             label: calm_bull_2019
@@ -511,7 +534,7 @@ validation:
       quick:
         window_days: 180
         screener: true
-        strategies: [momentum, relative_strength, rsi_reversion, ma_crossover, range_breakout]
+        strategies: [momentum, relative_strength, rsi_reversion, crypto_rsi_reversion, ma_crossover]
         windows:
           - end_date: "09/30/2020"
             label: covid_crash_2020
@@ -547,7 +570,7 @@ validation:
         days: 365
         end_date: "04/29/2026"
         screener: true
-        strategies: [momentum, relative_strength, rsi_reversion, ma_crossover, range_breakout]
+        strategies: [momentum, relative_strength, rsi_reversion, crypto_rsi_reversion, ma_crossover]
         required: true
         min_return_pct: 0.10
         max_drawdown_pct: 0.06
@@ -558,7 +581,7 @@ validation:
         days: 180
         end_date: "04/29/2026"
         screener: true
-        strategies: [momentum, relative_strength, rsi_reversion, ma_crossover, range_breakout]
+        strategies: [momentum, relative_strength, rsi_reversion, crypto_rsi_reversion, ma_crossover]
         required: true
         min_return_pct: 0.015
         max_drawdown_pct: 0.04
@@ -569,7 +592,7 @@ validation:
         days: 365
         end_date: "04/29/2026"
         screener: false
-        strategies: [ma_crossover, range_breakout]
+        strategies: [crypto_rsi_reversion, ma_crossover]
         required: true
         min_return_pct: 0.05
         max_drawdown_pct: 0.02
@@ -578,7 +601,7 @@ validation:
       - name: crypto_recent_30d_watch
         days: 30
         screener: false
-        strategies: [ma_crossover, range_breakout]
+        strategies: [crypto_rsi_reversion, ma_crossover]
         required: false
         min_return_pct: 0.0
         max_drawdown_pct: 0.015
