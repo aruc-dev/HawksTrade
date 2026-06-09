@@ -648,6 +648,7 @@ def _check_hold_day_exits(
     dry_run: bool = False,
     marker: RunScope | None = None,
     market_open: bool = True,
+    strategy_names: set[str] | None = None,
 ):
     """Exit any swing trade that has been held beyond its target hold_days.
 
@@ -655,6 +656,11 @@ def _check_hold_day_exits(
     crypto-only overnight scans cannot submit stock sell orders outside
     regular market hours.
     """
+    selected_strategies = {
+        str(strategy_name).strip()
+        for strategy_name in (strategy_names or set())
+        if str(strategy_name).strip()
+    }
     open_trades = get_open_trades()
     observed_prices: dict[str, float] = {}
     for trade in open_trades:
@@ -663,6 +669,8 @@ def _check_hold_day_exits(
         try:
             if not symbol:
                 log.warning("Skipping hold-day check for trade row without symbol.")
+                continue
+            if selected_strategies and strategy not in selected_strategies:
                 continue
             if strategy not in HOLD_DAYS:
                 continue
@@ -1120,7 +1128,13 @@ def run(
 
     # --- Hold-day expiry exits ---
     log.info("--- Checking hold-day expiry ---")
-    _check_hold_day_exits(open_symbols, dry_run=dry_run, marker=marker, market_open=market_open)
+    _check_hold_day_exits(
+        open_symbols,
+        dry_run=dry_run,
+        marker=marker,
+        market_open=market_open,
+        strategy_names=strategy_names,
+    )
 
     _reconcile_trade_log_after_run(marker, dry_run)
 

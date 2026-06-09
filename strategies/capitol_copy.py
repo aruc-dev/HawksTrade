@@ -134,6 +134,9 @@ class CapitolCopyStrategy(BaseStrategy):
             if _normalize_symbol(item)
         }
         universe_symbols = {_normalize_symbol(symbol) for symbol in universe if _normalize_symbol(symbol)}
+        if respect_scan_universe and not universe_symbols:
+            log.warning("[CapitolCopy] Scan universe is empty while respect_scan_universe=true; blocking all signals.")
+            return []
         existing_symbols = {
             _normalize_symbol(symbol)
             for symbol in kwargs.get("existing_symbols", [])

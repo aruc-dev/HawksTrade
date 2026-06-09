@@ -818,6 +818,52 @@ class RunScanTests(unittest.TestCase):
 
         self.assertEqual(seen, ["capitol_copy"])
 
+    def test_strategy_name_filter_limits_hold_day_exits(self):
+        open_trade = {
+            "symbol": "AAPL",
+            "strategy": "momentum",
+            "asset_class": "stock",
+            "side": "buy",
+            "entry_price": "100",
+        }
+
+        class DisabledCapitolCopy:
+            name = "capitol_copy"
+            asset_class = "stocks"
+
+            def scan(self, universe, **kwargs):
+                return []
+
+        class AllowProtectionManager:
+            enabled = False
+
+        with (
+            patch.object(run_scan.ProtectionManager, "from_config", return_value=AllowProtectionManager()),
+            patch.object(run_scan.ac, "is_market_open", return_value=True),
+            patch.object(
+                run_scan.ac,
+                "get_stock_bars",
+                return_value={"SPY": [object()] * 252, "QQQ": [object()] * 51},
+            ),
+            patch.object(run_scan, "get_open_symbols", side_effect=[["AAPL"], ["AAPL"]]),
+            patch.object(run_scan.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_scan, "get_stock_universe", return_value=["AAPL"]),
+            patch.object(run_scan, "STOCK_STRATEGIES", [DisabledCapitolCopy()]),
+            patch.object(run_scan, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_scan, "get_trade_age_days", return_value=4),
+            patch.dict(run_scan.CFG["strategies"]["momentum"], {"exit_policy": "fixed_hold"}),
+            patch.object(run_scan, "print_snapshot"),
+            patch.object(run_scan.oe, "exit_position") as exit_position,
+        ):
+            run_scan.run(
+                run_stocks=True,
+                run_crypto=False,
+                dry_run=True,
+                strategy_names={"capitol_copy"},
+            )
+
+        exit_position.assert_not_called()
+
     def test_entry_pipeline_passes_precomputed_closed_trade_count(self):
         class FakeMomentum:
             name = "momentum"

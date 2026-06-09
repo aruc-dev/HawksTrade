@@ -89,6 +89,19 @@ class CapitolCopyStrategyTests(unittest.TestCase):
 
         self.assertEqual(signals, [])
 
+    def test_respect_scan_universe_empty_universe_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "signals.json"
+            path.write_text(json.dumps([_signal(ticker="AAPL")]), encoding="utf-8")
+
+            strategy = CapitolCopyStrategy(cfg=self._cfg(path, respect_scan_universe=True))
+            signals = strategy.scan(
+                [],
+                current_time=datetime(2026, 6, 8, 15, 0, tzinfo=timezone.utc),
+            )
+
+        self.assertEqual(signals, [])
+
     def test_missing_signal_file_fails_closed(self):
         strategy = CapitolCopyStrategy(cfg=self._cfg(Path("/tmp/does-not-exist-hawkscapitol-signals.json")))
 
