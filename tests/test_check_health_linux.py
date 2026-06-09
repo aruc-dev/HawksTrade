@@ -97,6 +97,16 @@ Unit=hawkstrade-full-scan.service
                 + "\n",
             )
             self._write(
+                timer_dir / "hawkstrade-capitol-refresh.timer",
+                """
+[Timer]
+OnCalendar=Mon..Fri *-*-* 13:35:00
+OnCalendar=Mon..Fri *-*-* 14..19:05:00
+Unit=hawkstrade-capitol-refresh.service
+""".strip()
+                + "\n",
+            )
+            self._write(
                 timer_dir / "hawkstrade-capitol-scan.timer",
                 """
 [Timer]
@@ -138,6 +148,10 @@ Unit=hawkstrade-health-check.service
             self.assertEqual(by_key["crypto_scan"][0].schedule_text, "OnCalendar=hourly")
             self.assertEqual(by_key["full_scan"][0].pattern.cron_text, "0 14-19 * * 1-5")
             self.assertEqual(
+                [job.pattern.cron_text for job in by_key["capitol_refresh"]],
+                ["35 13 * * 1-5", "5 14-19 * * 1-5"],
+            )
+            self.assertEqual(
                 [job.pattern.cron_text for job in by_key["capitol_scan"]],
                 ["40 13 * * 1-5", "10 14-19 * * 1-5"],
             )
@@ -167,6 +181,33 @@ Unit=hawkstrade-health-check.service
         self.assertEqual(key, "capitol_scan")
         self.assertEqual(label, "Capitol signal scan")
 
+    def test_hawkscapitol_refresh_marker_maps_to_refresh_job(self):
+        key, label = health._marker_job_info("hawkscapitol_refresh", {})
+
+        self.assertEqual(key, "capitol_refresh")
+        self.assertEqual(label, "Capitol signal refresh")
+
+    def test_load_runtime_records_parses_capitol_refresh_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            self._write(
+                log_dir / "capitol_refresh_20260417.log",
+                """
+2026-04-17 18:05:00,000 [INFO] hawkscapitol_refresh: RUN_START script=hawkscapitol_refresh run_id=refresh-1 dry_run=0
+2026-04-17 18:05:03,000 [INFO] hawkscapitol_refresh: RUN_END script=hawkscapitol_refresh run_id=refresh-1 status=ok dry_run=0
+""".strip()
+                + "\n",
+            )
+
+            runtime = health.load_runtime_records(log_dir)
+
+            self.assertEqual(len(runtime["capitol_refresh"]), 1)
+            record = runtime["capitol_refresh"][0]
+            self.assertEqual(record.job_key, "capitol_refresh")
+            self.assertEqual(record.label, "Capitol signal refresh")
+            self.assertTrue(record.success)
+            self.assertEqual(record.duration, timedelta(seconds=3))
+
     def test_build_report_uses_systemd_timer_schedule_when_requested(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -191,12 +232,32 @@ Unit=hawkstrade-crypto-scan.service
                 + "\n",
             )
             self._write(
+                timer_dir / "hawkstrade-capitol-refresh.timer",
+                """
+[Timer]
+OnCalendar=Mon..Fri *-*-* 18:05:00
+OnCalendar=Mon..Fri *-*-* 19:05:00
+Unit=hawkstrade-capitol-refresh.service
+""".strip()
+                + "\n",
+            )
+            self._write(
                 log_dir / "scan_20260417.log",
                 """
 2026-04-17 18:00:00,000 [INFO] run_scan: RUN_START script=run_scan run_id=scan-systemd scan_kind=full run_stocks=1 run_crypto=1 dry_run=0
 2026-04-17 18:00:01,000 [INFO] run_scan: RUN_END script=run_scan run_id=scan-systemd status=ok duration_s=1.000 outcome=completed
 2026-04-17 19:00:00,000 [INFO] run_scan: RUN_START script=run_scan run_id=crypto-systemd scan_kind=crypto run_stocks=0 run_crypto=1 dry_run=0
 2026-04-17 19:00:01,000 [INFO] run_scan: RUN_END script=run_scan run_id=crypto-systemd status=ok duration_s=1.000 outcome=completed
+""".strip()
+                + "\n",
+            )
+            self._write(
+                log_dir / "capitol_refresh_20260417.log",
+                """
+2026-04-17 18:05:00,000 [INFO] hawkscapitol_refresh: RUN_START script=hawkscapitol_refresh run_id=refresh-systemd-1 dry_run=0
+2026-04-17 18:05:03,000 [INFO] hawkscapitol_refresh: RUN_END script=hawkscapitol_refresh run_id=refresh-systemd-1 status=ok dry_run=0
+2026-04-17 19:05:00,000 [INFO] hawkscapitol_refresh: RUN_START script=hawkscapitol_refresh run_id=refresh-systemd-2 dry_run=0
+2026-04-17 19:05:03,000 [INFO] hawkscapitol_refresh: RUN_END script=hawkscapitol_refresh run_id=refresh-systemd-2 status=ok dry_run=0
 """.strip()
                 + "\n",
             )
@@ -227,7 +288,7 @@ Unit=hawkstrade-crypto-scan.service
             self.assertEqual(report.cron_template, "systemd")
             self.assertEqual(report.cron_file, timer_dir.resolve())
             self.assertEqual(report.schedule_source, "systemd")
-            self.assertEqual([job.key for job in report.job_health], ["full_scan", "crypto_scan"])
+            self.assertEqual([job.key for job in report.job_health], ["capitol_refresh", "full_scan", "crypto_scan"])
             self.assertTrue(all(job.status == "green" for job in report.job_health))
             self.assertTrue(all(line.startswith("OnCalendar=") for job in report.job_health for line in job.schedule_lines))
 

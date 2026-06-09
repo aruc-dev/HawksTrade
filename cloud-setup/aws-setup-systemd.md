@@ -106,14 +106,16 @@ SSH into the instance, then:
 sudo dnf update -y
 sudo dnf install -y python3 python3-pip git jq
 
-# Clone or copy HawksTrade
-git clone https://github.com/YOUR_USERNAME/HawksTrade.git ~/HawksTrade
+# Clone or copy HawksTrade, including the HawksCapitol submodule
+git clone --recurse-submodules https://github.com/YOUR_USERNAME/HawksTrade.git ~/HawksTrade
 cd ~/HawksTrade
+git submodule update --init --recursive
 
 # Create a virtual environment (recommended for systemd deployments)
 python3 -m venv .venv
 .venv/bin/pip install --upgrade pip
 .venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r integrations/HawksCapitol/requirements.txt
 
 # Verify AWS CLI is available (pre-installed on Amazon Linux 2023)
 aws --version
@@ -278,7 +280,9 @@ rm -rf "$TMPDIR"
 | `hawkstrade-secrets.service` | oneshot | Copies secrets into `/dev/shm` at boot; runs before all trading units |
 | `hawkstrade-stock-scan.service` | oneshot | Stock-only scan at 9:35 AM ET |
 | `hawkstrade-stock-scan.timer` | timer | Fires at 13:35 UTC (Mon–Fri) |
-| `hawkstrade-capitol-scan.service` | oneshot | Optional HawksCapitol signal scan using `capitol_copy` |
+| `hawkstrade-capitol-refresh.service` | oneshot | Refreshes HawksCapitol submodule signals from the configured real-data export command |
+| `hawkstrade-capitol-refresh.timer` | timer | Fires at 13:35 UTC, then 14:05–19:05 UTC hourly (Mon–Fri) |
+| `hawkstrade-capitol-scan.service` | oneshot | Refreshes HawksCapitol signals, then runs optional `capitol_copy` scan |
 | `hawkstrade-capitol-scan.timer` | timer | Fires at 13:40 UTC, then 14:10–19:10 UTC hourly (Mon–Fri) |
 | `hawkstrade-full-scan.service` | oneshot | Full scan (stocks + crypto) |
 | `hawkstrade-full-scan.timer` | timer | Fires on the hour 14:00–19:00 UTC (Mon–Fri) |
@@ -340,9 +344,19 @@ journalctl -u hawkstrade-secrets.service --no-pager
 
 ## Step 11 — Enable the Timers
 
+Before enabling `hawkstrade-capitol-refresh.timer` in production, edit
+`/etc/hawkstrade/hawkstrade.env` and set `HAWKSTRADE_CAPITOL_REFRESH_COMMAND` to
+a real-data HawksCapitol signal export command that updates
+`integrations/HawksCapitol/data/signals/latest.json`. The wrapper blocks the
+pinned HawksCapitol demo sample-data export unless
+`HAWKSTRADE_CAPITOL_ALLOW_SAMPLE_DATA=1` is set for a non-production test.
+`scripts/run_hawkscapitol_refresh.sh --dry-run` skips the configured custom
+refresh command and runs only HawksCapitol dry-run entrypoints.
+
 ```bash
 sudo systemctl enable --now \
   hawkstrade-stock-scan.timer \
+  hawkstrade-capitol-refresh.timer \
   hawkstrade-capitol-scan.timer \
   hawkstrade-full-scan.timer \
   hawkstrade-crypto-scan.timer \
@@ -358,7 +372,7 @@ Verify they are active and show expected next-trigger times:
 systemctl list-timers 'hawkstrade-*'
 ```
 
-You should see all eight timers with `NEXT` timestamps populated.
+You should see all nine timers with `NEXT` timestamps populated.
 
 ---
 
@@ -380,21 +394,24 @@ a = get_account()
 print('Connected! Portfolio value:', a.portfolio_value)
 "
 
-# 3. Dry-run the scanner
+# 3. Dry-run the HawksCapitol refresh through the submodule
+HAWKSTRADE_REQUIRE_SHM=1 scripts/run_hawkscapitol_refresh.sh --dry-run
+
+# 4. Dry-run the scanner
 HAWKSTRADE_REQUIRE_SHM=1 .venv/bin/python scheduler/run_scan.py --dry-run
 
-# 4. Dry-run the risk check
+# 5. Dry-run the risk check
 HAWKSTRADE_REQUIRE_SHM=1 .venv/bin/python scheduler/run_risk_check.py --dry-run
 
-# 5. Run the health check manually
+# 6. Run the health check manually
 sudo systemctl start hawkstrade-health-check.service
 journalctl -u hawkstrade-health-check.service -n 50 --no-pager
 
-# 6. Run unit tests
+# 7. Run unit tests
 .venv/bin/python -m unittest discover -v
 ```
 
-All six checks must pass before relying on the bot to run unattended.
+All seven checks must pass before relying on the bot to run unattended.
 
 ---
 
@@ -410,7 +427,8 @@ network-online.target
 hawkstrade-secrets.service  ←── loads /dev/shm/.hawkstrade.env
         │
         ├──▶ hawkstrade-stock-scan.service   (via timer: 13:35 UTC Mon–Fri)
-        ├──▶ hawkstrade-capitol-scan.service (via timer: 13:40, 14–19:10 UTC Mon–Fri)
+        ├──▶ hawkstrade-capitol-refresh.service (via timer: 13:35, 14–19:05 UTC Mon–Fri)
+        ├──▶ hawkstrade-capitol-scan.service (refresh pre-step, then scan via timer: 13:40, 14–19:10 UTC Mon–Fri)
         ├──▶ hawkstrade-full-scan.service    (via timer: 14–19:00 UTC Mon–Fri)
         ├──▶ hawkstrade-crypto-scan.service  (via timer: hourly 24/7)
         ├──▶ hawkstrade-risk-check.service   (via timer: every 15 min market hours)
@@ -499,6 +517,7 @@ sudo systemctl disable 'hawkstrade-*.timer'
 ```bash
 sudo systemctl enable --now \
   hawkstrade-stock-scan.timer \
+  hawkstrade-capitol-refresh.timer \
   hawkstrade-capitol-scan.timer \
   hawkstrade-full-scan.timer \
   hawkstrade-crypto-scan.timer \

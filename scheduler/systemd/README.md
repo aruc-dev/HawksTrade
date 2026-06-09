@@ -17,8 +17,10 @@ intentions. The next timer run is the retry boundary.
   group-readable by the HawksTrade service group so `systemd-logind` does not
   remove it as `ec2-user` IPC when SSH/user sessions close.
 - `hawkstrade-stock-scan.service` and `.timer` run the 9:35 AM ET stock-only scan.
+- `hawkstrade-capitol-refresh.service` and `.timer` refresh scored signals from
+  the HawksCapitol submodule before Capitol scans.
 - `hawkstrade-capitol-scan.service` and `.timer` optionally run the
-  `capitol_copy` stock strategy from HawksCapitol scored signals.
+  `capitol_copy` stock strategy from the refreshed HawksCapitol signal file.
 - `hawkstrade-full-scan.service` and `.timer` run hourly full scans.
 - `hawkstrade-crypto-scan.service` and `.timer` run hourly crypto-only scans.
 - `hawkstrade-risk-check.service` and `.timer` run a 9:31 AM ET check before
@@ -39,9 +41,20 @@ export PROJECT=/home/ec2-user/HawksTrade
 export HT_USER=ec2-user
 export HT_GROUP=ec2-user
 
+git submodule update --init --recursive
+if [ -f integrations/HawksCapitol/requirements.txt ]; then
+  .venv/bin/pip install -r integrations/HawksCapitol/requirements.txt
+fi
+
 sudo install -d -m 0750 /etc/hawkstrade
 sudo install -m 0600 scheduler/systemd/hawkstrade.env.example /etc/hawkstrade/hawkstrade.env
 sudo editor /etc/hawkstrade/hawkstrade.env
+
+# Before enabling hawkstrade-capitol-refresh.timer in production, set
+# HAWKSTRADE_CAPITOL_REFRESH_COMMAND in /etc/hawkstrade/hawkstrade.env to a
+# real-data HawksCapitol signal export command. The built-in demo sample-data
+# export is blocked unless HAWKSTRADE_CAPITOL_ALLOW_SAMPLE_DATA=1 is set for a
+# non-production test.
 
 # Create this file with Alpaca credentials only. Do not commit it.
 sudo editor /etc/hawkstrade/hawkstrade.secrets
@@ -72,6 +85,7 @@ Enable timers:
 ```bash
 sudo systemctl enable --now \
   hawkstrade-stock-scan.timer \
+  hawkstrade-capitol-refresh.timer \
   hawkstrade-capitol-scan.timer \
   hawkstrade-full-scan.timer \
   hawkstrade-crypto-scan.timer \
@@ -93,6 +107,7 @@ Run safe checks manually:
 
 ```bash
 sudo systemctl start hawkstrade-health-check.service
+sudo systemctl start hawkstrade-capitol-refresh.service
 sudo systemctl start hawkstrade-daily-report.service
 ```
 
@@ -100,6 +115,7 @@ Inspect logs:
 
 ```bash
 journalctl -u hawkstrade-risk-check.service -n 100 --no-pager
+journalctl -u hawkstrade-capitol-refresh.service -n 100 --no-pager
 journalctl -u hawkstrade-health-check.service -n 100 --no-pager
 ```
 
@@ -123,6 +139,17 @@ sudo systemctl disable --now 'hawkstrade-*.timer'
 - Scan, risk-check, and report services run through
   `scripts/run_hawkstrade_job.sh`, so they use the project `.venv`, Alpaca
   preflight checks, and the shared trade-mutation lock.
+- Capitol refresh uses `scripts/run_hawkscapitol_refresh.sh`. In production,
+  configure `HAWKSTRADE_CAPITOL_REFRESH_COMMAND` to export real HawksCapitol
+  signals to `integrations/HawksCapitol/data/signals/latest.json`; the wrapper
+  validates that the signal file was updated and contains a signal list. The
+  pinned HawksCapitol sample-data export is available only when
+  `HAWKSTRADE_CAPITOL_ALLOW_SAMPLE_DATA=1` is set for a non-production test, and
+  it writes signals without invoking HawksCapitol order-execution code. Dry-runs
+  skip the configured custom refresh command and execute only HawksCapitol
+  dry-run entrypoints. The Capitol scan service also runs this refresh as
+  `ExecStartPre`, so a missed refresh timer does not make the scan reuse stale
+  signals silently.
 - The health-check service uses `.venv/bin/python`, then `.venv/bin/python3`,
   then `python3` as a fallback. On systemd deployments it reads installed
   `/etc/systemd/system/hawkstrade-*.timer` schedules instead of cron templates,

@@ -361,6 +361,7 @@ def load_cron_jobs(cron_file: Path) -> list[CronJob]:
 
 SYSTEMD_TIMER_JOBS = {
     "hawkstrade-stock-scan.timer": ("stock_scan", "Stock scan"),
+    "hawkstrade-capitol-refresh.timer": ("capitol_refresh", "Capitol signal refresh"),
     "hawkstrade-capitol-scan.timer": ("capitol_scan", "Capitol signal scan"),
     "hawkstrade-full-scan.timer": ("full_scan", "Full scan"),
     "hawkstrade-crypto-scan.timer": ("crypto_scan", "Crypto scan"),
@@ -659,6 +660,9 @@ def _marker_job_info(script: str | None, fields: dict[str, str]) -> tuple[str, s
             return "weekly_report", "Weekly report"
         return "daily_report", "Daily report"
 
+    if script_name == "hawkscapitol_refresh":
+        return "capitol_refresh", "Capitol signal refresh"
+
     if script_name:
         return script_name, script_name.replace("_", " ").title()
     return "unknown_run", "Run"
@@ -756,7 +760,7 @@ def _split_structured_records(findings_by_file: dict[Path, list[LogFinding]]) ->
     records_by_id: dict[str, RunRecord] = {}
     for path in sorted(findings_by_file):
         for finding in findings_by_file[path]:
-            if finding.logger not in {"run_scan", "run_risk_check", "run_report"}:
+            if finding.logger not in {"run_scan", "run_risk_check", "run_report", "hawkscapitol_refresh"}:
                 continue
             parsed = _parse_marker_fields(finding.message)
             if parsed is None:
@@ -853,6 +857,7 @@ def _find_matching_error_lines(
 def _log_files(log_dir: Path) -> list[Path]:
     patterns = [
         "scan_*.log",
+        "capitol_refresh_*.log",
         "risk_*.log",
         "report_*.log",
         "cron.log",
@@ -1058,6 +1063,7 @@ def load_runtime_records(log_dir: Path) -> dict[str, object]:
     legacy_report_records = _split_report_records(legacy_findings)
 
     structured_scan_records = [r for r in structured_records if r.job_key in {"stock_scan", "full_scan", "crypto_scan", "scan_unknown"}]
+    structured_capitol_refresh_records = [r for r in structured_records if r.job_key == "capitol_refresh"]
     structured_risk_records = [r for r in structured_records if r.job_key == "risk_check"]
     structured_daily_report_records = [r for r in structured_records if r.job_key == "daily_report"]
     structured_weekly_report_records = [r for r in structured_records if r.job_key == "weekly_report"]
@@ -1066,6 +1072,7 @@ def load_runtime_records(log_dir: Path) -> dict[str, object]:
 
     return {
         "scan": sorted(structured_scan_records + legacy_scan_records, key=sort_key),
+        "capitol_refresh": sorted(structured_capitol_refresh_records, key=sort_key),
         "risk_check": sorted(structured_risk_records + legacy_risk_records, key=sort_key),
         "daily_report": sorted(structured_daily_report_records + [r for r in legacy_report_records if r.job_key == "daily_report"], key=sort_key),
         "weekly_report": sorted(structured_weekly_report_records + [r for r in legacy_report_records if r.job_key == "weekly_report"], key=sort_key),
@@ -1239,6 +1246,7 @@ def evaluate_job_health(
     grouped = _group_jobs(jobs)
     by_key = {
         "stock_scan": [r for r in records if r.job_key == "stock_scan"],
+        "capitol_refresh": [r for r in records if r.job_key == "capitol_refresh"],
         "capitol_scan": [r for r in records if r.job_key == "capitol_scan"],
         "full_scan": [r for r in records if r.job_key == "full_scan"],
         "crypto_scan": [r for r in records if r.job_key == "crypto_scan"],
@@ -1291,12 +1299,13 @@ def evaluate_job_health(
 
     order = {
         "stock_scan": 0,
-        "capitol_scan": 1,
-        "full_scan": 2,
-        "crypto_scan": 3,
-        "risk_check": 4,
-        "daily_report": 5,
-        "weekly_report": 6,
+        "capitol_refresh": 1,
+        "capitol_scan": 2,
+        "full_scan": 3,
+        "crypto_scan": 4,
+        "risk_check": 5,
+        "daily_report": 6,
+        "weekly_report": 7,
     }
     health_rows.sort(key=lambda row: order.get(row.key, 99))
     return health_rows
@@ -1586,10 +1595,11 @@ def build_health_report(
     runtime = load_runtime_records(Path(log_dir))
 
     scan_records = runtime["scan"]
+    capitol_refresh_records = runtime["capitol_refresh"]
     risk_records = runtime["risk_check"]
     report_daily_records = runtime["daily_report"]
     report_weekly_records = runtime["weekly_report"]
-    all_records = scan_records + risk_records + report_daily_records + report_weekly_records
+    all_records = scan_records + capitol_refresh_records + risk_records + report_daily_records + report_weekly_records
 
     if alpaca_state is None:
         alpaca_state = fetch_alpaca_state()

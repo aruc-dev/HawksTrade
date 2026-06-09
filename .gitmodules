@@ -1,0 +1,4 @@
+[submodule "integrations/HawksCapitol"]
+	path = integrations/HawksCapitol
+	url = https://github.com/aruc-dev/HawksCapitol.git
+	branch = main

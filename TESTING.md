@@ -38,6 +38,7 @@ Expected:
 ## Scheduler Dry Runs
 
 ```bash
+scripts/run_hawkscapitol_refresh.sh --dry-run
 python3 scheduler/run_scan.py --dry-run
 python3 scheduler/run_scan.py --stocks-only --strategy capitol_copy --dry-run
 python3 scheduler/run_scan.py --crypto-only --dry-run

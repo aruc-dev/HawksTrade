@@ -22,6 +22,7 @@ documented in their own sections below.
 | Task | Command | Eastern Time | Pacific Time |
 |------|---------|--------------|--------------|
 | First stock scan | `./scripts/run_hawkstrade_job.sh scheduler/run_scan.py --stocks-only` | 9:35 AM Mon-Fri | 6:35 AM Mon-Fri |
+| Capitol signal refresh | `./scripts/run_hawkscapitol_refresh.sh` | 9:35 AM, then 10:05 AM-3:05 PM hourly Mon-Fri | 6:35 AM, then 7:05 AM-12:05 PM hourly Mon-Fri |
 | Capitol signal scan | `./scripts/run_hawkstrade_job.sh scheduler/run_scan.py --stocks-only --strategy capitol_copy` | 9:40 AM, then 10:10 AM-3:10 PM hourly Mon-Fri | 6:40 AM, then 7:10 AM-12:10 PM hourly Mon-Fri |
 | Full scan | `./scripts/run_hawkstrade_job.sh scheduler/run_scan.py` | 10:00 AM-3:00 PM hourly Mon-Fri | 7:00 AM-12:00 PM hourly Mon-Fri |
 | Risk check | `./scripts/run_hawkstrade_job.sh scheduler/run_risk_check.py` | 9:45 AM-3:45 PM every 15 min Mon-Fri | 6:45 AM-12:45 PM every 15 min Mon-Fri |
@@ -32,11 +33,20 @@ documented in their own sections below.
 Before enabling schedules:
 
 1. Confirm dependencies are installed: `pip3 install -r requirements.txt`.
-2. Confirm Alpaca credentials exist in `.env` or `config/.env`.
-3. Confirm `config/config.yaml` is still `mode: paper` unless live mode was explicitly approved.
-4. Run dry checks:
+2. Initialize submodules and, if using `capitol_copy`, install HawksCapitol dependencies:
+   `git submodule update --init --recursive && pip3 install -r integrations/HawksCapitol/requirements.txt`.
+3. Before enabling the Capitol refresh timer in production, set
+   `HAWKSTRADE_CAPITOL_REFRESH_COMMAND` to a real-data HawksCapitol signal export
+   command. The built-in sample-data export is blocked unless
+   `HAWKSTRADE_CAPITOL_ALLOW_SAMPLE_DATA=1` is set for a non-production test.
+   `scripts/run_hawkscapitol_refresh.sh --dry-run` skips the configured custom
+   command and runs only HawksCapitol dry-run entrypoints.
+4. Confirm Alpaca credentials exist in `.env` or `config/.env`.
+5. Confirm `config/config.yaml` is still `mode: paper` unless live mode was explicitly approved.
+6. Run dry checks:
 
 ```bash
+scripts/run_hawkscapitol_refresh.sh --dry-run
 python3 scheduler/run_scan.py --dry-run
 python3 scheduler/run_risk_check.py --dry-run
 python3 scheduler/run_report.py

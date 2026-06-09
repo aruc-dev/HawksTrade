@@ -294,7 +294,7 @@ before re-enabling or scaling capital allocated to this sleeve.
 **Type:** External signal adapter for HawksCapitol congressional trade-copy signals.
 
 **Entry:** Reads scored signals from
-`../HawksCapitol/data/signals/latest.json` by default, or from
+`integrations/HawksCapitol/data/signals/latest.json` by default, or from
 `HAWKSTRADE_CAPITOL_SIGNAL_PATH` when that environment variable is set. The
 strategy accepts only unblocked stock buy/copy-buy signals whose
 `created_at`, `conviction_score`, `freshness_score`, and
@@ -316,7 +316,7 @@ pass uses `hold_days`, high-water profit protection, trailing stop, and
 | Parameter | Value |
 |---|---|
 | `enabled` | false |
-| `signal_path` | `../HawksCapitol/data/signals/latest.json` |
+| `signal_path` | `integrations/HawksCapitol/data/signals/latest.json` |
 | `max_signal_age_hours` | 72 |
 | `min_conviction_score` | 0.65 |
 | `min_freshness_score` | 0.35 |
@@ -328,9 +328,11 @@ pass uses `hold_days`, high-water profit protection, trailing stop, and
 | `trailing_stop_pct` | 5% from post-entry peak |
 | `max_hold_days` | 45 business days |
 
-**Dedicated schedule:** `hawkstrade-capitol-scan.timer` runs
-`scheduler/run_scan.py --stocks-only --strategy capitol_copy`, so this sleeve can
-have its own cadence while still sharing the HawksTrade trade-mutation lock.
+**Dedicated schedule:** `hawkstrade-capitol-refresh.timer` refreshes the
+HawksCapitol submodule signal file before `hawkstrade-capitol-scan.timer` runs
+`scheduler/run_scan.py --stocks-only --strategy capitol_copy`. The scan service
+also runs the refresh script as a pre-step so it fails closed instead of silently
+reusing stale signals when the refresh command fails.
 
 **Live readiness:** If enabled in live mode, runtime entries are blocked until
 there are at least 20 closed paper exits and 30 calendar days of paper evidence
