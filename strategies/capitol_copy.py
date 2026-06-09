@@ -62,7 +62,7 @@ def _truthy_text(value: Any) -> bool:
 
 def _resolve_signal_path(raw_path: str | None, base_dir: Path) -> Path:
     env_path = os.getenv("HAWKSTRADE_CAPITOL_SIGNAL_PATH")
-    configured = env_path or raw_path or "../HawksCapitol/data/signals/latest.json"
+    configured = env_path or raw_path or "integrations/HawksCapitol/data/signals/latest.json"
     path = Path(configured).expanduser()
     if path.is_absolute():
         return path

@@ -1,8 +1,8 @@
 [Unit]
-Description=HawksTrade HawksCapitol signal scan
+Description=HawksTrade HawksCapitol signal refresh
 Documentation=file:/home/ec2-user/HawksTrade/scheduler/systemd/README.md
 Wants=network-online.target
-After=network-online.target hawkstrade-secrets.service hawkstrade-capitol-refresh.service
+After=network-online.target hawkstrade-secrets.service
 Requires=hawkstrade-secrets.service
 
 [Service]
@@ -14,8 +14,7 @@ EnvironmentFile=/etc/hawkstrade/hawkstrade.env
 Environment=HAWKSTRADE_REQUIRE_SHM=1
 Environment=HAWKSTRADE_CAPITOL_DIR=/home/ec2-user/HawksTrade/integrations/HawksCapitol
 Environment=HAWKSTRADE_CAPITOL_SIGNAL_PATH=/home/ec2-user/HawksTrade/integrations/HawksCapitol/data/signals/latest.json
-ExecStartPre=/home/ec2-user/HawksTrade/scripts/run_hawkscapitol_refresh.sh
-ExecStart=/home/ec2-user/HawksTrade/scripts/run_hawkstrade_job.sh scheduler/run_scan.py --stocks-only --strategy capitol_copy
+ExecStart=/home/ec2-user/HawksTrade/scripts/run_hawkscapitol_refresh.sh
 Restart=no
 TimeoutStartSec=45min
 StandardOutput=journal

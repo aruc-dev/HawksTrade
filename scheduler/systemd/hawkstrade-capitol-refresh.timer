@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh HawksCapitol signals before HawksTrade Capitol scans
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 13:35:00
+OnCalendar=Mon..Fri *-*-* 14..19:05:00
+Persistent=true
+AccuracySec=1min
+Unit=hawkstrade-capitol-refresh.service
+
+[Install]
+WantedBy=timers.target
