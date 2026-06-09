@@ -1,6 +1,6 @@
 import json
 import unittest
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
@@ -240,12 +240,21 @@ class WalkForwardTests(unittest.TestCase):
             "Momentum backtest uses daily bars. Symbols: AAPL.",
         ])
 
-    def test_configured_profile_windows_resolves_auto_and_oos_dates(self):
+    def test_configured_profile_windows_clips_auto_window_before_oos_lockup(self):
         today = datetime(2026, 5, 16, tzinfo=timezone.utc)
-        windows = _configured_profile_windows(_profile_cfg(), today=today)
-        oos = _configured_profile_windows(_profile_cfg(), today=today, oos_only=True)
+        lockup = Mock(
+            start_date=date(2026, 2, 15),
+            end_date=date(2026, 5, 15),
+        )
+        lockup.overlaps.side_effect = (
+            lambda start, end: start.date() <= lockup.end_date and end.date() >= lockup.start_date
+        )
 
-        self.assertEqual(windows[-1]["end_date"], "03/17/2026")
+        with patch("scheduler.run_walkforward.current_lockup", return_value=lockup):
+            windows = _configured_profile_windows(_profile_cfg(), today=today)
+            oos = _configured_profile_windows(_profile_cfg(), today=today, oos_only=True)
+
+        self.assertEqual(windows[-1]["end_date"], "02/14/2026")
         self.assertEqual(windows[-1]["window_days"], 180)
         self.assertEqual(oos, [{
             "label": "locked_oos_recent_60d",

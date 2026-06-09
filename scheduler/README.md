@@ -32,9 +32,12 @@ documented in their own sections below.
 
 Before enabling schedules:
 
-1. Confirm dependencies are installed: `pip3 install -r requirements.txt`.
-2. Initialize submodules and, if using `capitol_copy`, install HawksCapitol dependencies:
-   `git submodule update --init --recursive && pip3 install -r integrations/HawksCapitol/requirements.txt`.
+1. Confirm dependencies are installed: `pip3 install -r requirements.txt`. The root
+   requirements include the bundled HawksCapitol Python dependencies for source
+   ingestion, PDF parsing, and OCR helpers. Hosts that need OCR fallback for
+   scanned filings must also install the system `tesseract` binary used by the
+   `pytesseract` Python wrapper.
+2. Initialize submodules: `git submodule update --init --recursive`.
 3. Before enabling the Capitol refresh timer in production, set
    `HAWKSTRADE_CAPITOL_REFRESH_COMMAND` to a real-data HawksCapitol signal export
    command. The built-in sample-data export is blocked unless
@@ -118,6 +121,7 @@ launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.hawkstrade.weekly-repo
 Logs:
 
 - Script logs: `logs/scan_YYYYMMDD.log`, `logs/risk_YYYYMMDD.log`, `logs/report_YYYYMMDD.log`
+- Scan audit logs: `logs/scan_audit_YYYYMMDD.jsonl`; each line records one scan run's evaluated universes, dynamic/static stock symbols, emitted signals, no-signal rejections, and entry block reasons. View the latest run with `python3 scripts/show_scan_audit.py`.
 - launchd stdout/stderr: `logs/launchd_*.log`, `logs/launchd_*.err`
 
 macOS caveat: user `LaunchAgents` run while the user session is available. If the Mac

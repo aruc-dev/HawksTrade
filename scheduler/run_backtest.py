@@ -11,7 +11,9 @@ import os
 import sys
 import logging
 import argparse
+import copy
 import tempfile
+import uuid
 import warnings
 import numpy as np
 import pandas as pd
@@ -51,12 +53,14 @@ import strategies.momentum as momentum_module  # noqa: E402
 import strategies.relative_strength as relative_strength_module  # noqa: E402
 import strategies.rsi_reversion as rsi_module  # noqa: E402
 import strategies.gap_up as gap_up_module  # noqa: E402
+import strategies.capitol_copy as capitol_copy_module  # noqa: E402
 import strategies.ma_crossover as ma_crossover_module  # noqa: E402
 import strategies.range_breakout as range_breakout_module  # noqa: E402
 from strategies.momentum import MomentumStrategy  # noqa: E402
 from strategies.relative_strength import RelativeStrengthStrategy  # noqa: E402
 from strategies.rsi_reversion import RSIReversionStrategy  # noqa: E402
 from strategies.gap_up import GapUpStrategy  # noqa: E402
+from strategies.capitol_copy import CapitolCopyStrategy  # noqa: E402
 from strategies.ma_crossover import MACrossoverStrategy  # noqa: E402
 from strategies.range_breakout import RangeBreakoutStrategy  # noqa: E402
 from screener.universe_builder import UniverseBuilder  # noqa: E402
@@ -317,7 +321,8 @@ def _run_backtest_risk_exits(sim: "BacktestSimulator", *, market_open: bool) -> 
             observed_high = max(observed_high, float(bar["high"]))
         update_high_water_price(pos, observed_high)
         stop_price, stop_label = _effective_stop_for_backtest(pos)
-        take_profit = rm.take_profit_price(pos["entry_price"])
+        strategy = pos.get("strategy")
+        take_profit = rm.take_profit_price(pos["entry_price"], strategy=strategy)
 
         if bar is not None:
             low = float(bar["low"])
@@ -335,7 +340,7 @@ def _run_backtest_risk_exits(sim: "BacktestSimulator", *, market_open: bool) -> 
                 finally:
                     sim.pending_exit_prices.pop(symbol, None)
                 continue
-            if high >= take_profit:
+            if take_profit is not None and high >= take_profit:
                 reason = f"Take-profit hit intraday: {high:.4f} >= {take_profit:.4f}"
                 sim.pending_exit_prices[symbol] = take_profit
                 try:
@@ -354,6 +359,7 @@ def _run_backtest_risk_exits(sim: "BacktestSimulator", *, market_open: bool) -> 
             pos["entry_price"],
             price,
             custom_stop_price=pos.get("custom_stop_price"),
+            strategy=strategy,
         )
         if should_exit:
             oe.exit_position(
@@ -1027,9 +1033,24 @@ STRATEGY_MODULES = {
     "relative_strength": relative_strength_module,
     "rsi_reversion": rsi_module,
     "gap_up": gap_up_module,
+    "capitol_copy": capitol_copy_module,
     "ma_crossover": ma_crossover_module,
     "range_breakout": range_breakout_module,
 }
+
+
+def _capitol_copy_backtest_config(cfg: dict) -> dict:
+    backtest_cfg = copy.deepcopy(cfg)
+    strategies = backtest_cfg.setdefault("strategies", {})
+    capitol_cfg = strategies.setdefault("capitol_copy", {})
+    if not isinstance(capitol_cfg, dict):
+        capitol_cfg = {}
+        strategies["capitol_copy"] = capitol_cfg
+    capitol_cfg["signal_path"] = str(
+        Path(tempfile.gettempdir()) / f"hawkstrade_backtest_capitol_copy_{uuid.uuid4().hex}.json"
+    )
+    capitol_cfg["ignore_env_signal_path"] = True
+    return backtest_cfg
 
 
 def _coerce_override_value(raw: str):
@@ -1265,6 +1286,7 @@ def run_backtest(
             RelativeStrengthStrategy(),
             RSIReversionStrategy(),
             GapUpStrategy(),
+            CapitolCopyStrategy(cfg=_capitol_copy_backtest_config(cfg)),
             MACrossoverStrategy(),
             RangeBreakoutStrategy(),
         ]
@@ -1354,7 +1376,7 @@ def run_backtest(
                     "regime_bars": regime_bars,
                     "allow_regime_warmup": True,
                 }
-                if strat.name in {"momentum", "relative_strength"}:
+                if strat.name in {"momentum", "relative_strength", "capitol_copy"}:
                     scan_kwargs["existing_symbols"] = [
                         symbol for symbol, pos in sim.positions.items()
                         if pos.get("asset_class", "stock") == "stock"

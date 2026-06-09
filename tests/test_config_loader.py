@@ -173,6 +173,7 @@ class TestGetConfig(unittest.TestCase):
         self.assertEqual(strategies["momentum"]["min_breadth_coverage_pct"], 0.65)
         self.assertEqual(strategies["momentum"]["atr_multiplier"], 1.2)
         self.assertEqual(strategies["momentum"]["max_stop_loss_pct"], 0.05)
+        self.assertFalse(strategies["momentum"]["take_profit_enabled"])
         self.assertEqual(strategies["relative_strength"]["lookback_days"], 20)
         self.assertEqual(strategies["relative_strength"]["benchmark_symbol"], "SPY")
         self.assertEqual(strategies["relative_strength"]["top_n"], 1)
@@ -186,6 +187,7 @@ class TestGetConfig(unittest.TestCase):
         self.assertEqual(strategies["relative_strength"]["hold_days"], 7)
         self.assertNotIn("exit_policy", strategies["relative_strength"])
         self.assertTrue(strategies["relative_strength"]["profit_trailing_enabled"])
+        self.assertFalse(strategies["relative_strength"]["take_profit_enabled"])
         self.assertEqual(strategies["rsi_reversion"]["live_readiness"]["min_closed_paper_trades"], 20)
         self.assertEqual(strategies["rsi_reversion"]["live_readiness"]["min_paper_days"], 60)
         self.assertEqual(strategies["rsi_reversion"]["market_regime_mode"], "bear_or_chop_only")
@@ -206,12 +208,13 @@ class TestGetConfig(unittest.TestCase):
         self.assertEqual(strategies["gap_up"]["min_breadth_pct"], 0.65)
         self.assertTrue(strategies["gap_up"]["require_prior_close_above_trend"])
         self.assertEqual(strategies["gap_up"]["max_trend_extension_pct"], 0.35)
-        self.assertFalse(strategies["capitol_copy"]["enabled"])
+        self.assertTrue(strategies["capitol_copy"]["enabled"])
         self.assertEqual(strategies["capitol_copy"]["asset_class"], "stocks")
         self.assertEqual(strategies["capitol_copy"]["signal_path"], "integrations/HawksCapitol/data/signals/latest.json")
         self.assertEqual(strategies["capitol_copy"]["max_signal_age_hours"], 72)
         self.assertTrue(strategies["capitol_copy"]["profit_trailing_enabled"])
         self.assertTrue(strategies["capitol_copy"]["extend_winners_after_hold"])
+        self.assertFalse(strategies["capitol_copy"]["take_profit_enabled"])
         self.assertEqual(strategies["capitol_copy"]["live_readiness"]["min_closed_paper_trades"], 20)
         self.assertEqual(strategies["ma_crossover"]["fast_ema"], 6)
         self.assertEqual(strategies["ma_crossover"]["slow_ema"], 18)
@@ -230,17 +233,26 @@ class TestGetConfig(unittest.TestCase):
         self.assertEqual(strategies["range_breakout"]["min_range_ratio"], 0.45)
         self.assertEqual(strategies["range_breakout"]["rsi_entry_max"], 82)
         self.assertTrue(strategies["range_breakout"]["profit_trailing_enabled"])
+        self.assertFalse(strategies["range_breakout"]["take_profit_enabled"])
         self.assertEqual(strategies["range_breakout"]["trail_activation_pct"], 0.06)
         self.assertEqual(strategies["range_breakout"]["trailing_stop_pct"], 0.04)
 
         validation = cfg["validation"]
+        default_validation_strategies = [
+            "momentum",
+            "relative_strength",
+            "rsi_reversion",
+            "capitol_copy",
+            "ma_crossover",
+            "range_breakout",
+        ]
         self.assertEqual(
             validation["walkforward"]["profiles"]["master"]["strategies"],
-            ["momentum", "relative_strength", "rsi_reversion", "ma_crossover", "range_breakout"],
+            default_validation_strategies,
         )
         self.assertEqual(
             validation["walkforward"]["profiles"]["quick"]["strategies"],
-            ["momentum", "relative_strength", "rsi_reversion", "ma_crossover", "range_breakout"],
+            default_validation_strategies,
         )
         production_windows = {
             window["name"]: window
@@ -248,11 +260,11 @@ class TestGetConfig(unittest.TestCase):
         }
         self.assertEqual(
             production_windows["default_12m_costed"]["strategies"],
-            ["momentum", "relative_strength", "rsi_reversion", "ma_crossover", "range_breakout"],
+            default_validation_strategies,
         )
         self.assertEqual(
             production_windows["default_6m_costed"]["strategies"],
-            ["momentum", "relative_strength", "rsi_reversion", "ma_crossover", "range_breakout"],
+            default_validation_strategies,
         )
         self.assertEqual(production_windows["default_12m_costed"]["end_date"], "04/29/2026")
         self.assertEqual(production_windows["default_6m_costed"]["end_date"], "04/29/2026")

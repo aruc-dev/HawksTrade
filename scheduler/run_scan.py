@@ -47,6 +47,7 @@ from core.exit_policy import (
 from core.run_markers import RunScope, run_scope
 from core.logging_config import runtime_log_handlers
 from core.portfolio import get_open_symbols, print_snapshot
+from core.scan_audit import ScanAuditRecorder
 from scheduler.reconcile_trade_log import safe_reconcile
 from tracking.trade_log import get_closed_trades, get_open_trades, get_trade_age_days, update_high_water_prices
 from strategies.momentum import MomentumStrategy
@@ -91,6 +92,12 @@ def get_stock_universe() -> List[str]:
 
 CRYPTO_UNIVERSE = CFG["crypto"]["scan_universe"]
 INTRADAY_ON     = CFG["intraday"]["enabled"]
+NON_PLANNING_ENTRY_STATUSES = {
+    "entry_blocked",
+    "entry_failed",
+    "order_governor_blocked",
+    "strategy_readiness_blocked",
+}
 
 def _configured_hold_days(cfg: dict) -> dict:
     return {
@@ -258,6 +265,41 @@ def _known_strategy_names() -> set[str]:
     return {strategy.name for strategy in STOCK_STRATEGIES + CRYPTO_STRATEGIES}
 
 
+def _stock_universe_audit_details(stock_universe: list[str]) -> dict:
+    static_symbols = list(CFG.get("stocks", {}).get("scan_universe", []) or [])
+    if not CFG.get("screener", {}).get("enabled", False):
+        return {
+            "source": "config.stocks.scan_universe",
+            "static_symbols": static_symbols,
+            "dynamic_symbols": [],
+        }
+
+    details = getattr(_screener, "last_universe_details", {}) if _screener is not None else {}
+    details_match = False
+    if isinstance(details, dict):
+        detail_symbols = details.get("evaluated_symbols")
+        details_match = (
+            isinstance(detail_symbols, list)
+            and _normalized_symbol_set(detail_symbols) == _normalized_symbol_set(stock_universe)
+        )
+    dynamic_symbols = details.get("dynamic_symbols") if details_match else None
+    legacy_symbols = details.get("legacy_symbols") if details_match else None
+    static_normalized = _normalized_symbol_set(static_symbols)
+    return {
+        "source": str(details.get("source") or "screener") if details_match else "screener",
+        "static_symbols": list(legacy_symbols) if isinstance(legacy_symbols, list) else static_symbols,
+        "dynamic_symbols": (
+            list(dynamic_symbols)
+            if isinstance(dynamic_symbols, list)
+            else [
+                symbol
+                for symbol in stock_universe
+                if ac.normalize_symbol(str(symbol)) not in static_normalized
+            ]
+        ),
+    }
+
+
 def _order_value(order, name: str, default=None):
     if isinstance(order, dict):
         return order.get(name, default)
@@ -388,7 +430,7 @@ def _register_entry_result(
 ):
     if not result:
         return
-    if result.get("status") in {"entry_failed", "order_governor_blocked"}:
+    if result.get("status") in NON_PLANNING_ENTRY_STATUSES:
         return
     normalized = ac.normalize_symbol(symbol)
     planned_symbols.add(normalized)
@@ -462,6 +504,23 @@ def _mark_unhealthy_entry_result(marker: RunScope | None, result: dict | None, s
         )
 
 
+def _finish_scan_audit(
+    audit_recorder: ScanAuditRecorder | None,
+    *,
+    status: str,
+    outcome: str,
+) -> None:
+    if audit_recorder is None:
+        return
+    try:
+        path = audit_recorder.finish(status=status, outcome=outcome)
+    except Exception as e:
+        log.warning("Could not write scan audit log: %s", e, exc_info=True)
+        return
+    if path is not None:
+        log.info("Scan audit written: %s", path)
+
+
 def _log_active_protection_locks(locks: list) -> None:
     if not locks:
         return
@@ -511,11 +570,27 @@ def _log_entry_risk_block(decision: RiskDecision) -> None:
     )
 
 
-def _crypto_correlation_allows(symbol: str, planned_asset_classes: dict) -> bool:
+def _crypto_correlation_allows(
+    symbol: str,
+    planned_asset_classes: dict,
+    *,
+    audit_recorder: ScanAuditRecorder | None = None,
+    strategy: str = "",
+) -> bool:
     planned_crypto_symbols = _planned_symbols_for_asset_class(planned_asset_classes, "crypto")
     decision = evaluate_crypto_correlation(symbol, planned_crypto_symbols, cfg=CFG)
     if decision.allowed:
         return True
+    if audit_recorder is not None:
+        audit_recorder.record_block(
+            stage="crypto_correlation_guard",
+            code=decision.code,
+            reason=decision.reason,
+            symbol=symbol,
+            strategy=strategy,
+            asset_class="crypto",
+            context=dict(decision.context or {}),
+        )
     log.warning(
         "Entry blocked by crypto correlation guard | symbol=%s code=%s reason=%s context=%s",
         symbol,
@@ -534,6 +609,7 @@ def _entry_order_plan_for_signal(
     planned_asset_classes: dict,
     protection_manager: ProtectionManager,
     protection_entries_blocked: bool,
+    audit_recorder: ScanAuditRecorder | None = None,
 ) -> tuple[OrderPlan | None, bool]:
     signal = signal_from_strategy_dict(
         signal_row,
@@ -553,6 +629,16 @@ def _entry_order_plan_for_signal(
         ),
     )
     if not decision.allowed:
+        if audit_recorder is not None:
+            audit_recorder.record_block(
+                stage="risk_pipeline",
+                code=decision.code,
+                reason=decision.reason,
+                symbol=target.symbol,
+                strategy=target.strategy,
+                asset_class=target.asset_class,
+                context=dict(decision.context or {}),
+            )
         _log_entry_risk_block(decision)
         return None, decision.code == "planned_cap_reached"
     return build_order_plan(decision), False
@@ -885,12 +971,23 @@ def run(
     dry_run: bool = False,
     marker: RunScope | None = None,
     strategy_names: set[str] | None = None,
+    audit_recorder: ScanAuditRecorder | None = None,
 ):
     log.info("=" * 55)
     log.info(f"HawksTrade scan started | mode={CFG['mode'].upper()} | "
              f"intraday={'ON' if INTRADAY_ON else 'OFF'} | "
              f"dry_run={'ON' if dry_run else 'OFF'}")
     log.info("=" * 55)
+
+    audit = audit_recorder or ScanAuditRecorder(
+        output_dir=LOG_DIR,
+        run_id=getattr(marker, "run_id", "") or "manual_scan",
+        mode=CFG["mode"],
+        dry_run=dry_run,
+        run_stocks=run_stocks,
+        run_crypto=run_crypto,
+        strategy_filter=strategy_names,
+    )
 
     try:
         market_open  = ac.is_market_open()
@@ -906,8 +1003,10 @@ def run(
             info.status_code or "",
             exc_info=True,
         )
+        _finish_scan_audit(audit, status="error", outcome="initial_connection_failed")
         return
 
+    audit.record_market_context(market_open=market_open, open_symbols=open_symbols)
     log.info(f"Market open: {market_open} | Open positions: {len(open_symbols)}")
     closed_trade_counts: dict[str, int] | None
     try:
@@ -930,6 +1029,7 @@ def run(
             info.status_code or "",
             exc_info=True,
         )
+        _finish_scan_audit(audit, status="error", outcome="daily_loss_check_failed")
         return
 
     if loss_exceeded:
@@ -937,6 +1037,7 @@ def run(
         print_snapshot()
         if marker is not None:
             marker.mark_status("ok", outcome="halted_by_daily_loss_limit")
+        _finish_scan_audit(audit, status="ok", outcome="halted_by_daily_loss_limit")
         return
 
     try:
@@ -949,8 +1050,10 @@ def run(
                 error=str(e),
             )
         log.error("Pending entry order check failed; skipping scan to avoid duplicate entries.", exc_info=True)
+        _finish_scan_audit(audit, status="error", outcome="pending_entry_order_check_failed")
         return
 
+    audit.record_pending_entries(pending_entry_symbols)
     planned_asset_classes = _planned_asset_classes(open_symbols, pending_entry_symbols)
     planned_symbols = set(planned_asset_classes)
     new_entry_symbols = set()
@@ -1011,6 +1114,11 @@ def run(
     if run_stocks and market_open:
         log.info("--- Running stock strategies ---")
         stock_universe = get_stock_universe()
+        audit.record_universe(
+            "stock",
+            stock_universe,
+            **_stock_universe_audit_details(stock_universe),
+        )
         enabled_stock_strategies = _enabled_strategies(STOCK_STRATEGIES, strategy_names)
         for strategy in enabled_stock_strategies:
             try:
@@ -1020,86 +1128,173 @@ def run(
                         planned_asset_classes,
                         "stock",
                     )
-                signals = strategy.scan(stock_universe, **scan_kwargs)
+                signals = list(strategy.scan(stock_universe, **scan_kwargs) or [])
+                audit.record_strategy_scan(
+                    strategy=strategy.name,
+                    asset_class="stock",
+                    universe=stock_universe,
+                    signals=signals,
+                )
                 for sig in signals:
-                    if sig["action"] == "buy":
-                        plan, stop_strategy = _entry_order_plan_for_signal(
-                            sig,
-                            strategy,
-                            "stock",
-                            planned_symbols,
-                            planned_asset_classes,
-                            protection_manager,
-                            protection_entries_blocked,
+                    if str(sig.get("action") or "").lower() != "buy":
+                        audit.record_block(
+                            stage="scan_action",
+                            code="unsupported_action",
+                            reason=f"scan action {sig.get('action')} is not handled for entries",
+                            symbol=str(sig.get("symbol") or ""),
+                            strategy=strategy.name,
+                            asset_class="stock",
                         )
-                        if stop_strategy:
-                            break
-                        if plan is None:
-                            continue
-                        result = oe.enter_position(
-                            plan.symbol,
-                            **_entry_kwargs_for_plan(plan, dry_run, closed_trade_counts, sig),
-                        )
-                        _mark_unhealthy_entry_result(marker, result, "stock_entry")
-                        _register_entry_result(
-                            result,
-                            plan.symbol,
-                            open_symbols,
-                            planned_symbols,
-                            new_entry_symbols,
-                            asset_class=plan.asset_class,
-                            planned_asset_classes=planned_asset_classes,
-                        )
+                        continue
+                    plan, stop_strategy = _entry_order_plan_for_signal(
+                        sig,
+                        strategy,
+                        "stock",
+                        planned_symbols,
+                        planned_asset_classes,
+                        protection_manager,
+                        protection_entries_blocked,
+                        audit_recorder=audit,
+                    )
+                    if stop_strategy:
+                        break
+                    if plan is None:
+                        continue
+                    result = oe.enter_position(
+                        plan.symbol,
+                        **_entry_kwargs_for_plan(plan, dry_run, closed_trade_counts, sig),
+                    )
+                    audit.record_entry_result(
+                        result,
+                        symbol=plan.symbol,
+                        strategy=plan.strategy,
+                        asset_class=plan.asset_class,
+                    )
+                    _mark_unhealthy_entry_result(marker, result, "stock_entry")
+                    _register_entry_result(
+                        result,
+                        plan.symbol,
+                        open_symbols,
+                        planned_symbols,
+                        new_entry_symbols,
+                        asset_class=plan.asset_class,
+                        planned_asset_classes=planned_asset_classes,
+                    )
             except Exception as e:
+                audit.record_strategy_error(
+                    strategy=strategy.name,
+                    asset_class="stock",
+                    universe=stock_universe,
+                    error=e,
+                )
                 _mark_strategy_error(marker, "stock_strategy", strategy.name, e)
                 log.error(f"Strategy {strategy.name} failed: {e}", exc_info=True)
         all_strategies.extend(enabled_stock_strategies)
 
     elif run_stocks and not market_open:
         log.info("Market closed. Stock strategies skipped.")
+        audit.record_universe(
+            "stock",
+            [],
+            source="market_closed",
+            skipped_reason="Market closed. Stock strategies skipped.",
+        )
+    else:
+        audit.record_universe(
+            "stock",
+            [],
+            source="disabled",
+            skipped_reason="run_stocks=false",
+        )
 
     # --- Crypto scan (24/7) ---
     if run_crypto:
         log.info("--- Running crypto strategies ---")
+        audit.record_universe(
+            "crypto",
+            CRYPTO_UNIVERSE,
+            source="config.crypto.scan_universe",
+            static_symbols=CRYPTO_UNIVERSE,
+        )
         enabled_crypto_strategies = _enabled_strategies(CRYPTO_STRATEGIES, strategy_names)
         for strategy in enabled_crypto_strategies:
             try:
-                signals = strategy.scan(CRYPTO_UNIVERSE, regime_bars=crypto_regime_bars)
+                signals = list(strategy.scan(CRYPTO_UNIVERSE, regime_bars=crypto_regime_bars) or [])
+                audit.record_strategy_scan(
+                    strategy=strategy.name,
+                    asset_class="crypto",
+                    universe=CRYPTO_UNIVERSE,
+                    signals=signals,
+                )
                 for sig in signals:
-                    if sig["action"] == "buy":
-                        plan, stop_strategy = _entry_order_plan_for_signal(
-                            sig,
-                            strategy,
-                            "crypto",
-                            planned_symbols,
-                            planned_asset_classes,
-                            protection_manager,
-                            protection_entries_blocked,
+                    if str(sig.get("action") or "").lower() != "buy":
+                        audit.record_block(
+                            stage="scan_action",
+                            code="unsupported_action",
+                            reason=f"scan action {sig.get('action')} is not handled for entries",
+                            symbol=str(sig.get("symbol") or ""),
+                            strategy=strategy.name,
+                            asset_class="crypto",
                         )
-                        if stop_strategy:
-                            break
-                        if plan is None:
-                            continue
-                        if not _crypto_correlation_allows(plan.symbol, planned_asset_classes):
-                            continue
-                        result = oe.enter_position(
-                            plan.symbol,
-                            **_entry_kwargs_for_plan(plan, dry_run, closed_trade_counts, sig),
-                        )
-                        _mark_unhealthy_entry_result(marker, result, "crypto_entry")
-                        _register_entry_result(
-                            result,
-                            plan.symbol,
-                            open_symbols,
-                            planned_symbols,
-                            new_entry_symbols,
-                            asset_class=plan.asset_class,
-                            planned_asset_classes=planned_asset_classes,
-                        )
+                        continue
+                    plan, stop_strategy = _entry_order_plan_for_signal(
+                        sig,
+                        strategy,
+                        "crypto",
+                        planned_symbols,
+                        planned_asset_classes,
+                        protection_manager,
+                        protection_entries_blocked,
+                        audit_recorder=audit,
+                    )
+                    if stop_strategy:
+                        break
+                    if plan is None:
+                        continue
+                    if not _crypto_correlation_allows(
+                        plan.symbol,
+                        planned_asset_classes,
+                        audit_recorder=audit,
+                        strategy=plan.strategy,
+                    ):
+                        continue
+                    result = oe.enter_position(
+                        plan.symbol,
+                        **_entry_kwargs_for_plan(plan, dry_run, closed_trade_counts, sig),
+                    )
+                    audit.record_entry_result(
+                        result,
+                        symbol=plan.symbol,
+                        strategy=plan.strategy,
+                        asset_class=plan.asset_class,
+                    )
+                    _mark_unhealthy_entry_result(marker, result, "crypto_entry")
+                    _register_entry_result(
+                        result,
+                        plan.symbol,
+                        open_symbols,
+                        planned_symbols,
+                        new_entry_symbols,
+                        asset_class=plan.asset_class,
+                        planned_asset_classes=planned_asset_classes,
+                    )
             except Exception as e:
+                audit.record_strategy_error(
+                    strategy=strategy.name,
+                    asset_class="crypto",
+                    universe=CRYPTO_UNIVERSE,
+                    error=e,
+                )
                 _mark_strategy_error(marker, "crypto_strategy", strategy.name, e)
                 log.error(f"Strategy {strategy.name} failed: {e}", exc_info=True)
         all_strategies.extend(enabled_crypto_strategies)
+    else:
+        audit.record_universe(
+            "crypto",
+            [],
+            source="disabled",
+            skipped_reason="run_crypto=false",
+        )
 
     # --- Strategy-level exit checks ---
     log.info("--- Checking strategy exit conditions ---")
@@ -1116,6 +1311,7 @@ def run(
             info.status_code or "",
             exc_info=True,
         )
+        _finish_scan_audit(audit, status="error", outcome="refresh_open_positions_failed")
         return
     skip_symbols = set() if INTRADAY_ON else new_entry_symbols
     _check_strategy_exits(
@@ -1143,6 +1339,11 @@ def run(
     log.info("Scan complete.")
     if marker is not None and marker.status != "error":
         marker.mark_status("ok", outcome="completed")
+    _finish_scan_audit(
+        audit,
+        status="error" if marker is not None and marker.status == "error" else "ok",
+        outcome="completed",
+    )
 
 
 # ── CLI Entry ─────────────────────────────────────────────────────────────────

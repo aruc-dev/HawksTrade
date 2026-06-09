@@ -48,6 +48,30 @@ def _cfg_float(value, default: float) -> float:
     return parsed
 
 
+def _cfg_bool(value, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on", "y"}:
+        return True
+    if normalized in {"0", "false", "no", "off", "n"}:
+        return False
+    return default
+
+
+def _strategy_config(strategy: str | None, strategy_cfg: dict | None = None) -> dict:
+    if isinstance(strategy_cfg, dict):
+        return strategy_cfg
+    strategy_name = str(strategy or "").strip()
+    if not strategy_name:
+        return {}
+    strategies = CFG.get("strategies", {}) or {}
+    value = strategies.get(strategy_name, {}) or {}
+    return value if isinstance(value, dict) else {}
+
+
 def _crypto_regime_filter_config() -> dict:
     return (CFG.get("crypto", {}) or {}).get("regime_filter", {}) or {}
 
@@ -301,8 +325,45 @@ def stop_loss_price(entry_price: float) -> float:
     return round(entry_price * (1 - T["stop_loss_pct"]), 4)
 
 
-def take_profit_price(entry_price: float) -> float:
-    return round(entry_price * (1 + T["take_profit_pct"]), 4)
+def take_profit_pct_for_strategy(
+    strategy: str | None = None,
+    strategy_cfg: dict | None = None,
+) -> float | None:
+    cfg = _strategy_config(strategy, strategy_cfg)
+    if not _cfg_bool(cfg.get("take_profit_enabled"), True):
+        return None
+
+    raw_pct = cfg.get("take_profit_pct", T.get("take_profit_pct"))
+    try:
+        parsed = float(raw_pct)
+    except (TypeError, ValueError):
+        log.warning(
+            "Invalid take_profit_pct for strategy %s: %r; using global %.2f%%.",
+            strategy or "unknown",
+            raw_pct,
+            float(T["take_profit_pct"]) * 100,
+        )
+        parsed = float(T["take_profit_pct"])
+    if not math.isfinite(parsed) or parsed <= 0:
+        log.warning(
+            "Non-positive take_profit_pct for strategy %s: %r; using global %.2f%%.",
+            strategy or "unknown",
+            raw_pct,
+            float(T["take_profit_pct"]) * 100,
+        )
+        parsed = float(T["take_profit_pct"])
+    return parsed
+
+
+def take_profit_price(
+    entry_price: float,
+    strategy: str | None = None,
+    strategy_cfg: dict | None = None,
+) -> float | None:
+    take_profit_pct = take_profit_pct_for_strategy(strategy, strategy_cfg)
+    if take_profit_pct is None:
+        return None
+    return round(entry_price * (1 + take_profit_pct), 4)
 
 
 # ── Intraday Gate ─────────────────────────────────────────────────────────────
@@ -374,6 +435,8 @@ def should_exit_position(
     current_price: float,
     custom_stop_price: float | None = None,
     allow_custom_stop_widening: bool = True,
+    strategy: str | None = None,
+    strategy_cfg: dict | None = None,
 ) -> tuple:
     """
     Returns (should_exit: bool, reason: str).
@@ -394,12 +457,12 @@ def should_exit_position(
         sl = min(global_sl, custom_stop_price)
     else:
         sl = max(global_sl, custom_stop_price)
-    tp = take_profit_price(entry_price)
+    tp = take_profit_price(entry_price, strategy=strategy, strategy_cfg=strategy_cfg)
 
     if current_price <= sl:
         label = "Custom stop-loss" if custom_stop_price is not None and sl == custom_stop_price else "Stop-loss"
         return True, f"{label} hit: {current_price:.4f} <= {sl:.4f}"
-    if current_price >= tp:
+    if tp is not None and current_price >= tp:
         return True, f"Take-profit hit: {current_price:.4f} >= {tp:.4f}"
     return False, ""
 

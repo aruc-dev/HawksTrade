@@ -246,6 +246,57 @@ class RunRiskCheckTests(unittest.TestCase):
             force_market=True,
         )
 
+    def test_risk_check_skips_fixed_take_profit_when_strategy_disables_it(self):
+        position = SimpleNamespace(symbol="AAPL", avg_entry_price="100", asset_class="us_equity")
+        open_trade = {
+            "symbol": "AAPL",
+            "side": "buy",
+            "strategy": "momentum",
+            "entry_price": "100",
+            "high_water_price": "113",
+            "asset_class": "stock",
+        }
+
+        with (
+            patch.object(run_risk_check.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_risk_check, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_risk_check.ac, "get_all_positions", return_value=[position]),
+            patch.object(run_risk_check.ac, "get_stock_latest_price", return_value=113),
+            patch.object(run_risk_check.oe, "exit_position") as exit_position,
+        ):
+            run_risk_check.run(dry_run=True)
+
+        exit_position.assert_not_called()
+
+    def test_risk_check_keeps_default_take_profit_for_mean_reversion(self):
+        position = SimpleNamespace(symbol="AAPL", avg_entry_price="100", asset_class="us_equity")
+        open_trade = {
+            "symbol": "AAPL",
+            "side": "buy",
+            "strategy": "rsi_reversion",
+            "entry_price": "100",
+            "asset_class": "stock",
+        }
+
+        with (
+            patch.object(run_risk_check.rm, "daily_loss_exceeded", return_value=False),
+            patch.object(run_risk_check, "get_open_trades", return_value=[open_trade]),
+            patch.object(run_risk_check.ac, "get_all_positions", return_value=[position]),
+            patch.object(run_risk_check.ac, "get_stock_latest_price", return_value=113),
+            patch.object(run_risk_check.oe, "exit_position") as exit_position,
+        ):
+            run_risk_check.run(dry_run=True)
+
+        reason = exit_position.call_args.kwargs["reason"]
+        exit_position.assert_called_once_with(
+            "AAPL",
+            reason=reason,
+            asset_class="stock",
+            dry_run=True,
+            force_market=True,
+        )
+        self.assertIn("Take-profit hit", reason)
+
     def test_risk_check_enforces_momentum_profit_protection(self):
         position = SimpleNamespace(symbol="AAPL", avg_entry_price="100", asset_class="us_equity")
         open_trade = {

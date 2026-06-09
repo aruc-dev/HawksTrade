@@ -315,6 +315,33 @@ def _entry_readiness_block_result(
     }
 
 
+def _entry_block_result(
+    symbol: str,
+    strategy: str,
+    asset_class: str,
+    *,
+    code: str,
+    reason: str,
+    price=None,
+    qty=None,
+) -> dict:
+    return {
+        "timestamp": _utc_now().isoformat(),
+        "mode": MODE,
+        "symbol": symbol,
+        "strategy": strategy,
+        "asset_class": asset_class,
+        "side": "buy",
+        "qty": qty if qty not in (None, "") else "",
+        "entry_price": price if price not in (None, "") else "",
+        "order_id": "",
+        "status": "entry_blocked",
+        "block_code": code,
+        "error_type": "EntryBlocked",
+        "error": reason,
+    }
+
+
 def _exit_governor_block_result(
     *,
     symbol: str,
@@ -515,14 +542,31 @@ def enter_position(
             price = ac.get_stock_latest_price(symbol)
 
         if price <= 0:
-            log.warning(f"Invalid price for {symbol}: {price}. Skipping entry.")
-            return None
+            reason = f"Invalid price for {symbol}: {price}"
+            log.warning(f"{reason}. Skipping entry.")
+            return _entry_block_result(
+                symbol,
+                strategy,
+                asset_class,
+                code="invalid_price",
+                reason=reason,
+                price=price,
+            )
 
         # Risk Check (asset-class-aware for crypto reservation/cap enforcement)
         check = rm.pre_trade_check(price, symbol, asset_class=asset_class)
         if not check["approved"]:
-            log.info(f"Entry blocked for {symbol}: {check['reason']}")
-            return None
+            reason = str(check.get("reason") or "Pre-trade check blocked entry")
+            log.info(f"Entry blocked for {symbol}: {reason}")
+            return _entry_block_result(
+                symbol,
+                strategy,
+                asset_class,
+                code="pre_trade_check",
+                reason=reason,
+                price=price,
+                qty=check.get("qty"),
+            )
 
         sizing = construct_entry_size(
             price=price,
@@ -553,11 +597,24 @@ def enter_position(
             cash_qty=cash_qty,
         )
         if not math.isfinite(capped_qty) or capped_qty <= 0:
-            log.info(f"Entry blocked for {symbol}: capped quantity is zero.")
-            return None
+            reason = "capped quantity is zero"
+            log.info(f"Entry blocked for {symbol}: {reason}.")
+            return _entry_block_result(
+                symbol,
+                strategy,
+                asset_class,
+                code="scaled_qty_zero",
+                reason=reason,
+                price=price,
+                qty=capped_qty,
+            )
         min_trade_value = _min_trade_value_usd()
         scaled_notional = capped_qty * price
         if min_trade_value > 0 and scaled_notional + 1e-9 < min_trade_value:
+            reason = (
+                f"scaled notional ${scaled_notional:.2f} is below min trade value "
+                f"${min_trade_value:.2f}"
+            )
             log.info(
                 "Entry blocked for %s: scaled notional $%.2f is below min trade value $%.2f "
                 "(qty=%s price=%.4f).",
@@ -567,7 +624,15 @@ def enter_position(
                 capped_qty,
                 price,
             )
-            return None
+            return _entry_block_result(
+                symbol,
+                strategy,
+                asset_class,
+                code="min_trade_value",
+                reason=reason,
+                price=price,
+                qty=capped_qty,
+            )
         if sizing.capped:
             log.info(
                 "Entry max-position cap for %s: requested=%s base_capped=%s",
@@ -660,7 +725,7 @@ def enter_position(
         logged_qty = filled_qty if filled_qty > 0 else qty
         entry_price = _order_filled_avg_price(order, price) if filled_qty > 0 else price
         sl = _effective_entry_stop_loss(entry_price, atr_stop_price)
-        tp = rm.take_profit_price(entry_price)
+        tp = rm.take_profit_price(entry_price, strategy=strategy)
         trade = {
             "timestamp":        _utc_now().isoformat(),
             "mode":             MODE,
@@ -671,7 +736,7 @@ def enter_position(
             "qty":              logged_qty,
             "entry_price":      entry_price,
             "stop_loss":        sl,
-            "take_profit":      tp,
+            "take_profit":      tp if tp is not None else "",
             "high_water_price": entry_price,
             "risk_tier":        tier.audit_label,
             "order_id":         order_id,

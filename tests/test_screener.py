@@ -186,6 +186,23 @@ class TestScreenFromBars(unittest.TestCase):
         self.assertIn("SPY", result)
         self.assertIn("QQQ", result)
 
+    def test_get_universe_records_last_universe_details_for_audit(self):
+        cfg = _base_config()
+        builder = UniverseBuilder(cfg)
+        as_of = datetime(2025, 6, 1, tzinfo=timezone.utc)
+        bars_data = {
+            "HIGH": _make_bars_df(n=25, close=200.0, volume=1_000_000, atr_pct=0.025),
+        }
+
+        builder.preload_historical_bars(bars_data)
+        result = builder.get_universe(as_of_date=as_of)
+        details = builder.last_universe_details
+
+        self.assertEqual(details["source"], "historical_bars")
+        self.assertEqual(details["dynamic_symbols"], ["HIGH"])
+        self.assertEqual(details["legacy_symbols"], cfg["stocks"]["scan_universe"])
+        self.assertEqual(details["evaluated_symbols"], result)
+
 
 class TestUniverseCache(unittest.TestCase):
     """Tests for caching behaviour."""

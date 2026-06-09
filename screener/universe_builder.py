@@ -24,6 +24,8 @@ class UniverseBuilder:
         self.ac = alpaca_client
         self._asset_cache: Optional[List[str]] = None       # broad symbol list (session-level)
         self._universe_cache: Dict[str, List[str]] = {}     # date -> qualified symbols
+        self._universe_detail_cache: Dict[str, Dict[str, object]] = {}
+        self.last_universe_details: Dict[str, object] = {}
         self._historical_bars: Optional[Dict[str, object]] = None  # symbol -> bars df (backtest)
 
         # Screening parameters (can be overridden from config)
@@ -62,20 +64,36 @@ class UniverseBuilder:
 
         date_key = as_of_date.strftime("%Y-%m-%d")
         if date_key in self._universe_cache:
+            self.last_universe_details = dict(self._universe_detail_cache.get(date_key, {}))
             return self._universe_cache[date_key]
 
         if self._historical_bars is not None:
             # Backtest mode: derive universe from injected historical bars
             qualified = self._screen_from_bars(self._historical_bars, as_of_date)
+            source = "historical_bars"
         else:
             # Live mode: use pre-computed universe file if available, else fetch from Alpaca
             precomputed = self._load_precomputed_universe(date_key)
-            qualified = precomputed if precomputed is not None else self._screen_live()
+            if precomputed is not None:
+                qualified = precomputed
+                source = "precomputed_file"
+            else:
+                qualified = self._screen_live()
+                source = "live_screen"
 
         # Always merge legacy universe (so existing 20 symbols are never dropped)
         result = list(dict.fromkeys(qualified + self.legacy_universe))  # dedup, preserve order
+        details = {
+            "date": date_key,
+            "source": source,
+            "dynamic_symbols": list(qualified),
+            "legacy_symbols": list(self.legacy_universe),
+            "evaluated_symbols": list(result),
+        }
 
         self._universe_cache[date_key] = result
+        self._universe_detail_cache[date_key] = details
+        self.last_universe_details = dict(details)
         log.info(f"[Screener] {date_key}: {len(result)} symbols qualified "
                  f"({len(qualified)} dynamic + {len(self.legacy_universe)} legacy, "
                  f"deduped to {len(result)})")
