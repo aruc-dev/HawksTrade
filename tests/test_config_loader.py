@@ -238,13 +238,21 @@ class TestGetConfig(unittest.TestCase):
         self.assertEqual(strategies["range_breakout"]["trailing_stop_pct"], 0.04)
 
         validation = cfg["validation"]
+        default_validation_strategies = [
+            "momentum",
+            "relative_strength",
+            "rsi_reversion",
+            "capitol_copy",
+            "ma_crossover",
+            "range_breakout",
+        ]
         self.assertEqual(
             validation["walkforward"]["profiles"]["master"]["strategies"],
-            ["momentum", "relative_strength", "rsi_reversion", "ma_crossover", "range_breakout"],
+            default_validation_strategies,
         )
         self.assertEqual(
             validation["walkforward"]["profiles"]["quick"]["strategies"],
-            ["momentum", "relative_strength", "rsi_reversion", "ma_crossover", "range_breakout"],
+            default_validation_strategies,
         )
         production_windows = {
             window["name"]: window
@@ -252,11 +260,11 @@ class TestGetConfig(unittest.TestCase):
         }
         self.assertEqual(
             production_windows["default_12m_costed"]["strategies"],
-            ["momentum", "relative_strength", "rsi_reversion", "ma_crossover", "range_breakout"],
+            default_validation_strategies,
         )
         self.assertEqual(
             production_windows["default_6m_costed"]["strategies"],
-            ["momentum", "relative_strength", "rsi_reversion", "ma_crossover", "range_breakout"],
+            default_validation_strategies,
         )
         self.assertEqual(production_windows["default_12m_costed"]["end_date"], "04/29/2026")
         self.assertEqual(production_windows["default_6m_costed"]["end_date"], "04/29/2026")

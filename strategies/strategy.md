@@ -14,7 +14,7 @@
 | Relative Strength | Stocks | **Enabled** | `relative_strength.py` |
 | RSI Reversion | Stocks | **Enabled as conditional bear/chop sleeve** | `rsi_reversion.py`; live entries require paper-readiness evidence |
 | Gap-Up | Stocks | **Disabled in default profile** | `gap_up.py`; run standalone validation before re-enabling |
-| Capitol Copy | Stocks | **Disabled in default profile** | `capitol_copy.py`; consumes HawksCapitol scored signals; live entries require paper-readiness evidence |
+| Capitol Copy | Stocks | **Enabled** | `capitol_copy.py`; consumes HawksCapitol scored signals; live entries require paper-readiness evidence |
 | MA Crossover | Crypto | **Enabled** | `ma_crossover.py`; live entries require paper-readiness evidence |
 | Range Breakout | Crypto | **Enabled** | `range_breakout.py`; high-water profit protection enabled; live entries require paper-readiness evidence |
 
@@ -294,7 +294,7 @@ before re-enabling or scaling capital allocated to this sleeve.
 
 ---
 
-## 5. Capitol Copy *(Stocks — Disabled in Default Profile)*
+## 5. Capitol Copy *(Stocks — Enabled)*
 
 **Type:** External signal adapter for HawksCapitol congressional trade-copy signals.
 
@@ -321,7 +321,7 @@ from the `capitol_copy` config.
 
 | Parameter | Value |
 |---|---|
-| `enabled` | false |
+| `enabled` | true |
 | `signal_path` | `integrations/HawksCapitol/data/signals/latest.json` |
 | `max_signal_age_hours` | 72 |
 | `min_conviction_score` | 0.65 |

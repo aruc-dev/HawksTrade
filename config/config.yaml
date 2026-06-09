@@ -436,7 +436,7 @@ validation:
       master:
         window_days: 180
         screener: true
-        strategies: [momentum, relative_strength, rsi_reversion, ma_crossover, range_breakout]
+        strategies: [momentum, relative_strength, rsi_reversion, capitol_copy, ma_crossover, range_breakout]
         windows:
           - end_date: "12/31/2019"
             label: calm_bull_2019
@@ -487,7 +487,7 @@ validation:
       quick:
         window_days: 180
         screener: true
-        strategies: [momentum, relative_strength, rsi_reversion, ma_crossover, range_breakout]
+        strategies: [momentum, relative_strength, rsi_reversion, capitol_copy, ma_crossover, range_breakout]
         windows:
           - end_date: "09/30/2020"
             label: covid_crash_2020
@@ -523,7 +523,7 @@ validation:
         days: 365
         end_date: "04/29/2026"
         screener: true
-        strategies: [momentum, relative_strength, rsi_reversion, ma_crossover, range_breakout]
+        strategies: [momentum, relative_strength, rsi_reversion, capitol_copy, ma_crossover, range_breakout]
         required: true
         min_return_pct: 0.10
         max_drawdown_pct: 0.06
@@ -534,7 +534,7 @@ validation:
         days: 180
         end_date: "04/29/2026"
         screener: true
-        strategies: [momentum, relative_strength, rsi_reversion, ma_crossover, range_breakout]
+        strategies: [momentum, relative_strength, rsi_reversion, capitol_copy, ma_crossover, range_breakout]
         required: true
         min_return_pct: 0.015
         max_drawdown_pct: 0.04

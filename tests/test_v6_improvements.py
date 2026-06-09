@@ -20,6 +20,7 @@ from scheduler.run_backtest import (
     BacktestSimulator,
     EXTENDED_POOL,
     REGIME_HISTORY_LIMITS,
+    STRATEGY_MODULES,
     _apply_override,
     _backtest_trading_session_date,
     _backtest_scan_universe,
@@ -72,6 +73,9 @@ class TestBacktestRegimeHistory(unittest.TestCase):
 
 
 class TestBacktestLiveFidelity(unittest.TestCase):
+    def test_backtest_registry_includes_default_capitol_copy_strategy(self):
+        self.assertIn("capitol_copy", STRATEGY_MODULES)
+
     def test_oos_validation_uses_inclusive_lockup_days(self):
         cfg = {
             "trading": {},

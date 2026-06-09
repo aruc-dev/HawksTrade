@@ -49,6 +49,7 @@ HawksTrade includes a high-fidelity historical simulator. The current guarded de
 | **Relative Strength** | US Stocks | Top 1 stock by 20-day return minus SPY, minimum 5% RS, minimum 8% absolute return, max 3% recent 3-day gain, 1.8x elapsed-session volume pace, 7-day hold, ATR stop capped at 5% | Adds a stricter medium-term leadership sleeve that avoids fresh short-term blow-offs and shares stock breadth, sector, volume, and ATR-risk controls. |
 | **RSI Reversion** | US Stocks | Enabled only in bear/chop regimes; RSI < 40, %B < 20%, SMA-200 within +/-15%, 0.7x volume confirmation, 1-bar recovery, 5-day drawdown <= 10%, ATR/price <= 5%, 0.8x ATR stop capped at 6%, and profit protection | Mean reversion with crash, realised-volatility, tail-loss, and high-water trailing guards. |
 | **Gap-Up** | US Stocks | Disabled in the default profile; true 5-15% opening gap, 1.3x opening-volume pace, 65% breadth guard, prior close above SMA-200, <=35% SMA-200 extension, top-1 ranked signal, 2-day hold, failed-gap exit | Opening momentum sleeve kept behind its standalone validation gate until bootstrap and minute-fill evidence improve. |
+| **Capitol Copy** | US Stocks | Enabled; consumes scored HawksCapitol copy-buy signals, requires fresh unblocked stock signals, max 2 ranked entries, 10-business-day minimum hold, 8% trailing activation, 5% trailing stop, 45-business-day max hold | Congressional-copy sleeve where HawksCapitol owns ingestion/scoring and HawksTrade owns execution, risk, logging, and exits. |
 | **EMA Crossover** | Crypto | 6/18 EMA, latest completed cross only, top-1 ranked signal, RSI 35-75, slope + volatility filters, 3-day drawdown guard, price/EMA confirmation, 2% daily-close max-loss exit, 16-day hold cap | Bullish EMA crossover with BTC regime gate and tighter same-scan concentration control. |
 | **Range Breakout** | Crypto | Enabled; 20-day high close breakout, 2.5x volume, rising EMA-50, RSI, 0.8%-8% breakout-extension, upper-10% close guard, and profit protection | Ranked Donchian-style breakout sleeve with failed-breakout, trend-loss, and high-water trailing exits. |
 
@@ -63,7 +64,7 @@ Live/paper scans fail closed when regime data is unavailable or insufficient, bl
 
 ### Strategy Position Sizing
 
-Momentum, Relative Strength, RSI Reversion, Gap-Up, EMA Crossover, and Range Breakout emit ATR-risk quantities that target 1% account risk per trade before the global 8% max-position cap is applied. Momentum still has a Half-Kelly fallback in the executor if a signal does not include ATR sizing, but the current strategy path provides ATR-risk sizing by default.
+Momentum, Relative Strength, RSI Reversion, Gap-Up, EMA Crossover, Range Breakout, and Capitol Copy emit or pass through bounded quantities before the global 8% max-position cap is applied. Momentum still has a Half-Kelly fallback in the executor if a signal does not include ATR sizing, but the current strategy path provides ATR-risk sizing by default.
 
 ### Momentum Exit Policy
 
@@ -81,7 +82,7 @@ Use `--no-screener` to backtest only the fixed configured stock universe, or `--
 
 ```bash
 python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener \
-  --strategies momentum,relative_strength,rsi_reversion,ma_crossover,range_breakout \
+  --strategies momentum,relative_strength,rsi_reversion,capitol_copy,ma_crossover,range_breakout \
   --set strategies.momentum.top_n=2 \
   --set strategies.momentum.min_momentum_pct=0.04 \
   --set strategies.momentum.min_momentum_atr_mult=0.0 \
@@ -137,7 +138,7 @@ python3 scheduler/run_validation_gate.py --profile range
 
 ## Risk Controls (Tuned)
 
-- **Asymmetric Reward**: 3.5% stop-loss / 12% take-profit.
+- **Asymmetric Reward**: 3.5% global stop-loss with strategy-specific profit exits; the global 12% take-profit remains available by default, while momentum, relative strength, Capitol Copy, RSI Reversion, and Range Breakout can use configured high-water/trailing protection instead.
 - **Capital Protection**: SMA-based trend filters on all strategies.
 - **Strategy-Local Loss Defense**: Momentum and RSI use less-permissive ATR stop extensions on top of the global stop layer, RSI blocks high-ATR and unresolved waterfall entries and exits daily closes 6% below entry, Gap-Up exits failed continuations, and MA Crossover exits on a daily close at least 2% below entry.
 - **Position Limits**: Max 8% of portfolio per trade, cap of 10 concurrent positions.

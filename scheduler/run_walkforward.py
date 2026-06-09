@@ -23,6 +23,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
 from core.config_loader import get_config  # noqa: E402
+from core.data_lockup import current_lockup  # noqa: E402
 from analysis.bootstrap import gate_bounds  # noqa: E402
 from scheduler.run_backtest import run_backtest  # noqa: E402
 
@@ -210,6 +211,25 @@ def _resolve_profile_end_date(raw_value, *, today: datetime, auto_offset_days: i
     return str(raw_value)
 
 
+def _clip_profile_end_date_for_lockup(end_date: str, *, window_days: int) -> str:
+    lockup = current_lockup()
+    if lockup is None:
+        return end_date
+
+    end_dt = _parse_end_date(end_date)
+    start_dt = end_dt - timedelta(days=max(window_days - 1, 0))
+    if not lockup.overlaps(start_dt, end_dt):
+        return end_date
+
+    clipped_end = datetime(
+        lockup.start_date.year,
+        lockup.start_date.month,
+        lockup.start_date.day,
+        tzinfo=timezone.utc,
+    ) - timedelta(days=1)
+    return _format_end_date(clipped_end)
+
+
 def _walkforward_config(cfg: dict) -> dict:
     return ((cfg.get("validation", {}) or {}).get("walkforward", {}) or {})
 
@@ -331,14 +351,15 @@ def _configured_profile_windows(
         window_days = int(raw_window.get("window_days", default_window_days))
         if window_days <= 0:
             raise ValueError(f"walk-forward window '{label}' has non-positive window_days")
+        end_date = _resolve_profile_end_date(
+            raw_window.get("end_date"),
+            today=resolved_today,
+            auto_offset_days=int(raw_window.get("auto_offset_days", 2)),
+        )
         windows.append({
             "label": label,
             "regime": raw_window.get("regime", label),
-            "end_date": _resolve_profile_end_date(
-                raw_window.get("end_date"),
-                today=resolved_today,
-                auto_offset_days=int(raw_window.get("auto_offset_days", 2)),
-            ),
+            "end_date": _clip_profile_end_date_for_lockup(end_date, window_days=window_days),
             "window_days": window_days,
             "oos": False,
         })
