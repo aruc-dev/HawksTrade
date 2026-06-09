@@ -280,7 +280,7 @@ rm -rf "$TMPDIR"
 | `hawkstrade-secrets.service` | oneshot | Copies secrets into `/dev/shm` at boot; runs before all trading units |
 | `hawkstrade-stock-scan.service` | oneshot | Stock-only scan at 9:35 AM ET |
 | `hawkstrade-stock-scan.timer` | timer | Fires at 13:35 UTC (Mon–Fri) |
-| `hawkstrade-capitol-refresh.service` | oneshot | Refreshes HawksCapitol submodule signals |
+| `hawkstrade-capitol-refresh.service` | oneshot | Refreshes HawksCapitol submodule signals from the configured real-data export command |
 | `hawkstrade-capitol-refresh.timer` | timer | Fires at 13:35 UTC, then 14:05–19:05 UTC hourly (Mon–Fri) |
 | `hawkstrade-capitol-scan.service` | oneshot | Refreshes HawksCapitol signals, then runs optional `capitol_copy` scan |
 | `hawkstrade-capitol-scan.timer` | timer | Fires at 13:40 UTC, then 14:10–19:10 UTC hourly (Mon–Fri) |
@@ -343,6 +343,13 @@ journalctl -u hawkstrade-secrets.service --no-pager
 ---
 
 ## Step 11 — Enable the Timers
+
+Before enabling `hawkstrade-capitol-refresh.timer` in production, edit
+`/etc/hawkstrade/hawkstrade.env` and set `HAWKSTRADE_CAPITOL_REFRESH_COMMAND` to
+a real-data HawksCapitol signal export command that updates
+`integrations/HawksCapitol/data/signals/latest.json`. The wrapper blocks the
+pinned HawksCapitol demo sample-data export unless
+`HAWKSTRADE_CAPITOL_ALLOW_SAMPLE_DATA=1` is set for a non-production test.
 
 ```bash
 sudo systemctl enable --now \
