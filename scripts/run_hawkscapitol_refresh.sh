@@ -38,12 +38,28 @@ DEFAULT_SIGNAL_FILE="$CAPITOL_DIR/data/signals/latest.json"
 SIGNAL_FILE="${HAWKSTRADE_CAPITOL_SIGNAL_PATH:-$DEFAULT_SIGNAL_FILE}"
 LOCK_FILE="${HAWKSTRADE_CAPITOL_REFRESH_LOCK_FILE:-$HAWKSTRADE_DIR/local/locks/hawkscapitol-refresh.lock}"
 LOCK_TIMEOUT_SECONDS="${HAWKSTRADE_CAPITOL_REFRESH_LOCK_TIMEOUT_SECONDS:-600}"
+LOG_FILE="${HAWKSTRADE_CAPITOL_REFRESH_LOG_FILE:-$HAWKSTRADE_DIR/logs/capitol_refresh_$(date +%Y%m%d).log}"
+RUN_ID="hawkscapitol-refresh-$(date -u +"%Y%m%dT%H%M%SZ")-$$"
 
 mkdir -p "$HAWKSTRADE_DIR/logs" "$HAWKSTRADE_DIR/local/locks"
+touch "$LOG_FILE"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+quote_field() {
+    printf "%q" "$1"
+}
+
+log_line() {
+    local level="$1"
+    shift
+    printf '%s,000 [%s] hawkscapitol_refresh: %s\n' "$(date +"%Y-%m-%d %H:%M:%S")" "$level" "$*"
+}
 
 if [[ ! -f "$CAPITOL_DIR/scheduler/run_scan.py" ]]; then
-    echo "[hawkscapitol-refresh] ERROR: HawksCapitol submodule is not initialized at $CAPITOL_DIR." >&2
-    echo "[hawkscapitol-refresh] Run: git submodule update --init --recursive" >&2
+    log_line ERROR "RUN_START script=hawkscapitol_refresh run_id=$(quote_field "$RUN_ID") dry_run=$DRY_RUN capitol_dir=$(quote_field "$CAPITOL_DIR") signal_file=$(quote_field "$SIGNAL_FILE")"
+    log_line ERROR "HawksCapitol submodule is not initialized at $CAPITOL_DIR."
+    log_line ERROR "Run: git submodule update --init --recursive"
+    log_line ERROR "RUN_END script=hawkscapitol_refresh run_id=$(quote_field "$RUN_ID") status=error exit_code=69 dry_run=$DRY_RUN"
     exit 69
 fi
 
@@ -62,7 +78,7 @@ else
 fi
 
 START_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-echo "[hawkscapitol-refresh] REFRESH_START started_at=$START_UTC dry_run=$DRY_RUN capitol_dir=$CAPITOL_DIR signal_file=$SIGNAL_FILE python=$PYTHON_BIN"
+log_line INFO "RUN_START script=hawkscapitol_refresh run_id=$(quote_field "$RUN_ID") started_at=$(quote_field "$START_UTC") dry_run=$DRY_RUN capitol_dir=$(quote_field "$CAPITOL_DIR") signal_file=$(quote_field "$SIGNAL_FILE") python=$(quote_field "$PYTHON_BIN")"
 
 refresh_once() {
     cd "$CAPITOL_DIR"
@@ -91,7 +107,7 @@ else
         STATUS=$?
         rmdir "$LOCK_DIR" 2>/dev/null || true
     else
-        echo "[hawkscapitol-refresh] ERROR: refresh lock is busy: $LOCK_DIR" >&2
+        log_line ERROR "refresh lock is busy: $LOCK_DIR"
         STATUS=75
     fi
 fi
@@ -99,7 +115,7 @@ set -e
 
 if [[ "$STATUS" -ne 0 ]]; then
     END_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-    echo "[hawkscapitol-refresh] REFRESH_END ended_at=$END_UTC status=$STATUS"
+    log_line ERROR "RUN_END script=hawkscapitol_refresh run_id=$(quote_field "$RUN_ID") ended_at=$(quote_field "$END_UTC") status=error exit_code=$STATUS dry_run=$DRY_RUN"
     exit "$STATUS"
 fi
 
@@ -135,4 +151,4 @@ PY
 fi
 
 END_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-echo "[hawkscapitol-refresh] REFRESH_END ended_at=$END_UTC status=ok dry_run=$DRY_RUN"
+log_line INFO "RUN_END script=hawkscapitol_refresh run_id=$(quote_field "$RUN_ID") ended_at=$(quote_field "$END_UTC") status=ok dry_run=$DRY_RUN"
