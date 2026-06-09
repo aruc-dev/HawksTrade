@@ -39,6 +39,8 @@ Before enabling schedules:
    `HAWKSTRADE_CAPITOL_REFRESH_COMMAND` to a real-data HawksCapitol signal export
    command. The built-in sample-data export is blocked unless
    `HAWKSTRADE_CAPITOL_ALLOW_SAMPLE_DATA=1` is set for a non-production test.
+   `scripts/run_hawkscapitol_refresh.sh --dry-run` skips the configured custom
+   command and runs only HawksCapitol dry-run entrypoints.
 4. Confirm Alpaca credentials exist in `.env` or `config/.env`.
 5. Confirm `config/config.yaml` is still `mode: paper` unless live mode was explicitly approved.
 6. Run dry checks:

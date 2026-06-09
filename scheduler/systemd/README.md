@@ -145,9 +145,11 @@ sudo systemctl disable --now 'hawkstrade-*.timer'
   validates that the signal file was updated and contains a signal list. The
   pinned HawksCapitol sample-data export is available only when
   `HAWKSTRADE_CAPITOL_ALLOW_SAMPLE_DATA=1` is set for a non-production test, and
-  it writes signals without invoking HawksCapitol order-execution code. The
-  Capitol scan service also runs this refresh as `ExecStartPre`, so a missed
-  refresh timer does not make the scan reuse stale signals silently.
+  it writes signals without invoking HawksCapitol order-execution code. Dry-runs
+  skip the configured custom refresh command and execute only HawksCapitol
+  dry-run entrypoints. The Capitol scan service also runs this refresh as
+  `ExecStartPre`, so a missed refresh timer does not make the scan reuse stale
+  signals silently.
 - The health-check service uses `.venv/bin/python`, then `.venv/bin/python3`,
   then `python3` as a fallback. On systemd deployments it reads installed
   `/etc/systemd/system/hawkstrade-*.timer` schedules instead of cron templates,

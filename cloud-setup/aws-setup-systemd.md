@@ -350,6 +350,8 @@ a real-data HawksCapitol signal export command that updates
 `integrations/HawksCapitol/data/signals/latest.json`. The wrapper blocks the
 pinned HawksCapitol demo sample-data export unless
 `HAWKSTRADE_CAPITOL_ALLOW_SAMPLE_DATA=1` is set for a non-production test.
+`scripts/run_hawkscapitol_refresh.sh --dry-run` skips the configured custom
+refresh command and runs only HawksCapitol dry-run entrypoints.
 
 ```bash
 sudo systemctl enable --now \

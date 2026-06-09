@@ -19,12 +19,18 @@ class HawksCapitolRefreshScriptTests(unittest.TestCase):
         root = Path(tmp)
         hawkstrade = root / "HawksTrade"
         capitol = root / "HawksCapitol"
-        self._write(capitol / "scheduler" / "run_scan.py", "print('scan placeholder')\n")
+        for script_name in ("run_ingest.py", "run_score.py", "run_scan.py"):
+            self._write(capitol / "scheduler" / script_name, f"print('{script_name} placeholder')\n")
         (hawkstrade / "logs").mkdir(parents=True, exist_ok=True)
         (hawkstrade / "local" / "locks").mkdir(parents=True, exist_ok=True)
         return hawkstrade, capitol
 
-    def _run(self, tmp: str, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    def _run(
+        self,
+        tmp: str,
+        extra_env: dict[str, str] | None = None,
+        args: list[str] | None = None,
+    ) -> subprocess.CompletedProcess:
         hawkstrade, capitol = self._make_workspace(tmp)
         env = os.environ.copy()
         env.update(
@@ -38,7 +44,7 @@ class HawksCapitolRefreshScriptTests(unittest.TestCase):
         if extra_env:
             env.update(extra_env)
         return subprocess.run(
-            [str(SCRIPT)],
+            [str(SCRIPT), *(args or [])],
             cwd=BASE_DIR,
             env=env,
             text=True,
@@ -87,6 +93,59 @@ class HawksCapitolRefreshScriptTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 70, result.stdout)
             self.assertIn("signal_file_not_updated", result.stdout)
+
+    def test_dry_run_skips_custom_refresh_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _, capitol = self._make_workspace(tmp)
+            mutate_script = capitol / "mutate.py"
+            self._write(
+                mutate_script,
+                "from pathlib import Path\n"
+                "Path('marker-ran').write_text('x')\n"
+                "Path('data/signals/latest.json').parent.mkdir(parents=True, exist_ok=True)\n"
+                "Path('data/signals/latest.json').write_text('[]\\n')\n",
+            )
+
+            result = self._run(
+                tmp,
+                {"HAWKSTRADE_CAPITOL_REFRESH_COMMAND": f"{sys.executable} {mutate_script}"},
+                args=["--dry-run"],
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertIn("Skipping HAWKSTRADE_CAPITOL_REFRESH_COMMAND during dry-run", result.stdout)
+            self.assertFalse((root / "HawksCapitol" / "marker-ran").exists())
+            self.assertFalse((root / "HawksCapitol" / "data" / "signals" / "latest.json").exists())
+
+    def test_custom_signal_path_is_not_overwritten_by_stale_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, capitol = self._make_workspace(tmp)
+            default_signal = capitol / "data" / "signals" / "latest.json"
+            custom_signal = capitol / "custom" / "latest.json"
+            writer_script = capitol / "write_custom.py"
+            self._write(default_signal, '[{"symbol": "STALE"}]\n')
+            self._write(
+                writer_script,
+                "import os\n"
+                "from pathlib import Path\n"
+                "path = Path(os.environ['HAWKSTRADE_CAPITOL_SIGNAL_PATH'])\n"
+                "path.parent.mkdir(parents=True, exist_ok=True)\n"
+                "path.write_text('[{\"symbol\": \"FRESH\"}]\\n', encoding='utf-8')\n",
+            )
+
+            result = self._run(
+                tmp,
+                {
+                    "HAWKSTRADE_CAPITOL_SIGNAL_PATH": str(custom_signal),
+                    "HAWKSTRADE_CAPITOL_REFRESH_COMMAND": f"{sys.executable} {writer_script}",
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertIn("SIGNAL_FILE_OK", result.stdout)
+            self.assertEqual(custom_signal.read_text(encoding="utf-8"), '[{"symbol": "FRESH"}]\n')
+            self.assertEqual(default_signal.read_text(encoding="utf-8"), '[{"symbol": "STALE"}]\n')
 
 
 if __name__ == "__main__":

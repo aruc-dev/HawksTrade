@@ -8,7 +8,8 @@ Usage: scripts/run_hawkscapitol_refresh.sh [--dry-run]
 Refresh HawksCapitol scored signal data from the HawksCapitol submodule before a
 HawksTrade capitol_copy scan. Production deployments should set
 HAWKSTRADE_CAPITOL_REFRESH_COMMAND to a real-data signal export command. The
-built-in HawksCapitol demo export is blocked unless explicitly allowed.
+built-in HawksCapitol demo export is blocked unless explicitly allowed. Dry-runs
+skip custom refresh commands and run HawksCapitol dry-run entrypoints only.
 
 Environment overrides:
   HAWKSTRADE_CAPITOL_DIR              HawksCapitol checkout path
@@ -125,19 +126,23 @@ PY
 
 START_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 SIGNAL_PRE_REFRESH_MTIME_NS="$(file_mtime_ns "$SIGNAL_FILE")"
+DEFAULT_SIGNAL_PRE_REFRESH_MTIME_NS="$(file_mtime_ns "$DEFAULT_SIGNAL_FILE")"
 log_line INFO "RUN_START script=hawkscapitol_refresh run_id=$(quote_field "$RUN_ID") started_at=$(quote_field "$START_UTC") dry_run=$DRY_RUN capitol_dir=$(quote_field "$CAPITOL_DIR") signal_file=$(quote_field "$SIGNAL_FILE") python=$(quote_field "$PYTHON_BIN")"
 
 refresh_once() {
     cd "$CAPITOL_DIR"
-    if [[ -n "${HAWKSTRADE_CAPITOL_REFRESH_COMMAND:-}" ]]; then
-        bash -lc "set -euo pipefail; $HAWKSTRADE_CAPITOL_REFRESH_COMMAND"
-        return
-    fi
-
     if [[ "$DRY_RUN" -eq 1 ]]; then
+        if [[ -n "${HAWKSTRADE_CAPITOL_REFRESH_COMMAND:-}" ]]; then
+            log_line INFO "Skipping HAWKSTRADE_CAPITOL_REFRESH_COMMAND during dry-run to avoid refresh side effects."
+        fi
         "$PYTHON_BIN" scheduler/run_ingest.py --dry-run
         "$PYTHON_BIN" scheduler/run_score.py --dry-run
         "$PYTHON_BIN" scheduler/run_scan.py --dry-run
+        return
+    fi
+
+    if [[ -n "${HAWKSTRADE_CAPITOL_REFRESH_COMMAND:-}" ]]; then
+        bash -lc "set -euo pipefail; $HAWKSTRADE_CAPITOL_REFRESH_COMMAND"
         return
     fi
 
@@ -183,12 +188,19 @@ if [[ "$STATUS" -ne 0 ]]; then
 fi
 
 if [[ "$DRY_RUN" -eq 0 ]]; then
-    if [[ "$SIGNAL_FILE" != "$DEFAULT_SIGNAL_FILE" && -s "$DEFAULT_SIGNAL_FILE" ]]; then
-        mkdir -p "$(dirname "$SIGNAL_FILE")"
-        cp "$DEFAULT_SIGNAL_FILE" "$SIGNAL_FILE"
+    SIGNAL_POST_REFRESH_MTIME_NS="$(file_mtime_ns "$SIGNAL_FILE")"
+    DEFAULT_SIGNAL_POST_REFRESH_MTIME_NS="$(file_mtime_ns "$DEFAULT_SIGNAL_FILE")"
+
+    if [[ "$SIGNAL_FILE" != "$DEFAULT_SIGNAL_FILE" ]]; then
+        if [[ "$SIGNAL_POST_REFRESH_MTIME_NS" -gt "$SIGNAL_PRE_REFRESH_MTIME_NS" ]]; then
+            :
+        elif [[ "$DEFAULT_SIGNAL_POST_REFRESH_MTIME_NS" -gt "$DEFAULT_SIGNAL_PRE_REFRESH_MTIME_NS" && -s "$DEFAULT_SIGNAL_FILE" ]]; then
+            mkdir -p "$(dirname "$SIGNAL_FILE")"
+            cp "$DEFAULT_SIGNAL_FILE" "$SIGNAL_FILE"
+            SIGNAL_POST_REFRESH_MTIME_NS="$(file_mtime_ns "$SIGNAL_FILE")"
+        fi
     fi
 
-    SIGNAL_POST_REFRESH_MTIME_NS="$(file_mtime_ns "$SIGNAL_FILE")"
     if [[ "$SIGNAL_POST_REFRESH_MTIME_NS" -le "$SIGNAL_PRE_REFRESH_MTIME_NS" ]]; then
         log_line ERROR "RUN_END script=hawkscapitol_refresh run_id=$(quote_field "$RUN_ID") status=error exit_code=70 dry_run=$DRY_RUN reason=signal_file_not_updated signal_file=$(quote_field "$SIGNAL_FILE")"
         exit 70
