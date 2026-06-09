@@ -19,6 +19,7 @@ VALID_MOMENTUM_EXIT_POLICIES = {
 
 PROFIT_TRAILING_REASON_PREFIXES = {
     "momentum": "Momentum trailing stop",
+    "capitol_copy": "Capitol copy profit protection",
     "relative_strength": "Relative strength profit protection",
     "range_breakout": "Range breakout profit protection",
     "rsi_reversion": "RSI reversion profit protection",
@@ -118,6 +119,10 @@ def _profit_trailing_exit(
     )
 
 
+def _strategy_display_name(strategy: str) -> str:
+    return str(strategy).replace("_", " ").title()
+
+
 def evaluate_hold_exit(
     *,
     strategy: str,
@@ -138,6 +143,9 @@ def evaluate_hold_exit(
         under the same trailing stop plus an optional max_hold_days cap.
       - profit_trailing_enabled: non-momentum strategies can opt into
         high-water profit protection before their fixed hold cap.
+      - extend_winners_after_hold: non-momentum strategies can opt into
+        momentum-like behavior after hold_days; flat/losing trades exit,
+        winners can continue under the trailing/max-hold controls.
     """
     hold_days = strategy_cfg.get("hold_days")
     if not hold_days:
@@ -156,6 +164,20 @@ def evaluate_hold_exit(
             if should_exit:
                 return HoldExitDecision(True, reason, force_market=True)
         if age_days < hold_days:
+            return HoldExitDecision(False)
+        if bool(strategy_cfg.get("extend_winners_after_hold", False)):
+            pnl_pct = (float(current_price) / float(entry_price)) - 1.0
+            profit_floor_pct = float(strategy_cfg.get("profit_floor_pct", 0.0))
+            display = _strategy_display_name(strategy)
+            if pnl_pct <= profit_floor_pct:
+                return HoldExitDecision(
+                    True,
+                    f"{display} hold expired without profit: {pnl_pct:+.2%} <= {profit_floor_pct:+.2%}",
+                    force_market=True,
+                )
+            max_hold_days = strategy_cfg.get("max_hold_days")
+            if max_hold_days and age_days >= float(max_hold_days):
+                return HoldExitDecision(True, f"{display} max hold {int(age_days)}d", force_market=True)
             return HoldExitDecision(False)
         return HoldExitDecision(True, f"Hold {int(age_days)}d", force_market=False)
 

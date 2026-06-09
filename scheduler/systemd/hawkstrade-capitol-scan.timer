@@ -1,0 +1,12 @@
+[Unit]
+Description=Run HawksTrade HawksCapitol signal scans during US equity market hours
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 13:40:00
+OnCalendar=Mon..Fri *-*-* 14..19:10:00
+Persistent=true
+AccuracySec=1min
+Unit=hawkstrade-capitol-scan.service
+
+[Install]
+WantedBy=timers.target

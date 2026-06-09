@@ -17,6 +17,8 @@ intentions. The next timer run is the retry boundary.
   group-readable by the HawksTrade service group so `systemd-logind` does not
   remove it as `ec2-user` IPC when SSH/user sessions close.
 - `hawkstrade-stock-scan.service` and `.timer` run the 9:35 AM ET stock-only scan.
+- `hawkstrade-capitol-scan.service` and `.timer` optionally run the
+  `capitol_copy` stock strategy from HawksCapitol scored signals.
 - `hawkstrade-full-scan.service` and `.timer` run hourly full scans.
 - `hawkstrade-crypto-scan.service` and `.timer` run hourly crypto-only scans.
 - `hawkstrade-risk-check.service` and `.timer` run a 9:31 AM ET check before
@@ -70,6 +72,7 @@ Enable timers:
 ```bash
 sudo systemctl enable --now \
   hawkstrade-stock-scan.timer \
+  hawkstrade-capitol-scan.timer \
   hawkstrade-full-scan.timer \
   hawkstrade-crypto-scan.timer \
   hawkstrade-risk-check.timer \

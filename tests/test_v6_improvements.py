@@ -683,6 +683,60 @@ class TestRelativeStrengthExitPolicy(unittest.TestCase):
         self.assertEqual(reason, "Hold 7d")
 
 
+class TestCapitolCopyExitPolicy(unittest.TestCase):
+    """Tests for Capitol Copy winner extension after the minimum hold."""
+
+    def _cfg(self):
+        return {
+            "hold_days": 10,
+            "profit_trailing_enabled": True,
+            "extend_winners_after_hold": True,
+            "profit_floor_pct": 0.0,
+            "trail_activation_pct": 0.08,
+            "trailing_stop_pct": 0.05,
+            "max_hold_days": 45,
+        }
+
+    def test_capitol_copy_extends_winner_after_hold_days(self):
+        should_exit, reason = should_exit_for_hold(
+            strategy="capitol_copy",
+            age_days=10,
+            entry_price=100,
+            current_price=106,
+            peak_price=106,
+            strategy_cfg=self._cfg(),
+        )
+
+        self.assertFalse(should_exit)
+        self.assertEqual(reason, "")
+
+    def test_capitol_copy_exits_flat_or_losing_after_hold_days(self):
+        should_exit, reason = should_exit_for_hold(
+            strategy="capitol_copy",
+            age_days=10,
+            entry_price=100,
+            current_price=99,
+            peak_price=103,
+            strategy_cfg=self._cfg(),
+        )
+
+        self.assertTrue(should_exit)
+        self.assertIn("Capitol Copy hold expired without profit", reason)
+
+    def test_capitol_copy_exits_at_max_hold_even_when_profitable(self):
+        should_exit, reason = should_exit_for_hold(
+            strategy="capitol_copy",
+            age_days=45,
+            entry_price=100,
+            current_price=112,
+            peak_price=112,
+            strategy_cfg=self._cfg(),
+        )
+
+        self.assertTrue(should_exit)
+        self.assertEqual(reason, "Capitol Copy max hold 45d")
+
+
 class TestRSIReversionExitPolicy(unittest.TestCase):
     """Tests for RSI Reversion profit protection before the hold cap."""
 

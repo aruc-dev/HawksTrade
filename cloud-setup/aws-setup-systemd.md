@@ -278,6 +278,8 @@ rm -rf "$TMPDIR"
 | `hawkstrade-secrets.service` | oneshot | Copies secrets into `/dev/shm` at boot; runs before all trading units |
 | `hawkstrade-stock-scan.service` | oneshot | Stock-only scan at 9:35 AM ET |
 | `hawkstrade-stock-scan.timer` | timer | Fires at 13:35 UTC (Mon–Fri) |
+| `hawkstrade-capitol-scan.service` | oneshot | Optional HawksCapitol signal scan using `capitol_copy` |
+| `hawkstrade-capitol-scan.timer` | timer | Fires at 13:40 UTC, then 14:10–19:10 UTC hourly (Mon–Fri) |
 | `hawkstrade-full-scan.service` | oneshot | Full scan (stocks + crypto) |
 | `hawkstrade-full-scan.timer` | timer | Fires on the hour 14:00–19:00 UTC (Mon–Fri) |
 | `hawkstrade-crypto-scan.service` | oneshot | Crypto-only scan |
@@ -341,6 +343,7 @@ journalctl -u hawkstrade-secrets.service --no-pager
 ```bash
 sudo systemctl enable --now \
   hawkstrade-stock-scan.timer \
+  hawkstrade-capitol-scan.timer \
   hawkstrade-full-scan.timer \
   hawkstrade-crypto-scan.timer \
   hawkstrade-risk-check.timer \
@@ -355,7 +358,7 @@ Verify they are active and show expected next-trigger times:
 systemctl list-timers 'hawkstrade-*'
 ```
 
-You should see all seven timers with `NEXT` timestamps populated.
+You should see all eight timers with `NEXT` timestamps populated.
 
 ---
 
@@ -407,6 +410,7 @@ network-online.target
 hawkstrade-secrets.service  ←── loads /dev/shm/.hawkstrade.env
         │
         ├──▶ hawkstrade-stock-scan.service   (via timer: 13:35 UTC Mon–Fri)
+        ├──▶ hawkstrade-capitol-scan.service (via timer: 13:40, 14–19:10 UTC Mon–Fri)
         ├──▶ hawkstrade-full-scan.service    (via timer: 14–19:00 UTC Mon–Fri)
         ├──▶ hawkstrade-crypto-scan.service  (via timer: hourly 24/7)
         ├──▶ hawkstrade-risk-check.service   (via timer: every 15 min market hours)
@@ -495,6 +499,7 @@ sudo systemctl disable 'hawkstrade-*.timer'
 ```bash
 sudo systemctl enable --now \
   hawkstrade-stock-scan.timer \
+  hawkstrade-capitol-scan.timer \
   hawkstrade-full-scan.timer \
   hawkstrade-crypto-scan.timer \
   hawkstrade-risk-check.timer \

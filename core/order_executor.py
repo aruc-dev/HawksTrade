@@ -9,10 +9,11 @@ Writes every trade to the trade log.
 from __future__ import annotations
 
 import logging
+import json
 import math
 import os
 from datetime import datetime, timezone
-from typing import Optional, List, Dict
+from typing import Any, Mapping, Optional, List, Dict
 from pathlib import Path
 
 
@@ -35,6 +36,15 @@ MODE        = CFG["mode"]
 ORDER_TYPE  = CFG["trading"]["order_type"]
 SLIPPAGE    = CFG["trading"]["limit_slippage_pct"]
 log         = logging.getLogger("core.order_executor")
+
+SOURCE_METADATA_COLUMNS = (
+    "source_system",
+    "source_signal_id",
+    "source_tx_ids",
+    "source_created_at",
+    "source_rationale",
+    "source_scores",
+)
 
 
 def _utc_now():
@@ -87,6 +97,24 @@ def _finite_nonnegative(value) -> float | None:
     except (TypeError, ValueError):
         return None
     return parsed if math.isfinite(parsed) and parsed >= 0 else None
+
+
+def _metadata_value(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return str(value)
+
+
+def _source_metadata_fields(source_metadata: Mapping[str, Any] | None) -> dict[str, str]:
+    if not source_metadata:
+        return {}
+    return {
+        column: _metadata_value(source_metadata.get(column))
+        for column in SOURCE_METADATA_COLUMNS
+        if source_metadata.get(column) not in (None, "")
+    }
 
 
 def _sample_size_scale_input(sizing, check: dict) -> float:
@@ -452,6 +480,7 @@ def enter_position(
     suggested_qty: Optional[float] = None,
     atr_stop_price: Optional[float] = None,
     closed_trades_count: Optional[int] = None,
+    source_metadata: Optional[Mapping[str, Any]] = None,
 ) -> Optional[dict]:
     """
     Open a new position.
@@ -565,7 +594,9 @@ def enter_position(
 
         if dry_run:
             log.info(f"DRY RUN: would buy {qty} {symbol} @ {price}")
-            return {"symbol": symbol, "status": "dry_run"}
+            result = {"symbol": symbol, "status": "dry_run"}
+            result.update(_source_metadata_fields(source_metadata))
+            return result
 
         governor_decision = _evaluate_order_governor(OrderIntent(
             symbol=symbol,
@@ -646,6 +677,7 @@ def enter_position(
             "order_id":         order_id,
             "status":           action_status,
         }
+        trade.update(_source_metadata_fields(source_metadata))
         log_trade(trade)
         if action_status == "open":
             log.info(f"ENTERED {symbol} | strategy={strategy} | qty={logged_qty} | price={entry_price}")
@@ -770,6 +802,7 @@ def exit_position(
                 trade_symbol = t.get("symbol") or symbol
                 break
         entry_risk_tier = matched_open_trade.get("risk_tier", "") if matched_open_trade else ""
+        source_metadata = _source_metadata_fields(matched_open_trade)
 
         order_symbol = trade_symbol if asset_class == "crypto" else symbol
 
@@ -813,6 +846,7 @@ def exit_position(
                 "order_type":     order_type,
                 "risk_tier":      entry_risk_tier,
             }
+            trade.update(source_metadata)
             if limit_price is not None:
                 trade["limit_price"] = limit_price
             log.info(
@@ -905,6 +939,7 @@ def exit_position(
             "order_type":     order_type,
             "risk_tier":      entry_risk_tier,
         }
+        trade.update(source_metadata)
         if limit_price is not None:
             trade["limit_price"] = limit_price
         log_trade(trade)

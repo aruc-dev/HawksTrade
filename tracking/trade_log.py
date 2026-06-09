@@ -312,8 +312,13 @@ def _row_is_recent(row: dict) -> bool:
 
 COLUMNS = [
     "timestamp", "mode", "symbol", "strategy", "asset_class",
-    "side", "qty", "entry_price", "exit_price", "risk_tier", "stop_loss",
-    "take_profit", "high_water_price", "pnl_pct", "exit_reason", "order_id", "status",
+    "source_system", "source_signal_id", "source_tx_ids", "source_created_at",
+    "source_rationale", "source_scores",
+    "side", "qty", "entry_price", "exit_price", "decision_price", "arrival_price",
+    "limit_price", "expected_slippage_bps", "realised_slippage_bps", "latency_ms",
+    "execution_policy", "order_type", "risk_tier", "stop_loss", "take_profit",
+    "high_water_price", "pnl_pct", "exit_reason", "order_id", "status",
+    "governor_code", "readiness_code", "error_type", "error",
 ]
 
 
@@ -382,10 +387,7 @@ def _ensure_file(path: Path | None = None):
             return
         rows = list(reader)
 
-    with open(trade_log_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=COLUMNS)
-        writer.writeheader()
-        writer.writerows({col: row.get(col, "") for col in COLUMNS} for row in rows)
+    _write_rows_unlocked(trade_log_path, rows)
     log.info(f"Trade log migrated to current header: {trade_log_path}")
 
 
@@ -394,6 +396,13 @@ def _read_rows_unlocked(path: Path) -> list[dict]:
         return []
     with open(path, "r", newline="") as f:
         return list(csv.DictReader(f))
+
+
+def _write_rows_unlocked(path: Path, rows: Iterable[dict]) -> None:
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=COLUMNS)
+        writer.writeheader()
+        writer.writerows({col: row.get(col, "") for col in COLUMNS} for row in rows)
 
 
 def read_trade_rows(path: Path | None = None) -> list[dict]:
@@ -478,10 +487,7 @@ def mark_trade_closed(
             )
 
         if updated:
-            with open(trade_log_path, "w", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=COLUMNS)
-                writer.writeheader()
-                writer.writerows(rows)
+            _write_rows_unlocked(trade_log_path, rows)
 
     if not updated:
         log.warning(f"No open trade found to close for {symbol}")
@@ -843,10 +849,7 @@ def reconcile_open_trades_with_positions(
                 )
                 summary["closed_stale_rows"] += 1
 
-        with open(trade_log_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=COLUMNS)
-            writer.writeheader()
-            writer.writerows(rows)
+        _write_rows_unlocked(trade_log_path, rows)
 
     log.info(f"Trade log reconciliation complete: {summary}")
     return summary
@@ -902,10 +905,7 @@ def update_high_water_prices(symbol_prices: dict) -> None:
                 row["high_water_price"] = round(new_hwp, 4)
                 changed = True
         if changed:
-            with open(trade_log_path, "w", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=COLUMNS)
-                writer.writeheader()
-                writer.writerows(rows)
+            _write_rows_unlocked(trade_log_path, rows)
 
 
 def _business_days_between(start: date, end: date) -> int:

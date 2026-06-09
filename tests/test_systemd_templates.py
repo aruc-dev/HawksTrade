@@ -9,6 +9,7 @@ LOGROTATE_DIR = BASE_DIR / "cloud-setup" / "logrotate"
 
 TRADE_SERVICES = [
     "hawkstrade-stock-scan.service",
+    "hawkstrade-capitol-scan.service",
     "hawkstrade-full-scan.service",
     "hawkstrade-crypto-scan.service",
     "hawkstrade-risk-check.service",
@@ -20,6 +21,7 @@ ALL_JOB_SERVICES = TRADE_SERVICES + ["hawkstrade-health-check.service"]
 
 TIMERS = [
     "hawkstrade-stock-scan.timer",
+    "hawkstrade-capitol-scan.timer",
     "hawkstrade-full-scan.timer",
     "hawkstrade-crypto-scan.timer",
     "hawkstrade-risk-check.timer",
@@ -110,6 +112,7 @@ class SystemdTemplateTests(unittest.TestCase):
     def test_timers_are_persistent_and_installed_to_timers_target(self):
         expected_calendar = {
             "hawkstrade-stock-scan.timer": "OnCalendar=Mon..Fri *-*-* 13:35:00",
+            "hawkstrade-capitol-scan.timer": "OnCalendar=Mon..Fri *-*-* 13:40:00",
             "hawkstrade-full-scan.timer": "OnCalendar=Mon..Fri *-*-* 14..19:00:00",
             "hawkstrade-crypto-scan.timer": "OnCalendar=hourly",
             "hawkstrade-risk-check.timer": "OnCalendar=Mon..Fri *-*-* 13:31:00",
@@ -141,6 +144,12 @@ class SystemdTemplateTests(unittest.TestCase):
                 self.assertIn(calendar_line, text)
         self.assertNotIn("OnCalendar=Mon..Fri *-*-* 14..19:00:00", text)
 
+    def test_capitol_timer_runs_after_primary_stock_and_full_scans(self):
+        text = (SYSTEMD_DIR / "hawkstrade-capitol-scan.timer").read_text(encoding="utf-8")
+
+        self.assertIn("OnCalendar=Mon..Fri *-*-* 13:40:00", text)
+        self.assertIn("OnCalendar=Mon..Fri *-*-* 14..19:10:00", text)
+
     def test_crypto_lock_skip_exit_is_successful(self):
         text = (SYSTEMD_DIR / "hawkstrade-crypto-scan.service").read_text(encoding="utf-8")
 
@@ -151,6 +160,7 @@ class SystemdTemplateTests(unittest.TestCase):
 
         self.assertIn("sudo systemctl enable --now hawkstrade-secrets.service", text)
         self.assertIn("sudo systemctl enable --now", text)
+        self.assertIn("hawkstrade-capitol-scan.timer", text)
         self.assertIn("journalctl -u hawkstrade-risk-check.service", text)
         self.assertIn("systemctl list-timers 'hawkstrade-*'", text)
 

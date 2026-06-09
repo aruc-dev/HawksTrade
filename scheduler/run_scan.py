@@ -53,6 +53,7 @@ from strategies.momentum import MomentumStrategy
 from strategies.relative_strength import RelativeStrengthStrategy
 from strategies.rsi_reversion import RSIReversionStrategy
 from strategies.gap_up import GapUpStrategy
+from strategies.capitol_copy import CapitolCopyStrategy
 from strategies.ma_crossover import MACrossoverStrategy
 from strategies.range_breakout import RangeBreakoutStrategy
 from screener.universe_builder import UniverseBuilder
@@ -146,7 +147,13 @@ POLICY_AWARE_HOLD_STRATEGIES = _configured_policy_aware_hold_strategies(CFG)
 
 # ── Strategy Registry ─────────────────────────────────────────────────────────
 
-STOCK_STRATEGIES  = [MomentumStrategy(), RelativeStrengthStrategy(), RSIReversionStrategy(), GapUpStrategy()]
+STOCK_STRATEGIES  = [
+    MomentumStrategy(),
+    RelativeStrengthStrategy(),
+    RSIReversionStrategy(),
+    GapUpStrategy(),
+    CapitolCopyStrategy(),
+]
 CRYPTO_STRATEGIES = [MACrossoverStrategy(), RangeBreakoutStrategy()]
 
 
@@ -192,8 +199,63 @@ def _strategy_enabled(strategy) -> bool:
     return CFG["strategies"].get(strategy.name, {}).get("enabled", False)
 
 
-def _enabled_strategies(strategies) -> list:
-    return [strategy for strategy in strategies if _strategy_enabled(strategy)]
+def _enabled_strategies(strategies, strategy_names: set[str] | None = None) -> list:
+    enabled = [strategy for strategy in strategies if _strategy_enabled(strategy)]
+    if not strategy_names:
+        return enabled
+    return [strategy for strategy in enabled if strategy.name in strategy_names]
+
+
+SOURCE_METADATA_FIELDS = {
+    "source_system",
+    "source_signal_id",
+    "source_tx_ids",
+    "source_created_at",
+    "source_rationale",
+    "source_scores",
+}
+
+
+def _source_metadata_for_signal(signal_row: dict) -> dict:
+    return {
+        key: signal_row[key]
+        for key in SOURCE_METADATA_FIELDS
+        if key in signal_row and signal_row.get(key) not in (None, "")
+    }
+
+
+def _entry_kwargs_for_plan(
+    plan: OrderPlan,
+    dry_run: bool,
+    closed_trade_counts: dict[str, int] | None,
+    signal_row: dict,
+) -> dict:
+    kwargs = {
+        "strategy": plan.strategy,
+        "asset_class": plan.asset_class,
+        "dry_run": dry_run,
+        "suggested_qty": plan.suggested_qty,
+        "atr_stop_price": plan.atr_stop_price,
+        "closed_trades_count": _closed_trade_count_for_strategy(closed_trade_counts, plan.strategy),
+    }
+    source_metadata = _source_metadata_for_signal(signal_row)
+    if source_metadata:
+        kwargs["source_metadata"] = source_metadata
+    return kwargs
+
+
+def _parse_strategy_names(values: list[str] | None) -> set[str] | None:
+    names: set[str] = set()
+    for value in values or []:
+        for item in str(value).split(","):
+            name = item.strip()
+            if name:
+                names.add(name)
+    return names or None
+
+
+def _known_strategy_names() -> set[str]:
+    return {strategy.name for strategy in STOCK_STRATEGIES + CRYPTO_STRATEGIES}
 
 
 def _order_value(order, name: str, default=None):
@@ -586,6 +648,7 @@ def _check_hold_day_exits(
     dry_run: bool = False,
     marker: RunScope | None = None,
     market_open: bool = True,
+    strategy_names: set[str] | None = None,
 ):
     """Exit any swing trade that has been held beyond its target hold_days.
 
@@ -593,6 +656,11 @@ def _check_hold_day_exits(
     crypto-only overnight scans cannot submit stock sell orders outside
     regular market hours.
     """
+    selected_strategies = {
+        str(strategy_name).strip()
+        for strategy_name in (strategy_names or set())
+        if str(strategy_name).strip()
+    }
     open_trades = get_open_trades()
     observed_prices: dict[str, float] = {}
     for trade in open_trades:
@@ -601,6 +669,8 @@ def _check_hold_day_exits(
         try:
             if not symbol:
                 log.warning("Skipping hold-day check for trade row without symbol.")
+                continue
+            if selected_strategies and strategy not in selected_strategies:
                 continue
             if strategy not in HOLD_DAYS:
                 continue
@@ -814,6 +884,7 @@ def run(
     run_crypto: bool = True,
     dry_run: bool = False,
     marker: RunScope | None = None,
+    strategy_names: set[str] | None = None,
 ):
     log.info("=" * 55)
     log.info(f"HawksTrade scan started | mode={CFG['mode'].upper()} | "
@@ -940,11 +1011,11 @@ def run(
     if run_stocks and market_open:
         log.info("--- Running stock strategies ---")
         stock_universe = get_stock_universe()
-        enabled_stock_strategies = _enabled_strategies(STOCK_STRATEGIES)
+        enabled_stock_strategies = _enabled_strategies(STOCK_STRATEGIES, strategy_names)
         for strategy in enabled_stock_strategies:
             try:
                 scan_kwargs = {"regime_bars": stock_regime_bars}
-                if strategy.name in {"momentum", "relative_strength"}:
+                if strategy.name in {"momentum", "relative_strength", "capitol_copy"}:
                     scan_kwargs["existing_symbols"] = _planned_symbols_for_asset_class(
                         planned_asset_classes,
                         "stock",
@@ -967,12 +1038,7 @@ def run(
                             continue
                         result = oe.enter_position(
                             plan.symbol,
-                            strategy=plan.strategy,
-                            asset_class=plan.asset_class,
-                            dry_run=dry_run,
-                            suggested_qty=plan.suggested_qty,
-                            atr_stop_price=plan.atr_stop_price,
-                            closed_trades_count=_closed_trade_count_for_strategy(closed_trade_counts, plan.strategy),
+                            **_entry_kwargs_for_plan(plan, dry_run, closed_trade_counts, sig),
                         )
                         _mark_unhealthy_entry_result(marker, result, "stock_entry")
                         _register_entry_result(
@@ -995,7 +1061,7 @@ def run(
     # --- Crypto scan (24/7) ---
     if run_crypto:
         log.info("--- Running crypto strategies ---")
-        enabled_crypto_strategies = _enabled_strategies(CRYPTO_STRATEGIES)
+        enabled_crypto_strategies = _enabled_strategies(CRYPTO_STRATEGIES, strategy_names)
         for strategy in enabled_crypto_strategies:
             try:
                 signals = strategy.scan(CRYPTO_UNIVERSE, regime_bars=crypto_regime_bars)
@@ -1018,12 +1084,7 @@ def run(
                             continue
                         result = oe.enter_position(
                             plan.symbol,
-                            strategy=plan.strategy,
-                            asset_class=plan.asset_class,
-                            dry_run=dry_run,
-                            suggested_qty=plan.suggested_qty,
-                            atr_stop_price=plan.atr_stop_price,
-                            closed_trades_count=_closed_trade_count_for_strategy(closed_trade_counts, plan.strategy),
+                            **_entry_kwargs_for_plan(plan, dry_run, closed_trade_counts, sig),
                         )
                         _mark_unhealthy_entry_result(marker, result, "crypto_entry")
                         _register_entry_result(
@@ -1067,7 +1128,13 @@ def run(
 
     # --- Hold-day expiry exits ---
     log.info("--- Checking hold-day expiry ---")
-    _check_hold_day_exits(open_symbols, dry_run=dry_run, marker=marker, market_open=market_open)
+    _check_hold_day_exits(
+        open_symbols,
+        dry_run=dry_run,
+        marker=marker,
+        market_open=market_open,
+        strategy_names=strategy_names,
+    )
 
     _reconcile_trade_log_after_run(marker, dry_run)
 
@@ -1088,7 +1155,14 @@ if __name__ == "__main__":
                         help="Run stock strategies only")
     parser.add_argument("--dry-run", action="store_true",
                         help="Log intended entries/exits without submitting orders")
+    parser.add_argument("--strategy", action="append", default=[],
+                        help="Only run the named strategy. Repeat or comma-separate for multiple strategies.")
     args = parser.parse_args()
+
+    strategy_names = _parse_strategy_names(args.strategy)
+    unknown = sorted((strategy_names or set()) - _known_strategy_names())
+    if unknown:
+        parser.error(f"unknown strategy name(s): {', '.join(unknown)}")
 
     run_stocks = not args.crypto_only
     run_crypto = not args.stocks_only
@@ -1109,5 +1183,12 @@ if __name__ == "__main__":
         run_stocks=run_stocks,
         run_crypto=run_crypto,
         scan_kind=scan_kind,
+        strategy_filter=",".join(sorted(strategy_names)) if strategy_names else "all",
     ) as marker:
-        run(run_stocks=run_stocks, run_crypto=run_crypto, dry_run=args.dry_run, marker=marker)
+        run(
+            run_stocks=run_stocks,
+            run_crypto=run_crypto,
+            dry_run=args.dry_run,
+            marker=marker,
+            strategy_names=strategy_names,
+        )
