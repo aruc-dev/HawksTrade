@@ -1,6 +1,6 @@
 # HawksTrade Configuration Guide
 
-> **Updated:** May 17, 2026
+> **Updated:** June 9, 2026
 > **Primary config file:** `config/config.yaml`
 > **Local config:** `config/config.local.yaml` — if present, deep-merged over `config/config.yaml`. Include only the keys you want to override. Gitignored; use for per-machine settings without modifying the committed file.
 > **Current profile:** guarded paper trading profile with a positive 12-month point result; production validation remains blocking until bootstrap confidence gates improve.
@@ -27,6 +27,7 @@ The latest validated default configuration is:
 | Relative Strength | enabled, `top_n: 1`, `min_rs_pct: 0.05`, `min_abs_return_pct: 0.08`, `max_recent_return_pct: 0.03`, `hold_days: 7` | Adds a medium-term stock leadership sleeve while avoiding fresh short-term blow-offs and preserving sector/ATR controls. |
 | RSI Reversion | enabled, `oversold_threshold: 40`, `max_entry_atr_pct: 0.05`, `max_recent_drawdown_pct: 0.10` | Active mean-reversion stock sleeve with crash, realised-volatility, high-ATR, recent-waterfall, and max-loss guards. |
 | Gap-Up | disabled in the default profile, `require_prior_close_above_trend: true` | Opening-momentum sleeve remains available for standalone validation but is excluded from default trading until bootstrap and minute-fill evidence improve. |
+| Capitol Copy | enabled | Consumes HawksCapitol copy-buy signals in live/paper scans; historical validation isolates the strategy from mutable local signal files and records zero Capitol Copy trades unless a point-in-time signal dataset is supplied. |
 | MA Crossover | enabled, `hold_days: 16`, `max_loss_exit_pct: 0.02` | Positive crypto contribution with recent-window weakness reduced while avoiding the older large-loss tail seen with a 3% exit. |
 | Crypto regime filter | `EMA20` + 5-day slope guard | Crypto entries require BTC/USD above EMA20 and the EMA20 not falling more than 0.5% over five days. |
 | Range Breakout | enabled | Crypto Donchian breakout sleeve with volume, trend, RSI, 0.8%-8% extension, upper-10% close-location, and failed-breakout guards. |
@@ -36,9 +37,9 @@ Latest current-config 12-month costed point result:
 
 | Final Value | Return | Trades | Win Rate | Max Drawdown | Profit Factor | Sharpe |
 |---:|---:|---:|---:|---:|---:|---:|
-| $10,955.00 | +9.55% | 147 | 51.0% | -1.04% | 2.45 | 3.52 |
+| $10,512.15 | +5.12% | 136 | 44.9% | -1.37% | 1.56 | 2.04 |
 
-These results enforce `trading.max_position_pct: 0.08` for all entries, including momentum/Kelly sizing, with the default production strategy set and 10 bps slippage plus 5 bps fees per side. Production validation remains blocking: the default 12-month return lower bound improved but is still below the required +10%, and the crypto 12-month gate still fails its return/profit-factor lower bounds. Stop-loss, take-profit, daily-loss halt, and mode remain unchanged.
+These results enforce `trading.max_position_pct: 0.08` for all entries, including momentum/Kelly sizing, with the default production strategy set and 10 bps slippage plus 5 bps fees per side. Production validation remains blocking: the default 12-month bootstrap return, profit-factor, and daily-Sharpe lower bounds remain below the required floors, and the crypto 12-month gate still fails its return/profit-factor lower bounds. Stop-loss, daily-loss halt, max-position cap, and mode remain unchanged.
 
 See [backtests.md](backtests.md) for the full comparison.
 

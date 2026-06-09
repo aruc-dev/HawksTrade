@@ -33,7 +33,7 @@ python3 scheduler/run_backtest.py --days 365 --fund 10000 --screener
 
 ## Backtesting & Performance
 
-HawksTrade includes a high-fidelity historical simulator. The current guarded default strategy set produced a **+9.55% 12-month costed point return** through the OOS lockup boundary on $10,000 starting capital, with the configured 8% max-position risk cap enforced. Production validation remains blocking until bootstrap confidence gates improve and the crypto sleeve clears its lower-bound gate.
+HawksTrade includes a high-fidelity historical simulator. The current guarded default strategy set produced a **+5.12% 12-month costed point return** through the OOS lockup boundary on $10,000 starting capital, with Capitol Copy included in the validation surface and the configured 8% max-position risk cap enforced. Production validation remains blocking until bootstrap confidence gates improve and the crypto sleeve clears its lower-bound gate.
 
 - **Backtest Summary**: [backtests.md](backtests.md)
 - **Configuration Guide**: [config.md](config.md)
