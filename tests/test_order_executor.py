@@ -306,7 +306,9 @@ class OrderExecutorTests(unittest.TestCase):
         ):
             result = order_executor.enter_position("MSFT", "gap_up", dry_run=False)
 
-        self.assertIsNone(result)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "entry_blocked")
+        self.assertEqual(result["block_code"], "min_trade_value")
         place_limit_order.assert_not_called()
         self.assertTrue(any("scaled notional $50.00 is below min trade value $100.00" in message for message in logs.output))
         self.assertFalse(any(row["symbol"] == "MSFT" for row in trade_log.read_trade_rows()))

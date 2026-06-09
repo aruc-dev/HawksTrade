@@ -123,6 +123,27 @@ class RunScanTests(unittest.TestCase):
         self.assertEqual(open_symbols, [])
         self.assertEqual(new_entry_symbols, set())
 
+    def test_register_entry_result_does_not_plan_structured_blocked_entry(self):
+        open_symbols = []
+        planned_symbols = set()
+        new_entry_symbols = set()
+
+        run_scan._register_entry_result(
+            {
+                "symbol": "AAPL",
+                "status": "entry_blocked",
+                "block_code": "pre_trade_check",
+            },
+            "AAPL",
+            open_symbols,
+            planned_symbols,
+            new_entry_symbols,
+        )
+
+        self.assertEqual(planned_symbols, set())
+        self.assertEqual(open_symbols, [])
+        self.assertEqual(new_entry_symbols, set())
+
     def test_prefetched_regime_bars_require_all_symbols_and_minimum_history(self):
         self.assertTrue(
             run_scan._prefetched_bars_are_sufficient(

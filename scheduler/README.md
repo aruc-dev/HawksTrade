@@ -118,6 +118,7 @@ launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.hawkstrade.weekly-repo
 Logs:
 
 - Script logs: `logs/scan_YYYYMMDD.log`, `logs/risk_YYYYMMDD.log`, `logs/report_YYYYMMDD.log`
+- Scan audit logs: `logs/scan_audit_YYYYMMDD.jsonl`; each line records one scan run's evaluated universes, dynamic/static stock symbols, emitted signals, no-signal rejections, and entry block reasons. View the latest run with `python3 scripts/show_scan_audit.py`.
 - launchd stdout/stderr: `logs/launchd_*.log`, `logs/launchd_*.err`
 
 macOS caveat: user `LaunchAgents` run while the user session is available. If the Mac
