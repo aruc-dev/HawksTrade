@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from strategies.capitol_copy import CapitolCopyStrategy
 
@@ -106,6 +107,23 @@ class CapitolCopyStrategyTests(unittest.TestCase):
         strategy = CapitolCopyStrategy(cfg=self._cfg(Path("/tmp/does-not-exist-hawkscapitol-signals.json")))
 
         self.assertEqual(strategy.scan([], current_time=datetime(2026, 6, 8, tzinfo=timezone.utc)), [])
+
+    def test_ignore_env_signal_path_fails_closed_on_configured_missing_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_path = Path(tmpdir) / "env_signals.json"
+            configured_path = Path(tmpdir) / "configured_missing.json"
+            env_path.write_text(json.dumps([_signal(ticker="AAPL")]), encoding="utf-8")
+
+            strategy = CapitolCopyStrategy(
+                cfg=self._cfg(configured_path, ignore_env_signal_path=True)
+            )
+            with patch.dict("os.environ", {"HAWKSTRADE_CAPITOL_SIGNAL_PATH": str(env_path)}):
+                signals = strategy.scan(
+                    ["AAPL"],
+                    current_time=datetime(2026, 6, 8, 15, 0, tzinfo=timezone.utc),
+                )
+
+        self.assertEqual(signals, [])
 
     def test_non_positive_max_signals_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -24,6 +24,7 @@ from scheduler.run_backtest import (
     _apply_override,
     _backtest_trading_session_date,
     _backtest_scan_universe,
+    _capitol_copy_backtest_config,
     _build_regime_bars,
     _compute_daily_sharpe,
     _compute_max_drawdown,
@@ -75,6 +76,30 @@ class TestBacktestRegimeHistory(unittest.TestCase):
 class TestBacktestLiveFidelity(unittest.TestCase):
     def test_backtest_registry_includes_default_capitol_copy_strategy(self):
         self.assertIn("capitol_copy", STRATEGY_MODULES)
+
+    def test_capitol_copy_backtest_config_isolates_signal_source(self):
+        cfg = {
+            "strategies": {
+                "capitol_copy": {
+                    "enabled": True,
+                    "signal_path": "integrations/HawksCapitol/data/signals/latest.json",
+                }
+            }
+        }
+
+        backtest_cfg = _capitol_copy_backtest_config(cfg)
+        capitol_cfg = backtest_cfg["strategies"]["capitol_copy"]
+
+        self.assertEqual(
+            cfg["strategies"]["capitol_copy"]["signal_path"],
+            "integrations/HawksCapitol/data/signals/latest.json",
+        )
+        self.assertTrue(capitol_cfg["ignore_env_signal_path"])
+        self.assertNotEqual(
+            capitol_cfg["signal_path"],
+            cfg["strategies"]["capitol_copy"]["signal_path"],
+        )
+        self.assertTrue(capitol_cfg["signal_path"].endswith(".json"))
 
     def test_oos_validation_uses_inclusive_lockup_days(self):
         cfg = {

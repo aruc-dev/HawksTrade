@@ -60,8 +60,8 @@ def _truthy_text(value: Any) -> bool:
     return bool(str(value or "").strip())
 
 
-def _resolve_signal_path(raw_path: str | None, base_dir: Path) -> Path:
-    env_path = os.getenv("HAWKSTRADE_CAPITOL_SIGNAL_PATH")
+def _resolve_signal_path(raw_path: str | None, base_dir: Path, *, allow_env: bool = True) -> Path:
+    env_path = os.getenv("HAWKSTRADE_CAPITOL_SIGNAL_PATH") if allow_env else None
     configured = env_path or raw_path or "integrations/HawksCapitol/data/signals/latest.json"
     path = Path(configured).expanduser()
     if path.is_absolute():
@@ -102,7 +102,12 @@ class CapitolCopyStrategy(BaseStrategy):
         return value if isinstance(value, dict) else {}
 
     def _signal_path(self) -> Path:
-        return _resolve_signal_path(self.strategy_cfg.get("signal_path"), self.base_dir)
+        allow_env = not bool(self.strategy_cfg.get("ignore_env_signal_path", False))
+        return _resolve_signal_path(
+            self.strategy_cfg.get("signal_path"),
+            self.base_dir,
+            allow_env=allow_env,
+        )
 
     def scan(self, universe: List[str], **kwargs) -> List[Dict]:
         cfg = self.strategy_cfg

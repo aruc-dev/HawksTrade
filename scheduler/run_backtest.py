@@ -11,7 +11,9 @@ import os
 import sys
 import logging
 import argparse
+import copy
 import tempfile
+import uuid
 import warnings
 import numpy as np
 import pandas as pd
@@ -1037,6 +1039,20 @@ STRATEGY_MODULES = {
 }
 
 
+def _capitol_copy_backtest_config(cfg: dict) -> dict:
+    backtest_cfg = copy.deepcopy(cfg)
+    strategies = backtest_cfg.setdefault("strategies", {})
+    capitol_cfg = strategies.setdefault("capitol_copy", {})
+    if not isinstance(capitol_cfg, dict):
+        capitol_cfg = {}
+        strategies["capitol_copy"] = capitol_cfg
+    capitol_cfg["signal_path"] = str(
+        Path(tempfile.gettempdir()) / f"hawkstrade_backtest_capitol_copy_{uuid.uuid4().hex}.json"
+    )
+    capitol_cfg["ignore_env_signal_path"] = True
+    return backtest_cfg
+
+
 def _coerce_override_value(raw: str):
     """Convert CLI override strings to bool/int/float where possible."""
     lowered = raw.lower()
@@ -1270,7 +1286,7 @@ def run_backtest(
             RelativeStrengthStrategy(),
             RSIReversionStrategy(),
             GapUpStrategy(),
-            CapitolCopyStrategy(cfg=cfg),
+            CapitolCopyStrategy(cfg=_capitol_copy_backtest_config(cfg)),
             MACrossoverStrategy(),
             RangeBreakoutStrategy(),
         ]
