@@ -359,6 +359,33 @@ class V4ImprovementsTests(unittest.TestCase):
         self.assertTrue(should_exit)
         self.assertIn("Stop-loss", reason)
 
+    def test_default_take_profit_still_fires(self):
+        should_exit, reason = rm.should_exit_position("TEST", 100.0, 113.0)
+
+        self.assertTrue(should_exit)
+        self.assertIn("Take-profit hit", reason)
+
+    def test_strategy_take_profit_can_be_disabled(self):
+        should_exit, reason = rm.should_exit_position(
+            "TEST",
+            100.0,
+            150.0,
+            strategy_cfg={"take_profit_enabled": False},
+        )
+
+        self.assertFalse(should_exit)
+        self.assertEqual(reason, "")
+
+    def test_strategy_take_profit_can_override_global_pct(self):
+        strategy_cfg = {"take_profit_pct": 0.20}
+
+        should_exit, _ = rm.should_exit_position("TEST", 100.0, 119.0, strategy_cfg=strategy_cfg)
+        self.assertFalse(should_exit)
+
+        should_exit, reason = rm.should_exit_position("TEST", 100.0, 121.0, strategy_cfg=strategy_cfg)
+        self.assertTrue(should_exit)
+        self.assertIn("Take-profit hit", reason)
+
     # ── market_breadth_pct ────────────────────────────────────────────────────
 
     def test_breadth_all_above_sma50_returns_one(self):

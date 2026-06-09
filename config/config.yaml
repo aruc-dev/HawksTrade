@@ -179,6 +179,7 @@ strategies:
     top_n: 2                     # Pick the two strongest sector-diversified momentum stocks in green regimes
     hold_days: 4                 # Minimum hold before profit-aware exit checks
     exit_policy: "profit_trailing" # fixed_hold | profit_trailing | risk_only_baseline
+    take_profit_enabled: false   # Let winners run under trailing/max-hold protection instead of the global 12% cap
     profit_floor_pct: 0.0        # After hold_days, exit if P&L is flat/negative
     trail_activation_pct: 0.06   # Enable trailing stop once peak gain reaches 6%
     trailing_stop_pct: 0.04      # Exit if price falls 4% from post-entry peak
@@ -221,6 +222,7 @@ strategies:
     max_trend_extension_pct: 0.30  # Avoid names stretched more than 30% above SMA50
     hold_days: 7
     profit_trailing_enabled: true
+    take_profit_enabled: false
     profit_floor_pct: 0.0
     trail_activation_pct: 0.06
     trailing_stop_pct: 0.04
@@ -324,6 +326,7 @@ strategies:
     hold_days: 10
     profit_trailing_enabled: true
     extend_winners_after_hold: true
+    take_profit_enabled: false
     profit_floor_pct: 0.0
     trail_activation_pct: 0.08
     trailing_stop_pct: 0.05
@@ -392,6 +395,7 @@ strategies:
     rsi_exit_max: 82             # Profit-taking exhaustion exit after profit floor
     profit_floor_pct: 0.03       # RSI exhaustion exit only after at least 3% open profit
     profit_trailing_enabled: true # Protect winners before the 14-day hold cap
+    take_profit_enabled: false   # Let breakout winners run under high-water/hold protection instead of the global 12% cap
     trail_activation_pct: 0.06   # Enable trailing stop once peak gain reaches 6%
     trailing_stop_pct: 0.04      # Exit if price falls 4% from post-entry peak
     breakdown_exit_pct: 0.02     # Exit failed breakout when close falls 2% below entry

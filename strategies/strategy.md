@@ -19,11 +19,14 @@
 | Range Breakout | Crypto | **Enabled** | `range_breakout.py`; high-water profit protection enabled; live entries require paper-readiness evidence |
 
 All strategies share a common global risk layer (8% max position size,
-3.5% stop-loss, 12% take-profit, max 10 open positions, 5% daily-loss halt)
-enforced by `core/risk_manager.py` and `scheduler/run_risk_check.py`.
-Individual strategies may override the stop via
-`atr_stop_price` on their signals; the executor writes that value to the trade log
-when it is wider than the global stop.
+3.5% stop-loss, max 10 open positions, 5% daily-loss halt) enforced by
+`core/risk_manager.py` and `scheduler/run_risk_check.py`. The global
+12% take-profit is the default, but strategies can disable or override it with
+`take_profit_enabled` / `take_profit_pct`. Trend sleeves with configured
+high-water profit protection disable the fixed cap so winners can run until the
+trailing, exhaustion, or hold rules fire. Individual strategies may override the
+stop via `atr_stop_price` on their signals; the executor writes that value to the
+trade log when it is wider than the global stop.
 
 ---
 
@@ -88,6 +91,7 @@ room while the global 3.5% stop remains the baseline fixed-percentage stop.
 | `trail_activation_pct` | 6% peak gain |
 | `trailing_stop_pct` | 4% from peak |
 | `exit_policy` | `profit_trailing` |
+| `take_profit_enabled` | false |
 | `atr_period` | 14 |
 | `atr_multiplier` | 1.2 ATR stop extension |
 | `risk_per_trade_pct` | 1% of equity |
@@ -147,6 +151,7 @@ and price falls 4% from that peak.
 | `recent_lookback_days` | 3 |
 | `max_recent_return_pct` | 3% |
 | `hold_days` | 7 business days |
+| `take_profit_enabled` | false |
 | `atr_period` | 14 |
 | `atr_multiplier` | 1.2 ATR stop extension |
 | `max_stop_loss_pct` | 5% |
@@ -307,9 +312,10 @@ portfolio caps, protections, order governor, broker stops, and order logging.
 creation timestamp, rationale, and score payload.
 
 **Exit:** Capitol Copy does not wait for delayed disclosed sells. Global
-stop-loss/take-profit and `run_risk_check.py` always apply. The scan hold-exit
-pass uses `hold_days`, high-water profit protection, trailing stop, and
-`max_hold_days` from the `capitol_copy` config.
+stop-loss and `run_risk_check.py` always apply, but the default global 12%
+take-profit is disabled for this strategy. The scan hold-exit pass uses
+`hold_days`, high-water profit protection, trailing stop, and `max_hold_days`
+from the `capitol_copy` config.
 
 **Key parameters:**
 
@@ -324,6 +330,7 @@ pass uses `hold_days`, high-water profit protection, trailing stop, and
 | `max_signals` | 2 |
 | `hold_days` | 10 business days |
 | `extend_winners_after_hold` | true |
+| `take_profit_enabled` | false |
 | `trail_activation_pct` | 8% |
 | `trailing_stop_pct` | 5% from post-entry peak |
 | `max_hold_days` | 45 business days |
@@ -421,6 +428,8 @@ signals first just because they appear earlier in `crypto.scan_universe`.
   exit if price then falls by `trailing_stop_pct` from the observed peak.
 
 Stop-loss and take-profit from the global risk manager apply throughout.
+The fixed global 12% take-profit is disabled for this strategy, so open
+breakout winners rely on the configured high-water, exhaustion, and hold exits.
 
 **Key parameters:**
 
@@ -440,6 +449,7 @@ Stop-loss and take-profit from the global risk manager apply throughout.
 | `rsi_exit_max` | 82 |
 | `breakdown_exit_pct` | 2% below entry |
 | `profit_trailing_enabled` | true |
+| `take_profit_enabled` | false |
 | `trail_activation_pct` | 6% |
 | `trailing_stop_pct` | 4% from post-entry peak |
 | `timeframe` | 1Day |

@@ -317,7 +317,8 @@ def _run_backtest_risk_exits(sim: "BacktestSimulator", *, market_open: bool) -> 
             observed_high = max(observed_high, float(bar["high"]))
         update_high_water_price(pos, observed_high)
         stop_price, stop_label = _effective_stop_for_backtest(pos)
-        take_profit = rm.take_profit_price(pos["entry_price"])
+        strategy = pos.get("strategy")
+        take_profit = rm.take_profit_price(pos["entry_price"], strategy=strategy)
 
         if bar is not None:
             low = float(bar["low"])
@@ -335,7 +336,7 @@ def _run_backtest_risk_exits(sim: "BacktestSimulator", *, market_open: bool) -> 
                 finally:
                     sim.pending_exit_prices.pop(symbol, None)
                 continue
-            if high >= take_profit:
+            if take_profit is not None and high >= take_profit:
                 reason = f"Take-profit hit intraday: {high:.4f} >= {take_profit:.4f}"
                 sim.pending_exit_prices[symbol] = take_profit
                 try:
@@ -354,6 +355,7 @@ def _run_backtest_risk_exits(sim: "BacktestSimulator", *, market_open: bool) -> 
             pos["entry_price"],
             price,
             custom_stop_price=pos.get("custom_stop_price"),
+            strategy=strategy,
         )
         if should_exit:
             oe.exit_position(

@@ -326,6 +326,75 @@ class TestBacktestLiveFidelity(unittest.TestCase):
         self.assertEqual(observed_prices, [rm.stop_loss_price(100.0)])
         self.assertEqual(sim.pending_exit_prices, {})
 
+    def test_backtest_intraday_take_profit_can_be_disabled_by_strategy(self):
+        sim = BacktestSimulator(initial_fund=10000.0)
+        sim.current_date = datetime(2026, 4, 24, tzinfo=timezone.utc)
+        sim.historical_data = {
+            "AAPL": pd.DataFrame(
+                {
+                    "open": [100.0],
+                    "high": [113.0],
+                    "low": [100.0],
+                    "close": [113.0],
+                    "volume": [1000],
+                },
+                index=pd.DatetimeIndex([sim.current_date]),
+            )
+        }
+        sim.positions = {
+            "AAPL": {
+                "qty": 1,
+                "entry_price": 100.0,
+                "entry_date": sim.current_date,
+                "asset_class": "stock",
+                "strategy": "momentum",
+                "high_water_price": 100.0,
+            },
+        }
+
+        with patch("scheduler.run_backtest.oe.exit_position") as exit_position:
+            _run_backtest_risk_exits(sim, market_open=True)
+
+        exit_position.assert_not_called()
+        self.assertEqual(sim.positions["AAPL"]["high_water_price"], 113.0)
+
+    def test_backtest_intraday_take_profit_still_applies_to_mean_reversion(self):
+        sim = BacktestSimulator(initial_fund=10000.0)
+        sim.current_date = datetime(2026, 4, 24, tzinfo=timezone.utc)
+        sim.historical_data = {
+            "AAPL": pd.DataFrame(
+                {
+                    "open": [100.0],
+                    "high": [113.0],
+                    "low": [100.0],
+                    "close": [111.0],
+                    "volume": [1000],
+                },
+                index=pd.DatetimeIndex([sim.current_date]),
+            )
+        }
+        sim.positions = {
+            "AAPL": {
+                "qty": 1,
+                "entry_price": 100.0,
+                "entry_date": sim.current_date,
+                "asset_class": "stock",
+                "strategy": "rsi_reversion",
+            },
+        }
+        observed_prices = []
+
+        def _capture_exit(symbol, reason, asset_class, open_trades_callback=None):
+            observed_prices.append(sim.get_current_price(symbol))
+
+        with patch("scheduler.run_backtest.oe.exit_position", side_effect=_capture_exit) as exit_position:
+            _run_backtest_risk_exits(sim, market_open=True)
+
+        exit_position.assert_called_once()
+        self.assertIn("Take-profit hit intraday", exit_position.call_args.args[1])
+        self.assertEqual(observed_prices, [rm.take_profit_price(100.0, strategy="rsi_reversion")])
+        self.assertEqual(sim.pending_exit_prices, {})
+
     def test_risk_exit_high_water_uses_intraday_bar_high(self):
         sim = BacktestSimulator(initial_fund=10000.0)
         sim.current_date = datetime(2026, 4, 24, tzinfo=timezone.utc)

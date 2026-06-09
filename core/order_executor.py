@@ -660,7 +660,7 @@ def enter_position(
         logged_qty = filled_qty if filled_qty > 0 else qty
         entry_price = _order_filled_avg_price(order, price) if filled_qty > 0 else price
         sl = _effective_entry_stop_loss(entry_price, atr_stop_price)
-        tp = rm.take_profit_price(entry_price)
+        tp = rm.take_profit_price(entry_price, strategy=strategy)
         trade = {
             "timestamp":        _utc_now().isoformat(),
             "mode":             MODE,
@@ -671,7 +671,7 @@ def enter_position(
             "qty":              logged_qty,
             "entry_price":      entry_price,
             "stop_loss":        sl,
-            "take_profit":      tp,
+            "take_profit":      tp if tp is not None else "",
             "high_water_price": entry_price,
             "risk_tier":        tier.audit_label,
             "order_id":         order_id,

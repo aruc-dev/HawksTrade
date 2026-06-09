@@ -583,11 +583,15 @@ def run(dry_run: bool = False, marker: RunScope | None = None):
                             custom_stop = parsed
             except (ValueError, TypeError):
                 pass
+        risk_strategy = str((trade or {}).get("strategy", "") or "").strip().lower() or None
+        risk_kwargs = {"custom_stop_price": custom_stop}
+        if risk_strategy:
+            risk_kwargs["strategy"] = risk_strategy
         should_exit, reason = rm.should_exit_position(
             symbol,
             entry_price,
             current_price,
-            custom_stop_price=custom_stop,
+            **risk_kwargs,
         )
         if not should_exit:
             should_exit, reason = _strategy_profit_protection_exit(
