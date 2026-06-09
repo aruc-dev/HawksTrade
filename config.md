@@ -27,7 +27,7 @@ The latest validated default configuration is:
 | Relative Strength | enabled, `top_n: 1`, `min_rs_pct: 0.05`, `min_abs_return_pct: 0.08`, `max_recent_return_pct: 0.03`, `hold_days: 7` | Adds a medium-term stock leadership sleeve while avoiding fresh short-term blow-offs and preserving sector/ATR controls. |
 | RSI Reversion | enabled, `oversold_threshold: 40`, `max_entry_atr_pct: 0.05`, `max_recent_drawdown_pct: 0.10` | Active mean-reversion stock sleeve with crash, realised-volatility, high-ATR, recent-waterfall, and max-loss guards. |
 | Gap-Up | disabled in the default profile, `require_prior_close_above_trend: true` | Opening-momentum sleeve remains available for standalone validation but is excluded from default trading until bootstrap and minute-fill evidence improve. |
-| Capitol Copy | enabled | Consumes HawksCapitol copy-buy signals in live/paper scans; historical validation isolates the strategy from mutable local signal files and records zero Capitol Copy trades unless a point-in-time signal dataset is supplied. |
+| Capitol Copy | enabled | Consumes HawksCapitol copy-buy signals in live/paper scans; historical validation isolates the strategy from mutable local signal files and records zero Capitol Copy trades. |
 | MA Crossover | enabled, `hold_days: 16`, `max_loss_exit_pct: 0.02` | Positive crypto contribution with recent-window weakness reduced while avoiding the older large-loss tail seen with a 3% exit. |
 | Crypto regime filter | `EMA20` + 5-day slope guard | Crypto entries require BTC/USD above EMA20 and the EMA20 not falling more than 0.5% over five days. |
 | Range Breakout | enabled | Crypto Donchian breakout sleeve with volume, trend, RSI, 0.8%-8% extension, upper-10% close-location, and failed-breakout guards. |

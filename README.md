@@ -138,7 +138,7 @@ python3 scheduler/run_validation_gate.py --profile range
 
 ## Risk Controls (Tuned)
 
-- **Asymmetric Reward**: 3.5% global stop-loss with strategy-specific profit exits; the global 12% take-profit remains available by default, while momentum, relative strength, Capitol Copy, RSI Reversion, and Range Breakout can use configured high-water/trailing protection instead.
+- **Asymmetric Reward**: 3.5% global stop-loss with strategy-specific profit exits; the global 12% take-profit remains available by default. Momentum, Relative Strength, Capitol Copy, and Range Breakout disable the fixed cap in favor of configured high-water/trailing exits, while RSI Reversion keeps the fixed take-profit and can also use profit protection.
 - **Capital Protection**: SMA-based trend filters on all strategies.
 - **Strategy-Local Loss Defense**: Momentum and RSI use less-permissive ATR stop extensions on top of the global stop layer, RSI blocks high-ATR and unresolved waterfall entries and exits daily closes 6% below entry, Gap-Up exits failed continuations, and MA Crossover exits on a daily close at least 2% below entry.
 - **Position Limits**: Max 8% of portfolio per trade, cap of 10 concurrent positions.

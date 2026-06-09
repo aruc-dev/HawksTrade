@@ -40,11 +40,11 @@ The current guarded configuration uses:
 - `relative_strength` enabled with `top_n: 1`, 20-day excess return versus SPY, 5% minimum RS, 8% minimum absolute return, 3-day blow-off cap, 1.8x volume pace, and 7-day hold
 - `rsi_reversion` enabled with RSI<40 entries, crash, realised-volatility, 5-day drawdown, high-ATR entry, and 6% tail-loss guards
 - `gap_up` disabled in the default profile until its standalone bootstrap and minute-fill validation improve
-- `capitol_copy` enabled with HawksCapitol signal ingestion; historical backtests fail closed to an empty isolated signal source unless an explicit point-in-time signal dataset is supplied
+- `capitol_copy` enabled with HawksCapitol signal ingestion; historical backtests fail closed to an empty isolated signal source
 - `ma_crossover` enabled with 3-day follow-through, price/EMA confirmation, BTC EMA20 slope gating, a 2% daily-close max-loss exit, and a 16-day hold cap
 - `range_breakout` enabled with 20-day Donchian breakout, trend, volume, RSI, extension, upper-10% close, BTC EMA20 slope gating, and failed-breakout guards
 
-These costed results enforce `trading.max_position_pct: 0.08` for every entry, including momentum/Kelly sizing, and assume 10 bps adverse slippage plus 5 bps fees per side. The active default excludes Gap-Up until its standalone gate passes. The latest default includes the Capitol Copy sleeve, but the current historical validation has zero Capitol Copy trades because no committed point-in-time signal dataset is supplied. Global stop-loss, daily-loss halt, max-position cap, and mode remain unchanged; several sleeves use strategy-specific trailing exits instead of the global fixed take-profit.
+These costed results enforce `trading.max_position_pct: 0.08` for every entry, including momentum/Kelly sizing, and assume 10 bps adverse slippage plus 5 bps fees per side. The active default excludes Gap-Up until its standalone gate passes. The latest default includes the Capitol Copy sleeve, but the current historical validation has zero Capitol Copy trades because backtests deliberately isolate it from mutable local HawksCapitol signal files. Global stop-loss, daily-loss halt, max-position cap, and mode remain unchanged; several sleeves use strategy-specific trailing exits instead of the global fixed take-profit.
 
 | Period | Final Value | Return | Trades | Win Rate | Max Drawdown | Profit Factor | Sharpe |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -96,7 +96,7 @@ These costed results enforce `trading.max_position_pct: 0.08` for every entry, i
 Interpretation:
 
 - The current default profile returns +5.12% over 12 months with a -1.37% max drawdown under the costed model, but production validation still blocks because the 12-month bootstrap lower bounds do not clear the required production floors.
-- Capitol Copy is enabled in the current default profile. Backtests include the strategy in the scan loop but isolate it from mutable local HawksCapitol signal files, so it contributes zero trades until a point-in-time signal dataset is supplied.
+- Capitol Copy is enabled in the current default profile. Backtests include the strategy in the scan loop but isolate it from mutable local HawksCapitol signal files, so it contributes zero trades in historical validation.
 - Range Breakout and MA Crossover remain positive crypto contributors. Range Breakout has only 3 closed trades in the latest 12-month run, so its edge needs continued forward validation before scaling allocation.
 - Gap-Up has a positive point estimate but failed its standalone bootstrap gate, so it is disabled in the default profile until the dedicated gate and minute-fill validation improve.
 - Conditional RSI Reversion remains in the default profile as a bear/chop sleeve, but its standalone paper/readiness gate is still blocking. Keep monitoring the dedicated RSI gate before scaling allocation.
