@@ -39,6 +39,7 @@ Expected:
 
 ```bash
 python3 scheduler/run_scan.py --dry-run
+python3 scheduler/run_scan.py --stocks-only --strategy capitol_copy --dry-run
 python3 scheduler/run_scan.py --crypto-only --dry-run
 python3 scheduler/run_risk_check.py --dry-run
 python3 scheduler/run_report.py

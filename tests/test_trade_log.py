@@ -192,6 +192,64 @@ class TradeLogTests(unittest.TestCase):
         self.assertEqual(rows[1]["risk_tier"], "exploration:0")
         self.assertEqual(rows[1]["stop_loss"], "193")
 
+    def test_trade_log_schema_includes_source_and_execution_metadata(self):
+        expected_columns = {
+            "source_system",
+            "source_signal_id",
+            "source_tx_ids",
+            "source_created_at",
+            "source_rationale",
+            "source_scores",
+            "decision_price",
+            "arrival_price",
+            "limit_price",
+            "expected_slippage_bps",
+            "realised_slippage_bps",
+            "latency_ms",
+            "execution_policy",
+            "order_type",
+            "governor_code",
+            "readiness_code",
+            "error_type",
+            "error",
+        }
+
+        self.assertTrue(expected_columns.issubset(set(trade_log.COLUMNS)))
+
+    def test_rewrite_ignores_unknown_columns_and_preserves_known_execution_metadata(self):
+        trade_log.TRADE_LOG.parent.mkdir(parents=True, exist_ok=True)
+        fieldnames = trade_log.COLUMNS + ["future_column"]
+        with open(trade_log.TRADE_LOG, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerow({
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "mode": "paper",
+                "symbol": "AAPL",
+                "strategy": "momentum",
+                "asset_class": "stock",
+                "side": "buy",
+                "qty": "1",
+                "entry_price": "100",
+                "order_id": "entry-1",
+                "status": "open",
+                "order_type": "limit",
+                "limit_price": "100.25",
+                "future_column": "ignored",
+            })
+
+        closed = trade_log.mark_trade_closed("AAPL", exit_price=105, pnl_pct=0.05, reason="test exit")
+
+        self.assertTrue(closed)
+        with open(trade_log.TRADE_LOG, "r", newline="") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        self.assertEqual(reader.fieldnames, trade_log.COLUMNS)
+        self.assertEqual(rows[0]["status"], "closed")
+        self.assertEqual(rows[0]["order_type"], "limit")
+        self.assertEqual(rows[0]["limit_price"], "100.25")
+        self.assertNotIn("future_column", rows[0])
+
     def test_mark_trade_closed_updates_most_recent_open_buy(self):
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         older = (now - timedelta(days=2)).isoformat()

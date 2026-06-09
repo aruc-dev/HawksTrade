@@ -14,6 +14,7 @@
 | Relative Strength | Stocks | **Enabled** | `relative_strength.py` |
 | RSI Reversion | Stocks | **Enabled as conditional bear/chop sleeve** | `rsi_reversion.py`; live entries require paper-readiness evidence |
 | Gap-Up | Stocks | **Disabled in default profile** | `gap_up.py`; run standalone validation before re-enabling |
+| Capitol Copy | Stocks | **Disabled in default profile** | `capitol_copy.py`; consumes HawksCapitol scored signals; live entries require paper-readiness evidence |
 | MA Crossover | Crypto | **Enabled** | `ma_crossover.py`; live entries require paper-readiness evidence |
 | Range Breakout | Crypto | **Enabled** | `range_breakout.py`; high-water profit protection enabled; live entries require paper-readiness evidence |
 
@@ -288,7 +289,56 @@ before re-enabling or scaling capital allocated to this sleeve.
 
 ---
 
-## 5. MA Crossover *(Crypto — Enabled)*
+## 5. Capitol Copy *(Stocks — Disabled in Default Profile)*
+
+**Type:** External signal adapter for HawksCapitol congressional trade-copy signals.
+
+**Entry:** Reads scored signals from
+`../HawksCapitol/data/signals/latest.json` by default, or from
+`HAWKSTRADE_CAPITOL_SIGNAL_PATH` when that environment variable is set. The
+strategy accepts only unblocked stock buy/copy-buy signals whose
+`created_at`, `conviction_score`, `freshness_score`, and
+`entry_quality_score` pass the configured thresholds. Accepted signals are
+converted into normal HawksTrade buy signals and then pass through the standard
+portfolio caps, protections, order governor, broker stops, and order logging.
+
+**Signal provenance:** Buy and sell rows carry `source_*` fields in
+`data/trades.csv`, including the HawksCapitol signal ID, source transaction IDs,
+creation timestamp, rationale, and score payload.
+
+**Exit:** Capitol Copy does not wait for delayed disclosed sells. Global
+stop-loss/take-profit and `run_risk_check.py` always apply. The scan hold-exit
+pass uses `hold_days`, high-water profit protection, trailing stop, and
+`max_hold_days` from the `capitol_copy` config.
+
+**Key parameters:**
+
+| Parameter | Value |
+|---|---|
+| `enabled` | false |
+| `signal_path` | `../HawksCapitol/data/signals/latest.json` |
+| `max_signal_age_hours` | 72 |
+| `min_conviction_score` | 0.65 |
+| `min_freshness_score` | 0.35 |
+| `min_entry_quality_score` | 0.55 |
+| `max_signals` | 2 |
+| `hold_days` | 10 business days |
+| `extend_winners_after_hold` | true |
+| `trail_activation_pct` | 8% |
+| `trailing_stop_pct` | 5% from post-entry peak |
+| `max_hold_days` | 45 business days |
+
+**Dedicated schedule:** `hawkstrade-capitol-scan.timer` runs
+`scheduler/run_scan.py --stocks-only --strategy capitol_copy`, so this sleeve can
+have its own cadence while still sharing the HawksTrade trade-mutation lock.
+
+**Live readiness:** If enabled in live mode, runtime entries are blocked until
+there are at least 20 closed paper exits and 30 calendar days of paper evidence
+for `capitol_copy`.
+
+---
+
+## 6. MA Crossover *(Crypto — Enabled)*
 
 **Type:** Trend-following, medium-term swing. Runs 24/7 on daily bars.
 
@@ -340,7 +390,7 @@ before scaling capital allocated to this sleeve.
 
 ---
 
-## 6. Range Breakout *(Crypto — Enabled)*
+## 7. Range Breakout *(Crypto — Enabled)*
 
 **Type:** Breakout, short swing trade. Runs 24/7 on daily bars.
 

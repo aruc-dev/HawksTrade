@@ -97,6 +97,16 @@ Unit=hawkstrade-full-scan.service
                 + "\n",
             )
             self._write(
+                timer_dir / "hawkstrade-capitol-scan.timer",
+                """
+[Timer]
+OnCalendar=Mon..Fri *-*-* 13:40:00
+OnCalendar=Mon..Fri *-*-* 14..19:10:00
+Unit=hawkstrade-capitol-scan.service
+""".strip()
+                + "\n",
+            )
+            self._write(
                 timer_dir / "hawkstrade-risk-check.timer",
                 """
 [Timer]
@@ -128,6 +138,10 @@ Unit=hawkstrade-health-check.service
             self.assertEqual(by_key["crypto_scan"][0].schedule_text, "OnCalendar=hourly")
             self.assertEqual(by_key["full_scan"][0].pattern.cron_text, "0 14-19 * * 1-5")
             self.assertEqual(
+                [job.pattern.cron_text for job in by_key["capitol_scan"]],
+                ["40 13 * * 1-5", "10 14-19 * * 1-5"],
+            )
+            self.assertEqual(
                 [job.pattern.cron_text for job in by_key["risk_check"]],
                 [
                     "31 13 * * 1-5",
@@ -138,6 +152,20 @@ Unit=hawkstrade-health-check.service
                 ],
             )
             self.assertNotIn("health_check", by_key)
+
+    def test_capitol_strategy_filter_marker_maps_to_capitol_scan_job(self):
+        key, label = health._marker_job_info(
+            "run_scan",
+            {
+                "scan_kind": "stock",
+                "run_stocks": "1",
+                "run_crypto": "0",
+                "strategy_filter": "capitol_copy",
+            },
+        )
+
+        self.assertEqual(key, "capitol_scan")
+        self.assertEqual(label, "Capitol signal scan")
 
     def test_build_report_uses_systemd_timer_schedule_when_requested(self):
         with tempfile.TemporaryDirectory() as tmp:

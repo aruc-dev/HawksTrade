@@ -410,6 +410,61 @@ class OrderExecutorTests(unittest.TestCase):
         self.assertEqual(result["status"], "dry_run")
         self.assertEqual(effective_risk.call_args.kwargs["closed_trades"], 42)
 
+    def test_enter_position_preserves_source_metadata_in_dry_run(self):
+        with (
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=100),
+            patch.object(order_executor.rm, "pre_trade_check", return_value={"approved": True, "qty": 4}),
+            patch.object(order_executor.rm, "cap_position_qty", return_value=4),
+        ):
+            result = order_executor.enter_position(
+                "MSFT",
+                "capitol_copy",
+                dry_run=True,
+                closed_trades_count=0,
+                source_metadata={
+                    "source_system": "HawksCapitol",
+                    "source_signal_id": "sig-msft",
+                    "source_tx_ids": ["tx-1"],
+                    "source_scores": {"conviction_score": 0.9},
+                },
+            )
+
+        self.assertEqual(result["source_system"], "HawksCapitol")
+        self.assertEqual(result["source_signal_id"], "sig-msft")
+        self.assertEqual(result["source_tx_ids"], '["tx-1"]')
+        self.assertEqual(result["source_scores"], '{"conviction_score":0.9}')
+
+    def test_exit_position_copies_source_metadata_from_open_trade(self):
+        trade_log.log_trade({
+            "timestamp": "2026-04-10T12:05:00",
+            "mode": "paper",
+            "symbol": "MSFT",
+            "strategy": "capitol_copy",
+            "asset_class": "stock",
+            "source_system": "HawksCapitol",
+            "source_signal_id": "sig-msft",
+            "source_tx_ids": '["tx-1"]',
+            "source_scores": '{"conviction_score":0.9}',
+            "side": "buy",
+            "qty": 1,
+            "entry_price": 100,
+            "risk_tier": "exploration:0",
+            "order_id": "entry-capitol",
+            "status": "open",
+        })
+        position = SimpleNamespace(qty="1", avg_entry_price="100")
+
+        with (
+            patch.object(order_executor.ac, "get_position", return_value=position),
+            patch.object(order_executor.ac, "get_stock_latest_price", return_value=110),
+        ):
+            result = order_executor.exit_position("MSFT", "capitol trailing stop", dry_run=True)
+
+        self.assertEqual(result["strategy"], "capitol_copy")
+        self.assertEqual(result["source_system"], "HawksCapitol")
+        self.assertEqual(result["source_signal_id"], "sig-msft")
+        self.assertEqual(result["source_tx_ids"], '["tx-1"]')
+
     def test_enter_position_blocks_live_strategy_when_readiness_gate_fails_before_price_fetch(self):
         with (
             patch.object(order_executor, "MODE", "live"),

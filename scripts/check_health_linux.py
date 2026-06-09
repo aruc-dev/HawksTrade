@@ -361,6 +361,7 @@ def load_cron_jobs(cron_file: Path) -> list[CronJob]:
 
 SYSTEMD_TIMER_JOBS = {
     "hawkstrade-stock-scan.timer": ("stock_scan", "Stock scan"),
+    "hawkstrade-capitol-scan.timer": ("capitol_scan", "Capitol signal scan"),
     "hawkstrade-full-scan.timer": ("full_scan", "Full scan"),
     "hawkstrade-crypto-scan.timer": ("crypto_scan", "Crypto scan"),
     "hawkstrade-risk-check.timer": ("risk_check", "Risk check"),
@@ -623,6 +624,14 @@ def _field_truthy(value: str | None) -> bool:
 def _marker_job_info(script: str | None, fields: dict[str, str]) -> tuple[str, str]:
     script_name = (script or "").strip().lower()
     if script_name == "run_scan":
+        strategy_filter = {
+            item.strip()
+            for item in (fields.get("strategy_filter") or "").split(",")
+            if item.strip()
+        }
+        if strategy_filter == {"capitol_copy"}:
+            return "capitol_scan", "Capitol signal scan"
+
         scan_kind = (fields.get("scan_kind") or "").strip().lower()
         if scan_kind in {"stock", "stocks"}:
             return "stock_scan", "Stock scan"
@@ -1230,6 +1239,7 @@ def evaluate_job_health(
     grouped = _group_jobs(jobs)
     by_key = {
         "stock_scan": [r for r in records if r.job_key == "stock_scan"],
+        "capitol_scan": [r for r in records if r.job_key == "capitol_scan"],
         "full_scan": [r for r in records if r.job_key == "full_scan"],
         "crypto_scan": [r for r in records if r.job_key == "crypto_scan"],
         "risk_check": [r for r in records if r.job_key == "risk_check"],
@@ -1281,11 +1291,12 @@ def evaluate_job_health(
 
     order = {
         "stock_scan": 0,
-        "full_scan": 1,
-        "crypto_scan": 2,
-        "risk_check": 3,
-        "daily_report": 4,
-        "weekly_report": 5,
+        "capitol_scan": 1,
+        "full_scan": 2,
+        "crypto_scan": 3,
+        "risk_check": 4,
+        "daily_report": 5,
+        "weekly_report": 6,
     }
     health_rows.sort(key=lambda row: order.get(row.key, 99))
     return health_rows

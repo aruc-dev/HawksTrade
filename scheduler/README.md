@@ -22,6 +22,7 @@ documented in their own sections below.
 | Task | Command | Eastern Time | Pacific Time |
 |------|---------|--------------|--------------|
 | First stock scan | `./scripts/run_hawkstrade_job.sh scheduler/run_scan.py --stocks-only` | 9:35 AM Mon-Fri | 6:35 AM Mon-Fri |
+| Capitol signal scan | `./scripts/run_hawkstrade_job.sh scheduler/run_scan.py --stocks-only --strategy capitol_copy` | 9:40 AM, then 10:10 AM-3:10 PM hourly Mon-Fri | 6:40 AM, then 7:10 AM-12:10 PM hourly Mon-Fri |
 | Full scan | `./scripts/run_hawkstrade_job.sh scheduler/run_scan.py` | 10:00 AM-3:00 PM hourly Mon-Fri | 7:00 AM-12:00 PM hourly Mon-Fri |
 | Risk check | `./scripts/run_hawkstrade_job.sh scheduler/run_risk_check.py` | 9:45 AM-3:45 PM every 15 min Mon-Fri | 6:45 AM-12:45 PM every 15 min Mon-Fri |
 | Crypto scan | `./scripts/run_hawkstrade_job.sh scheduler/run_scan.py --crypto-only` | Hourly, every day | Hourly, every day |
