@@ -4,7 +4,7 @@
 
 **Automated swing trading bot for US stocks and crypto, powered by Alpaca Markets.**
 
-Ships with 6 independent strategies, enables the guarded core set by default,
+Ships with 7 independent strategies, enables the guarded core set by default,
 enforces strict risk rules, and is designed to be operated autonomously by an AI agent.
 
 ---
@@ -14,6 +14,9 @@ enforces strict risk rules, and is designed to be operated autonomously by an AI
 ```bash
 # 1. Install dependencies
 pip install -r requirements.txt --break-system-packages
+
+# 1b. Initialize bundled integrations such as HawksCapitol
+git submodule update --init --recursive
 
 # 2. Set up your API keys
 cp config/.env.example config/.env

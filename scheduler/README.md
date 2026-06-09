@@ -32,9 +32,12 @@ documented in their own sections below.
 
 Before enabling schedules:
 
-1. Confirm dependencies are installed: `pip3 install -r requirements.txt`.
-2. Initialize submodules and, if using `capitol_copy`, install HawksCapitol dependencies:
-   `git submodule update --init --recursive && pip3 install -r integrations/HawksCapitol/requirements.txt`.
+1. Confirm dependencies are installed: `pip3 install -r requirements.txt`. The root
+   requirements include the bundled HawksCapitol Python dependencies for source
+   ingestion, PDF parsing, and OCR helpers. Hosts that need OCR fallback for
+   scanned filings must also install the system `tesseract` binary used by the
+   `pytesseract` Python wrapper.
+2. Initialize submodules: `git submodule update --init --recursive`.
 3. Before enabling the Capitol refresh timer in production, set
    `HAWKSTRADE_CAPITOL_REFRESH_COMMAND` to a real-data HawksCapitol signal export
    command. The built-in sample-data export is blocked unless

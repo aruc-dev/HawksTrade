@@ -208,7 +208,7 @@ class TestGetConfig(unittest.TestCase):
         self.assertEqual(strategies["gap_up"]["min_breadth_pct"], 0.65)
         self.assertTrue(strategies["gap_up"]["require_prior_close_above_trend"])
         self.assertEqual(strategies["gap_up"]["max_trend_extension_pct"], 0.35)
-        self.assertFalse(strategies["capitol_copy"]["enabled"])
+        self.assertTrue(strategies["capitol_copy"]["enabled"])
         self.assertEqual(strategies["capitol_copy"]["asset_class"], "stocks")
         self.assertEqual(strategies["capitol_copy"]["signal_path"], "integrations/HawksCapitol/data/signals/latest.json")
         self.assertEqual(strategies["capitol_copy"]["max_signal_age_hours"], 72)

@@ -42,9 +42,9 @@ export HT_USER=ec2-user
 export HT_GROUP=ec2-user
 
 git submodule update --init --recursive
-if [ -f integrations/HawksCapitol/requirements.txt ]; then
-  .venv/bin/pip install -r integrations/HawksCapitol/requirements.txt
-fi
+.venv/bin/pip install -r requirements.txt
+# Optional but recommended for scanned congressional filing OCR fallback:
+# sudo dnf install -y tesseract
 
 sudo install -d -m 0750 /etc/hawkstrade
 sudo install -m 0600 scheduler/systemd/hawkstrade.env.example /etc/hawkstrade/hawkstrade.env

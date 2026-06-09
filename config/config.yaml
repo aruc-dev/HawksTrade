@@ -310,7 +310,7 @@ strategies:
     weight: 0.8
 
   capitol_copy:
-    enabled: false
+    enabled: true
     asset_class: stocks
     description: "HawksCapitol signal adapter. Consumes scored congressional copy-buy signals from the HawksCapitol submodule; HawksCapitol owns ingestion/scoring, HawksTrade owns execution/risk/exits."
     signal_path: "integrations/HawksCapitol/data/signals/latest.json"
